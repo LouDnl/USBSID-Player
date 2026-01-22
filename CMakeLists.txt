@@ -35,8 +35,12 @@ set(CMAKE_CXX_STANDARD 17)
 ### Project magic sprinkles
 set(PROJECT_NAME usbsid)
 
+# enable or disable desktop build
 set(DESKTOP 1 CACHE STRING "DESKTOP")
+# enable or disable embedded build
 set(EMBEDDED 0 CACHE STRING "EMBEDDED")
+# enable or disable radare2 debugging support
+set(RADARE2 1 CACHE STRING "RADARE2")
 
 if(${DESKTOP} EQUAL 1 AND ${EMBEDDED} EQUAL 1)
   message(FATAL_ERROR "DESKTOP and EMBEDDED are mutually exclusive! Exiting...")
@@ -108,22 +112,47 @@ endif (DESKTOP)
 ### Source files to compile
 set(SOURCEFILES
   ${CMAKE_CURRENT_LIST_DIR}/src/main.cpp
-  ${CMAKE_CURRENT_LIST_DIR}/src/sidfile.cpp
-  ${CMAKE_CURRENT_LIST_DIR}/src/mos6502.cpp
-  ${CMAKE_CURRENT_LIST_DIR}/src/mos6510.cpp
-
-  ${WIN32_SRC}
+  ${CMAKE_CURRENT_LIST_DIR}/src/usplayer.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/src/emulation.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/src/c64/mos6510_cpu.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/src/c64/mos6526_cia.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/src/c64/mos6560_6561_vic.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/src/c64/mos6581_8580_sid.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/src/c64/mos906114_pla.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/src/c64/mmu.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/src/c64/timer.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/src/psid/sidfile.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/src/psiddrv/psid.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/src/psiddrv/reloc65.c
+  #${WIN32_SRC}
 )
 ### Header folders to include
 set(TARGET_INCLUDE_DIRS PRIVATE
   .
   src
   ${CMAKE_CURRENT_LIST_DIR}/src
+  ${CMAKE_CURRENT_LIST_DIR}/src/c64
+  ${CMAKE_CURRENT_LIST_DIR}/src/util
+  ${CMAKE_CURRENT_LIST_DIR}/src/roms
+  ${CMAKE_CURRENT_LIST_DIR}/src/psid
+  ${CMAKE_CURRENT_LIST_DIR}/src/psiddrv
   # ${WIN32_INC}
   /usr/local/lib
   /usr/local/include
   /usr/lib
   /usr/include
+)
+
+add_custom_command(
+  # OUTPUT psiddrv.h psidextdrv.h
+  OUTPUT psiddrv.h
+  COMMAND $(MAKE) all
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/psiddrv/
+)
+add_custom_target(
+  RSIDDriver ALL
+  # DEPENDS psiddrv.h psidextdrv.h
+  DEPENDS psiddrv.h
 )
 
 if (DESKTOP)

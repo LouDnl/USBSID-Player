@@ -6,7 +6,7 @@
  * MOS SID chips and/or hardware SID emulators over (WEB)USB with
  * your computer, phone or ASID supporting player
  *
- * mos6581_8580_mos6581_8580_sid.h
+ * mos6581_8580_sid.h
  * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *

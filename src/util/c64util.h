@@ -34,6 +34,9 @@
 #include <cstdio>
 #include <cstdint>
 
+#if DESKTOP
+#define __in_flash(name)
+#endif
 
 #if DESKTOP
   #ifndef NDEBUG

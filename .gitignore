@@ -12,9 +12,15 @@
 
 # File types to un-ignore
 !*.cpp
+!*.c
 !*.h
 
 # Directories to un-ignore
 !src
+!src/c64
+!src/psid
+!src/psiddrv
+!src/util
+!src/roms
 !lib
 !lib/driver

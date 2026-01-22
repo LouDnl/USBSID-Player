@@ -3,7 +3,7 @@
 // Filename    : sidfile.cpp
 // Source repo : https://github.com/LouDnl/SidBerry
 // Authors     : Gianluca Ghettini, LouD
-// Last update : 2025
+// Last update : 2026
 // License     : GPL2 https://github.com/LouDnl/SidBerry/blob/master/LICENSE
 //============================================================================
 

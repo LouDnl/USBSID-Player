@@ -3,7 +3,7 @@
 // Filename    : sidfile.h
 // Source repo : https://github.com/LouDnl/SidBerry
 // Authors     : Gianluca Ghettini, LouD
-// Last update : 2025
+// Last update : 2026
 // License     : GPL2 https://github.com/LouDnl/SidBerry/blob/master/LICENSE
 //============================================================================
 
@@ -110,8 +110,8 @@ enum clock_speeds
 enum refresh_rates
 {
   HZ_DEFAULT = 20000,  /* 50Hz ~ 20000 == 20 us */
-  HZ_EU      = 19950,  /* 50Hz ~ 20000 == 20 us    / 50.125Hz ~ 19.950124688279 exact */
-  HZ_US      = 16715,  /* 60Hz ~ 16667 == 16.67 us / 59.826Hz ~ 16.715140574332 exact */
+  HZ_EU      = 19656,  /* 50Hz ~ 19950 == 20 us    / 50.125Hz ~ 19.950124688279 exact */
+  HZ_US      = 17096,  /* 60Hz ~ 16667 == 16.67 us / 59.826Hz ~ 16.715140574332 exact */
 };
 /* Rasterrates (cycles) in microseconds
   * Source: https://www.c64-wiki.com/wiki/raster_time

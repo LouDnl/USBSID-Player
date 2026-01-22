@@ -63,6 +63,9 @@ const uint16_t pAddrIO2Page         = 0xdf00;
 const uint16_t pAddrDataDirection   = 0x0000;
 const uint16_t pAddrMemoryLayout    = 0x0001;
 const uint16_t pBaseAddrStack       = 0x0100;
+const uint16_t pAddrResetVector     = 0xfffc;
+const uint16_t pAddrIRQVector       = 0xfffe;
+const uint16_t pAddrNMIVector       = 0xfffa;
 
 /* ROM pages */
 /* BASIC */
@@ -77,8 +80,8 @@ const uint16_t pAddrKernalLastPage  = 0xff00;
 
 /* Keyboard interaction keys for PSID64 */
 /* rows are $dc00, cols are $dc01 */
-const uint8_t row_bit_plus = 5;  /* $20/$df */
-const uint8_t col_bit_plus = 0;  /* $01/$fe */
+const uint8_t row_bit_plus  = 5;  /* $20/$df */
+const uint8_t col_bit_plus  = 0;  /* $01/$fe */
 const uint8_t row_bit_minus = 5; /* $20/$df */
 const uint8_t col_bit_minus = 3; /* $80/$7f */
 

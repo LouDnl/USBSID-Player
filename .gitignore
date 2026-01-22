@@ -9,6 +9,8 @@
 !LICENSE
 !CMakeLists.txt
 !usplayer.code-workspace
+!psiddrv.a65
+!Makefile
 
 # File types to un-ignore
 !*.cpp

@@ -230,7 +230,7 @@ uint8_t mos6581_8580::read_sid(uint16_t addr)
   uint_fast16_t cycles = sid_delay();
   if (phyaddr == 0xFE) data = mmu_->dma_read_ram(addr);
   if (log_sidrw) {
-    printf("[R SID%d] $%04x $%02x:%02x [C]%5u\n",
+    MOSDBG("[R SID%d] $%04x $%02x:%02x [C]%5u\n",
       sidno,addr,phyaddr,data,cycles);
   }
   r_cyclecount += cycles;

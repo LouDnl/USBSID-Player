@@ -91,8 +91,8 @@ typedef struct psid_s {
 #define PSID_V1_DATA_OFFSET 0x76
 #define PSID_V2_DATA_OFFSET 0x7c
 
-static psid_t* psid = NULL;
-static int psid_tune = 0;       /* currently selected tune, 0: default 1: first, 2: second, etc */
+static psid_t* psid = nullptr;
+static int psid_tune = -1;       /* currently selected tune, 0: default 1: first, 2: second, etc */
 
 #if DESKTOP
 void *psid_calloc(size_t nmemb, size_t size)
@@ -100,7 +100,7 @@ void *psid_calloc(size_t nmemb, size_t size)
   void *ptr;
   ptr = calloc(nmemb, size);
 
-  if (ptr == NULL && (size * nmemb) > 0) {
+  if (ptr == nullptr && (size * nmemb) > 0) {
     MOSDBG("[PSID] error: lib_calloc failed\n");
     return ptr;
   }
@@ -148,7 +148,8 @@ int psid_load_file(uint8_t * binary_, size_t binsize_, int subtune)
     return 0;
   }
 #endif
-  free(psid);
+  if (psid != nullptr)
+    free(psid);
   psid = (psid_t*)calloc(sizeof(psid_t), 1);
 
   if (
@@ -324,7 +325,7 @@ fail:
   fclose(f);
 #endif
   free(psid);
-  psid = NULL;
+  psid = nullptr;
 
   return 0;
 }
@@ -332,7 +333,7 @@ fail:
 void psid_shutdown(void)
 {
   free(psid);
-  psid = NULL;
+  psid = nullptr;
 }
 
 /* Use CBM80 vector to start PSID driver. This is a simple method to
@@ -545,11 +546,21 @@ void psid_init_driver(void)
 
   for (i = 0; i < psid_size; i++) {
     emu_dma_write_ram((uint16_t)(reloc_addr + i), psid_reloc[i]);
+    /* if (i <= 0x20) MOSDBG("[PSID] driver @ $%04x:%02x %02x\n",
+      (uint16_t)(reloc_addr + i),
+      emu_dma_read_ram((uint16_t)(reloc_addr + i)),
+      psid_reloc[i]
+      ); */
   }
 
   /* Store binary C64 data. */
   for (i = 0; i < psid->data_size; i++) {
     emu_dma_write_ram((uint16_t)(psid->load_addr + i), psid->data[i]);
+    /* if (i <= 0x20) MOSDBG("[PSID] data @ $%04x:%02x %02x\n",
+      (uint16_t)(psid->load_addr + i),
+      emu_dma_read_ram((uint16_t)(psid->load_addr + i)),
+      psid->data[i]
+      ); */
   }
 
   /* Skip JMP and CBM80 reset vector. */

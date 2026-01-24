@@ -4,7 +4,7 @@
  *
  * Contains excerpts from vice code, see below.
  *
- * Changes by LouD ~ (c) 2026
+ * Changes and additions by LouD ~ (c) 2026
  *
  */
 
@@ -39,6 +39,7 @@
 #include <cstring>
 #include <cstdint>
 #include <cstdlib>
+#include <c64util.h>
 
 /* Sync factors (changed to positive 2016-11-07, BW)  */
 #define MACHINE_SYNC_PAL     1
@@ -94,8 +95,8 @@ void *psid_calloc(size_t nmemb, size_t size)
   ptr = calloc(nmemb, size);
 
   if (ptr == NULL && (size * nmemb) > 0) {
-    fprintf(stderr, "error: lib_calloc failed\n\n");
-    exit(-1);
+    MOSDBG("[PSID] error: lib_calloc failed\n");
+    return ptr;
   }
 
   return ptr;
@@ -130,7 +131,7 @@ int psid_load_file(const char* filename, int subtune)
   free(psid);
   psid = (psid_t*)calloc(sizeof(psid_t), 1);
 
-  if (fread(ptr, 1, 6, f) != 6 || (memcmp(ptr, "PSID", 4) != 0 && memcmp(ptr, "RSID", 4) != 0)) {
+    MOSDBG("[PSID] SID file validation failed!\n");
     goto fail;
   }
   psid->is_rsid = (ptr[0] == 'R');
@@ -139,15 +140,15 @@ int psid_load_file(const char* filename, int subtune)
   psid->version = psid_extract_word(&ptr);
 
   if (psid->version < 1 || psid->version > 4) {
-    fprintf(stderr, "Unknown PSID version number: %d.\n", (int)psid->version);
+    MOSDBG("[PSID] Unknown PSID version number: %d.\n", (int)psid->version);
     goto fail;
   }
-  fprintf(stdout, "PSID version number: %d.\n", (int)psid->version);
+  MOSDBG("[PSID] PSID version number: %d.\n", (int)psid->version);
 
   length = (unsigned int)((psid->version == 1 ? PSID_V1_DATA_OFFSET : PSID_V2_DATA_OFFSET) - 6);
 
   if (fread(ptr, 1, length, f) != length) {
-    fprintf(stderr, "Reading PSID header.\n\n");
+    MOSDBG("[PSID] Error reading PSID header.\n");
     goto fail;
   }
 
@@ -182,7 +183,7 @@ int psid_load_file(const char* filename, int subtune)
   }
 
   if ((psid->start_song < 1) || (psid->start_song > psid->songs)) {
-    fprintf(stderr, "Default tune out of range (%d of %d ?), using 1 instead.\n", psid->start_song, psid->songs);
+    MOSDBG("[PSID] Default tune out of range (%d of %d ?), using 1 instead.\n", psid->start_song, psid->songs);
     psid->start_song = 1;
   }
 
@@ -190,7 +191,7 @@ int psid_load_file(const char* filename, int subtune)
      first two bytes of the binary C64 data. */
   if (psid->load_addr == 0) {
     if (fread(ptr, 1, 2, f) != 2) {
-      fprintf(stderr, "Reading PSID load address.\n");
+      MOSDBG("[PSID] Error reading PSID load address.\n");
       goto fail;
     }
     psid->load_addr = ptr[0] | ptr[1] << 8;
@@ -206,12 +207,12 @@ int psid_load_file(const char* filename, int subtune)
   psid->load_last_addr = (psid->load_addr + psid->data_size - 1);
 
   if (ferror(f)) {
-    fprintf(stderr, "Reading PSID data.\n");
+    MOSDBG("[PSID] Reading PSID data.\n");
     goto fail;
   }
 
   if (!feof(f)) {
-    fprintf(stderr, "More than 64KiB PSID data.\n");
+    MOSDBG("[PSID] More than 64KiB PSID data.\n");
     goto fail;
   }
 
@@ -237,7 +238,7 @@ int psid_load_file(const char* filename, int subtune)
     unsigned int last_page = 0;
     unsigned int i, page, tmp;
 
-    fprintf(stdout, "No PSID freepages set, recalculating...\n");
+    MOSDBG("[PSID] No PSID freepages set, recalculating...\n");
 
     /* finish initialization */
     used[6] = startp; used[7] = endp;
@@ -270,7 +271,7 @@ int psid_load_file(const char* filename, int subtune)
   }
 
   if (psid->start_page == 0xff || psid->max_pages < 2) {
-    fprintf(stderr, "No space for driver.\n\n");
+    MOSDBG("[PSID] No space for driver.\n");
     goto fail;
   }
 
@@ -279,6 +280,7 @@ int psid_load_file(const char* filename, int subtune)
   return 0;
 
 fail:
+  MOSDBG("[PSID] Load SID file failed!\n");
   fclose(f);
   free(psid);
   psid = NULL;
@@ -334,7 +336,7 @@ void psid_init_tune(int install_driver_hook)
 
   reloc_addr = psid->start_page << 8;
 
-  fprintf(stdout, "Driver=$%04X, Image=$%04X-$%04X, Init=$%04X, Play=$%04X\n",
+  MOSDBG("[PSID] Driver=$%04X, Image=$%04X-$%04X, Init=$%04X, Play=$%04X\n",
     reloc_addr, psid->load_addr,
     (unsigned int)(psid->load_addr + psid->data_size - 1),
     psid->init_addr, psid->play_addr);
@@ -346,18 +348,18 @@ void psid_init_tune(int install_driver_hook)
   // resources_get_int("SidModel", &sid_model);
 
   /* Check tune number. */
-  /* printf("start_song: %d psid->start_song %d\n", start_song, psid->start_song); */
+  /* MOSDBG("[PSID] start_song: %d psid->start_song %d\n", start_song, psid->start_song); */
 
   if (start_song == 0) {
     start_song = psid->start_song;
   } else if (start_song < 1 || start_song > psid->songs) {
-    fprintf(stdout, "Tune out of range.\n");
+    MOSDBG("[PSID] Tune out of range.\n");
     start_song = psid->start_song;
   }
 
   /* Check for PlaySID specific file. */
   if (psid->flags & 0x02 && !psid->is_rsid) {
-    fprintf(stdout, "Image is PlaySID specific - trying anyway.\n");
+    MOSDBG("[PSID] Image is PlaySID specific - trying anyway.\n");
   }
 
   /* Check tune speed. */
@@ -376,13 +378,13 @@ void psid_init_tune(int install_driver_hook)
 
   sync = (is_pal ? MACHINE_SYNC_PAL : MACHINE_SYNC_NTSC); /* Added by LouD */
 
-  fprintf(stdout, "   Title: %s\n", (char *) psid->name);
-  fprintf(stdout, "  Author: %s\n", (char *) psid->author);
-  fprintf(stdout, "Released: %s\n", (char *) psid->copyright);
-  fprintf(stdout, "Using %s sync\n", sync == MACHINE_SYNC_PAL ? "PAL" : "NTSC");
-  fprintf(stdout, "SID model: %s\n", csidflag[(psid->flags >> 4) & 3]);
-  fprintf(stdout, "Using %s interrupt\n", irq_str);
-  fprintf(stdout, "Playing tune %d out of %d (default=%d)\n", start_song, psid->songs, psid->start_song);
+  MOSDBG("[PSID]    Title: %s\n", (char *) psid->name);
+  MOSDBG("[PSID]   Author: %s\n", (char *) psid->author);
+  MOSDBG("[PSID] Released: %s\n", (char *) psid->copyright);
+  MOSDBG("[PSID] Using %s sync\n", sync == MACHINE_SYNC_PAL ? "PAL" : "NTSC");
+  MOSDBG("[PSID] SID model: %s\n", csidflag[(psid->flags >> 4) & 3]);
+  MOSDBG("[PSID] Using %s interrupt\n", irq_str);
+  MOSDBG("[PSID] Playing tune %d out of %d (default=%d)\n", start_song, psid->songs, psid->start_song);
 
   /* Store parameters for PSID player. */
   if (install_driver_hook) {
@@ -447,7 +449,7 @@ void psid_init_driver(void)
   // resources_set_int("SidStereo", 0);
   if (psid->version >= 3) {
     sid2loc = 0xd000 | ((psid->reserved >> 4) & 0x0ff0);
-    fprintf(stdout, "2nd SID at $%04x\n", (unsigned int)sid2loc);
+    MOSDBG("[PSID] 2nd SID at $%04x\n", (unsigned int)sid2loc);
     if (((sid2loc >= 0xd420 && sid2loc < 0xd800) || sid2loc >= 0xde00)
       && (sid2loc & 0x10) == 0) {
         numsids++;
@@ -456,7 +458,7 @@ void psid_init_driver(void)
     }
     sid3loc = 0xd000 | ((psid->reserved << 4) & 0x0ff0);
     if (sid3loc != 0xd000) {
-      fprintf(stdout, "3rd SID at $%04x\n", (unsigned int)sid3loc);
+      MOSDBG("[PSID] 3rd SID at $%04x\n", (unsigned int)sid3loc);
       if (((sid3loc >= 0xd420 && sid3loc < 0xd800) || sid3loc >= 0xde00)
         && (sid3loc & 0x10) == 0) {
           numsids++;
@@ -491,11 +493,11 @@ void psid_init_driver(void)
   /* Relocation of C64 PSID driver code. */
   reloc_addr = psid->start_page << 8;
   psid_size = sizeof(psid_driver);
-  fprintf(stdout, "PSID free pages: $%04x-$%04x\n",
+  MOSDBG("[PSID] PSID free pages: $%04x-$%04x\n",
     reloc_addr, (reloc_addr + (psid->max_pages << 8)) - 1U);
 
   if (!reloc65((char **)&psid_reloc, &psid_size, reloc_addr)) {
-    fprintf(stderr, "Relocation.\n");
+    MOSDBG("[PSID] Relocation.\n");
     // psid_set_tune(-1);
     return;
   }

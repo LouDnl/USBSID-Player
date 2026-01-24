@@ -340,7 +340,7 @@ void mos906114::runtime_bank_switching(uint8_t v)
   /* Setup bank mode during runtime */
   uint8_t b = banks_at_boot; /* Use boot time state as preset */
   b &= (0x18|(v&0x7)); /* Preserve _cart bits_ and only set cpu latches */
-  if (log_pla) printf("[PLA] Bank switch @ runtime from %02X to: %02X with %02X requested\n",banks_at_boot,b,v);
+  if (log_pla) MOSDBG("[PLA] Bank switch @ runtime from %02X to: %02X with %02X requested\n",banks_at_boot,b,v);
   switch_banks(b);
   /* write the raw value to the zero page (doesn't influence the cart bits) */
   mmu_->dma_write_ram(0x0001, v);

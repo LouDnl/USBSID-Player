@@ -323,7 +323,7 @@ void mos6560_6561::emulate(void)
     control_register_one = ((control_register_one & ~RASTERROWMSB) | ((current_raster_row_ & 0x100) >> 1));
     raster_row_lines = (current_raster_row_ & 0xFF);
 
-    // printf("[VIC] RL:%u RRC:%u RR:%u RRL:%u RCYC:%u IRQ@%u IRQE:%x IRQST:%x\n",
+    // MOSDBG("[VIC] RL:%u RRC:%u RR:%u RRL:%u RCYC:%u IRQ@%u IRQE:%x IRQST:%x\n",
     //   raster_lines,
     //   raster_row_cycles,
     //   raster_row_lines,
@@ -334,7 +334,7 @@ void mos6560_6561::emulate(void)
     //   irq_status);
   }
 
-  // printf("[VIC] RL:%u RRC:%u RRL:%u RCYC:%u IRQ:%x ST:%x\n",
+  // MOSDBG("[VIC] RL:%u RRC:%u RRL:%u RCYC:%u IRQ:%x ST:%x\n",
   //   raster_lines,
   //   raster_row_cycles,
   //   raster_row_lines,

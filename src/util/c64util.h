@@ -39,23 +39,20 @@
 #endif
 
 #if DESKTOP
+  #define MOSLOG(...) fprintf (stdout,__VA_ARGS__)
   #ifndef NDEBUG
-    #define MOSDBG(...) fprintf (stderr,__VA_ARGS__)
+    #define MOSDBG(...) fprintf (stdout,__VA_ARGS__)
   #else
     #define MOSDBG(...) do {} while (0)
-  #endif
-  #ifdef IRQDEBUG
-    #define MOSIDBG(...) fprintf (stderr,__VA_ARGS__)
-  #else
-    #define MOSIDBG(...) do {} while (0)
   #endif
 #elif EMBEDDED
+  #include <logging.h>
+  #define MOSLOG(...) _US_DBG(__VA_ARGS__)
   #if defined(EMUDEBUG)
-    #define MOSDBG(...) printf(__VA_ARGS__)
+    #define MOSDBG(...) _US_DBG(__VA_ARGS__)
   #else
     #define MOSDBG(...) do {} while (0)
   #endif
-  #define MOSIDBG(...) do {} while (0) /* No IRQ debugging on embedded, too slow! */
 #endif
 
 /**

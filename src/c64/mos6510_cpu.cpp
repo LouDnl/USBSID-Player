@@ -1430,7 +1430,7 @@ void mos6510::jam(val_t insn)
 {
   (void)insn;
   // if (1) return;
-  // printf("JAM! INS: %02X PC @ %04X\nInstr %02X @ %04X\nNext Instr %02X @ %04X\nPrev Instr %02X @ %04X\nPrev Instr %02X @ %04X\nSP:%X A:%X X:%X Y:%X\n",
+  // MOSDBG("JAM! INS: %02X PC @ %04X\nInstr %02X @ %04X\nNext Instr %02X @ %04X\nPrev Instr %02X @ %04X\nPrev Instr %02X @ %04X\nSP:%X A:%X X:%X Y:%X\n",
     // insn,pc(),
     // load_byte(pc_-1),pc_,load_byte(pc_),pc_+1,
     // load_byte(pc_-2),pc_-1,load_byte(pc_-3),pc_-2,
@@ -1704,7 +1704,7 @@ void mos6510::set_irq_nmi_callback(CPUCLOCK c, int src)
       cia2_timb_nmi_callback = c;
       break;
   }
-  // printf("[CPU] Set callback @ %u for %d\n",c,src);
+  // MOSDBG("[CPU] Set callback @ %u for %d\n",c,src);
   return;
 }
 
@@ -1756,7 +1756,7 @@ void mos6510::handle_interrupts(void) /* BUG: Makes play way too fast */
 {
   // if (loginstructions) {dump_regs_irq(0, (mos6510::nmi_pending ? 1 : 3));}
   if (mos6510::nmi_pending || (mos6510::irq_pending && !idf())) {
-    MOSIDBG("[handle_interrupts] NMI:%d IRQ:%d IDF:%d\n",mos6510::nmi_pending, mos6510::irq_pending, idf());
+    /* MOSDBG("[handle_interrupts] NMI:%d IRQ:%d IDF:%d\n",mos6510::nmi_pending, mos6510::irq_pending, idf()); */
     tick(2);
     push(((pc()) >> 8) & 0xff);
     push(((pc()) & 0xff));
@@ -2011,8 +2011,8 @@ void mos6510::dump_regs_json()
 void mos6510::dbg()
 {
   MOSDBG("INS %02X: %02X %02X %04X\n",load_byte(pc_-1),load_byte(pc_),load_byte(pc_+1),pc_);
-  // printf("INS-1 %02X: %02X %02X %04X\n",load_byte(pc_-2),load_byte(pc_-1),load_byte(pc_+2),pc_-1);
-  // printf("INS-2 %02X: %02X %02X %04X\n",load_byte(pc_-3),load_byte(pc_-2),load_byte(pc_+3),pc_-2);
+  // MOSDBG("INS-1 %02X: %02X %02X %04X\n",load_byte(pc_-2),load_byte(pc_-1),load_byte(pc_+2),pc_-1);
+  // MOSDBG("INS-2 %02X: %02X %02X %04X\n",load_byte(pc_-3),load_byte(pc_-2),load_byte(pc_+3),pc_-2);
 }
 
 void mos6510::dbg_a()

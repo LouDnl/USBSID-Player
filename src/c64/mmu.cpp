@@ -29,6 +29,7 @@
  *
  */
 
+#include <cstdint>
 #include <cstring>
 
 #include <c64util.h>
@@ -148,10 +149,10 @@ uint8_t mmu::read_cia(uint_least16_t addr)
   uint8_t cia_addr = (addr & 0xF);
   if (cia_page == pAddrCIA1Page) {
     data = cia1->read_register(cia_addr);
-    if (log_cia1rw) printf("[R CIA1] $%04x $%02x:%02x\n",addr,cia_addr,data);
+    if (log_cia1rw) MOSDBG("[R CIA1] $%04x $%02x:%02x\n",addr,cia_addr,data);
   } else if (cia_page == pAddrCIA2Page) {
     data = cia2->read_register(cia_addr);
-    if (log_cia2rw) printf("[R CIA2] $%04x $%02x:%02x\n",addr,cia_addr,data);
+    if (log_cia2rw) MOSDBG("[R CIA2] $%04x $%02x:%02x\n",addr,cia_addr,data);
   }
 
   return data;
@@ -168,10 +169,10 @@ void mmu::write_cia(uint_least16_t addr, uint8_t data)
   uint_least16_t cia_page = (addr & 0xFF00);
   uint8_t cia_addr = (addr & 0xF);
   if (cia_page == pAddrCIA1Page) {
-    if (log_cia1rw) printf("[W CIA1] $%04x:%02x\n",addr,data);
+    if (log_cia1rw) MOSDBG("[W CIA1] $%04x:%02x\n",addr,data);
     cia1->write_register(cia_addr,data);
   } else if (cia_page == pAddrCIA2Page) {
-    if (log_cia2rw) printf("[W CIA2] $%04x:%02x\n",addr,data);
+    if (log_cia2rw) MOSDBG("[W CIA2] $%04x:%02x\n",addr,data);
     cia2->write_register(cia_addr,data);
   }
 
@@ -188,7 +189,7 @@ uint8_t mmu::read_vic(uint_least16_t addr)
 {
   uint8_t data = 0xff;
   uint8_t vic_addr = (addr & 0x3f);
-  if (log_vicrw) printf("[R  VIC] $%04x:%02x\n",addr,data);
+  if (log_vicrw) MOSDBG("[R  VIC] $%04x:%02x\n",addr,data);
   if _MOS_LIKELY (vic_addr <=0x3f) {
     data = vic->read_register(vic_addr);
   }
@@ -208,7 +209,7 @@ void mmu::write_vic(uint_least16_t addr, uint8_t data)
   if _MOS_LIKELY (vic_addr <=0x3f) {
     vic->write_register(vic_addr,data);
   }
-  if (log_vicrw) printf("[W  VIC] $%04x:%02x\n",addr,data);
+  if (log_vicrw) MOSDBG("[W  VIC] $%04x:%02x\n",addr,data);
 
   return;
 }
@@ -238,7 +239,7 @@ uint8_t mmu::rom_read_byte(uint16_t addr, char rom)
       break;
   }
   if (log_romrw) {
-    printf("[R  ROM]$%04x:%02x [B%dC%dK%d]\n",
+    MOSDBG("[R  ROM]$%04x:%02x [B%dC%dK%d]\n",
       addr,data,bsc,crg,krn);
   }
   return data;
@@ -270,7 +271,7 @@ uint8_t mmu::vic_read_byte(uint16_t addr) /* Unused */
     v = RAM[vic_addr];
   }
   if (log_vicrrw) {
-    printf("[VIC RR] $%04x:%02x (%04x/%04x/%04x)\n",
+    MOSDBG("[VIC RR] $%04x:%02x (%04x/%04x/%04x)\n",
       addr,v,vic_addr,
       (pAddrCharsFirstPage + (vic_addr & 0xfff)),
       cia2->vic_base_address());
@@ -370,7 +371,7 @@ uint8_t mmu::read_byte(uint16_t addr)
       break;
   }
   if (log_readwrites)
-    printf("[R MEM %d%d%d%d]$%04x:%02x\n",
+    MOSDBG("[R MEM %d%d%d%d]$%04x:%02x\n",
       read_io,b_rom,c_rom,k_rom,addr,data);
   return data;
 }
@@ -388,7 +389,7 @@ void mmu::write_byte(uint16_t addr, uint8_t data)
   crg = pla->memory_banks(mos906114::kBankChargen);
   bool write_io = (crg == mos906114::kIO);
 
-  if (log_readwrites) printf("[W MEM %d___]$%04x:%02x\n",write_io,addr,data);
+  if (log_readwrites) MOSDBG("[W MEM %d___]$%04x:%02x\n",write_io,addr,data);
   switch (addr) {
     /* $0000 */
     case pAddrDataDirection:

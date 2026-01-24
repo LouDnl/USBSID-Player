@@ -70,7 +70,6 @@ int SidFile::Parse(std::string file)
     }
 
     numOfSongs = (int)Read16(header, SIDFILE_PSID_NUMBER_H);
-    // printf("%d\n",numOfSongs);
 
     if (numOfSongs == 0)
     {
@@ -214,7 +213,6 @@ int SidFile::ParsePtr(uint8_t * f, size_t fsize)
     // }
 
     numOfSongs = (int)Read16(header, SIDFILE_PSID_NUMBER_H);
-    // printf("%d\n",numOfSongs);
 
     if (numOfSongs == 0)
     {

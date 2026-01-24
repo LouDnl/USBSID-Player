@@ -50,13 +50,14 @@ mos6526::mos6526(uint_least16_t base_address) :
 
   if (is_cia2 && log_cia2rw) {
     log_rw = true;
-    printf("[CIA 2] Read/Write logging enabled\n");
+    MOSDBG("[CIA 2] Read/Write logging enabled\n");
   }
   if (!is_cia2 && log_cia1rw) {
     log_rw = true;
-    printf("[CIA 1] Read/Write logging enabled\n");
+    MOSDBG("[CIA 1] Read/Write logging enabled\n");
   }
 
+  MOSDBG("[CIA] %d created @ $%04x\n",(is_cia2?2:1),cia_address);
   reset();
 }
 

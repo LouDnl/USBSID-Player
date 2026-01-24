@@ -233,7 +233,7 @@ void mos6581_8580::write_sid(uint16_t addr, uint8_t data)
   }
   mmu_->dma_write_ram(addr, data); /* Always write to RAM as mirror */
   if (log_sidrw) {
-    printf("[W SID%d] $%04x $%02x:%02x [C]%5u\n",
+    MOSDBG("[W SID%d] $%04x $%02x:%02x [C]%5u\n",
       sidno,addr,phyaddr,data,cycles);
   }
   w_cyclecount += cycles;

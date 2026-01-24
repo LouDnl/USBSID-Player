@@ -46,7 +46,7 @@ extern "C" void clockcycle_delay(uint32_t n_cycles);
  * @brief Construct a new mos6560_6561::mos6560_6561 object
  *
  */
-mos6560_6561::mos6560_6561()
+mos6560_6561::mos6560_6561(void)
 {
   MOSDBG("[VIC] Init\n");
 
@@ -60,6 +60,17 @@ mos6560_6561::mos6560_6561()
   reset();
 
   set_timer_speed(100);
+  return;
+}
+
+/**
+ * @brief Destroy the mos6560 6561::mos6560 6561 object
+ *
+ */
+mos6560_6561::~mos6560_6561(void)
+{
+  MOSDBG("[VIC] Deinit\n");
+  return;
 }
 
 /**

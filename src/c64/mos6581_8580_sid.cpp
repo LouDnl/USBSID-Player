@@ -57,6 +57,17 @@ mos6581_8580::mos6581_8580()
   MOSDBG("[SID] Init\n");
 
   srand(time(NULL));
+  return;
+}
+
+/**
+ * @brief Destroy the mos6581 8580::mos6581 8580 object
+ *
+ */
+mos6581_8580::~mos6581_8580(void)
+{
+  MOSDBG("[SID] Deinit\n");
+  return;
 }
 
 /**

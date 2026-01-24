@@ -59,6 +59,17 @@ mos6526::mos6526(uint_least16_t base_address) :
 
   MOSDBG("[CIA] %d created @ $%04x\n",(is_cia2?2:1),cia_address);
   reset();
+  return;
+}
+
+/**
+ * @brief Destroy the mos6526::mos6526 object
+ *
+ */
+mos6526::~mos6526(void)
+{
+  MOSDBG("[CIA] %d Deinit\n",(is_cia2+1));
+  return;
 }
 
 /**

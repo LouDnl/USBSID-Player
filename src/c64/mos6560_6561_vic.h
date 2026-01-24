@@ -128,8 +128,8 @@ class mos6560_6561
     void vsync_do_end_of_line(void);
 
   public:
-    mos6560_6561();
-    ~mos6560_6561(){};
+    mos6560_6561(void);
+    ~mos6560_6561(void);
 
     void reset(void);
     void glue_c64(VicReadDMA rdma, mos6510 *_cpu, mos6581_8580 *_sid);

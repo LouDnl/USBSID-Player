@@ -52,6 +52,15 @@ mos906114::mos906114(mmu * _mmu) :
   mmu_->dma_write_ram(0x0001, data_direction_default);
   return;
 }
+
+/**
+ * @brief Destroy the mos906114::mos906114 object
+ *
+ */
+mos906114::~mos906114(void)
+{
+  MOSDBG("[PLA] Deinit\n");
+  return;
 }
 
 /**

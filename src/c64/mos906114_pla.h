@@ -57,7 +57,7 @@ class mos906114
 
   public:
     mos906114(mmu * _mmu);
-    ~mos906114(){};
+    ~mos906114(void);
 
     /** Bank Switching Zones
      *

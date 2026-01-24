@@ -43,8 +43,8 @@ class mos6510;
 class mos6581_8580
 {
   public:
-    mos6581_8580();
-    ~mos6581_8580(){};
+    mos6581_8580(void);
+    ~mos6581_8580(void);
 
     /* SID related defaults */
     uint8_t sidcount  = 1;

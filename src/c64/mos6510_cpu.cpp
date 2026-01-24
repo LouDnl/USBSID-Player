@@ -73,6 +73,19 @@ mos6510::mos6510(BusRead r, BusWrite w)
 }
 
 /**
+ * @brief Destroy the mos6510::mos6510 object
+ *
+ */
+mos6510::~mos6510()
+{
+  MOSDBG("[CPU] Deinit\n");
+  initialized = false;
+  instruction_table.fill(InstructionHandler{});
+
+  return;
+}
+
+/**
  * @brief Glue required C64 modules
  *
  */

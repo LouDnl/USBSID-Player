@@ -28,10 +28,12 @@
 
 #include <cstring>
 /* Random shit */
+#include <cstdint>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 
+#include <mmu.h>
 #include <mos6581_8580_sid.h>
 #include <mos6510_cpu.h>
 
@@ -41,6 +43,8 @@
 #if DESKTOP
 #include <USBSID.h>
 extern USBSID_NS::USBSID_Class* usbsid;
+#elif EMBEDDED
+extern "C" void cycled_write_operation(uint8_t address, uint8_t data, uint16_t cycles);
 #endif
 
 
@@ -159,8 +163,9 @@ void mos6581_8580::sid_flush(void)
 {
   const CPUCLOCK now = cpu->cycles();
   CPUCLOCK cycles = (now - sid_main_clk);
-
+#if DESKTOP
   usbsid->USBSID_SetFlush(); /* Always flush USB data buffer when called */
+#endif
   if (now < sid_main_clk || w_cyclecount == 0) { /* Reset / flush */
     r_cyclecount = 0;
     w_cyclecount = 0;
@@ -170,10 +175,12 @@ void mos6581_8580::sid_flush(void)
   while(cycles > 0xFFFF) {
     cycles -= 0xFFFF;
   }
+#if DESKTOP
   /* Delay for any remaining cycles */
   if (usbsid) {
     usbsid->USBSID_WaitForCycle(cycles);
   }
+#endif
 
   sid_main_clk = flush_main_clk = now;
   r_cyclecount = w_cyclecount = 0;
@@ -191,7 +198,9 @@ unsigned int mos6581_8580::sid_delay(void)
   CPUCLOCK cycles = (now - sid_main_clk);
   while (cycles > 0xFFFF) {
     cycles -= 0xFFFF;
+#if DESKTOP
     usbsid->USBSID_WaitForCycle(0xFFFF);
+#endif
   }
   sid_main_clk = now;
   return cycles;
@@ -227,10 +236,16 @@ void mos6581_8580::write_sid(uint16_t addr, uint8_t data)
 {
   uint8_t phyaddr = (sidaddr_translation(addr) & 0xFF);  /* 4 SIDs max */
   uint_fast16_t cycles = sid_delay();
+#if DESKTOP
   if (usbsid && (phyaddr != 0xFE)) {
     usbsid->USBSID_WaitForCycle(cycles);
     usbsid->USBSID_WriteRingCycled(phyaddr, data, cycles);
   }
+#elif EMBEDDED
+  if (phyaddr != 0xFE) {
+    cycled_write_operation(phyaddr, data, cycles);
+  }
+#endif
   mmu_->dma_write_ram(addr, data); /* Always write to RAM as mirror */
   if (log_sidrw) {
     MOSDBG("[W SID%d] $%04x $%02x:%02x [C]%5u\n",

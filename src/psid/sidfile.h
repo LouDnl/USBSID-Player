@@ -86,7 +86,7 @@ enum
   * https://sourceforge.net/p/vice-emu/code/HEAD/tree/trunk/vice/src/c64/c64.h
   */
 
-
+#if DESKTOP
 /* Clock speed: 0.985 MHz (PAL) or 1.023 MHz (NTSC) */
 #define CLOCK_DEFAULT 1000000  // 1MHz = 1us
 #define CLOCK_PAL      985248  // 0.985 MHz
@@ -160,6 +160,7 @@ static long cycles_per_raster = R_DEFAULT;   /* default @ 20000 */
 // static const enum refresh_rates refreshRate[] = {DEFAULT, EU, US, GLOBAL};
 static const enum scan_lines scanLines[] = {C64_PAL_SCANLINES, C64_PAL_SCANLINES, C64_NTSC_SCANLINES, C64_NTSC_SCANLINES};
 static const enum scanline_cycles scanlinesCycles[] = {C64_PAL_SCANLINE_CYCLES, C64_PAL_SCANLINE_CYCLES, C64_NTSC_SCANLINE_CYCLES, C64_NTSC_SCANLINE_CYCLES};
+#endif
 
 class SidFile
 {

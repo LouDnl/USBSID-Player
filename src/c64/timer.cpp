@@ -56,6 +56,14 @@
 #include <sys/time.h>
 #include <stdio.h>
 
+#if EMBEDDED
+#include <pico/types.h>
+#include <pico/time.h>
+extern "C" uint32_t clockcycles(void);
+extern "C" void clockcycle_delay(uint32_t n_cycles);
+extern "C" uint64_t pico_ns_since_boot(void);
+#endif
+
 tick_t tick_per_second(void)
 {
     return TICK_PER_SECOND;
@@ -63,16 +71,22 @@ tick_t tick_per_second(void)
 
 tick_t tick_now(void)
 {
+#if DESKTOP
     struct timespec now;
 
     clock_gettime(CLOCK_MONOTONIC_RAW, &now);
-    // clock_gettime(CLOCK_MONOTONIC, &now);
 
     return NANO_TO_TICK(((uint64_t)NANO_PER_SECOND * now.tv_sec) + now.tv_nsec);
+#elif EMBEDDED // TODO: FIX
+    uint64_t now = pico_ns_since_boot();;
+    return NANO_TO_TICK((uint64_t)now);
+#endif
+    return 0;
 }
 
 static inline void sleep_impl(tick_t sleep_ticks)
 {
+#if DESKTOP
     struct timespec ts;
     uint64_t nanos = TICK_TO_NANO(sleep_ticks);
 
@@ -85,6 +99,11 @@ static inline void sleep_impl(tick_t sleep_ticks)
     }
 
     nanosleep(&ts, NULL);
+#elif EMBEDDED
+    uint64_t micros = TICK_TO_MICRO(sleep_ticks);
+    sleep_us(micros);
+#endif
+    return;
 }
 
 /* Sleep a number of timer units. */

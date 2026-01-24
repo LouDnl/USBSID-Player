@@ -38,7 +38,13 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdint>
+#if DESKTOP
 #include <cstdlib>
+#elif EMBEDDED
+#include <stdlib.h>
+#include <pico/stdlib.h>
+#include <pico/malloc.h>
+#endif
 #include <c64util.h>
 
 /* Sync factors (changed to positive 2016-11-07, BW)  */
@@ -88,10 +94,10 @@ typedef struct psid_s {
 static psid_t* psid = NULL;
 static int psid_tune = 0;       /* currently selected tune, 0: default 1: first, 2: second, etc */
 
+#if DESKTOP
 void *psid_calloc(size_t nmemb, size_t size)
 {
   void *ptr;
-
   ptr = calloc(nmemb, size);
 
   if (ptr == NULL && (size * nmemb) > 0) {
@@ -101,6 +107,15 @@ void *psid_calloc(size_t nmemb, size_t size)
 
   return ptr;
 }
+#endif
+
+#if EMBEDDED
+int MEM_fread(unsigned char *buf, size_t size, size_t n, uint8_t **f) {
+    memcpy(buf, *f, size * n);
+    *f += size * n;
+    return n;
+}
+#endif
 
 static uint16_t psid_extract_word(uint8_t **buf)
 {
@@ -109,9 +124,14 @@ static uint16_t psid_extract_word(uint8_t **buf)
   return word;
 }
 
+#if DESKTOP
 int psid_load_file(const char* filename, int subtune)
 {
   FILE* f;
+#elif EMBEDDED
+int psid_load_file(uint8_t * binary_, size_t binsize_, int subtune)
+{
+#endif
   uint8_t buf[PSID_V2_DATA_OFFSET + 2];
   uint8_t *ptr = buf;
   unsigned int length;
@@ -123,14 +143,21 @@ int psid_load_file(const char* filename, int subtune)
    *     number given on commandline (if any).
    */
   psid_tune = subtune;
-
+#if DESKTOP
   if (!(f = fopen(filename, "r\n"))) {
-    return -1;
+    return 0;
   }
-
+#endif
   free(psid);
   psid = (psid_t*)calloc(sizeof(psid_t), 1);
 
+  if (
+#if DESKTOP
+    fread(ptr, 1, 6, f) != 6 ||
+#elif EMBEDDED
+    MEM_fread(ptr, 1, 6, &binary_) != 6 ||
+#endif
+    (memcmp(ptr, "PSID", 4) != 0 && memcmp(ptr, "RSID", 4) != 0)) {
     MOSDBG("[PSID] SID file validation failed!\n");
     goto fail;
   }
@@ -146,8 +173,11 @@ int psid_load_file(const char* filename, int subtune)
   MOSDBG("[PSID] PSID version number: %d.\n", (int)psid->version);
 
   length = (unsigned int)((psid->version == 1 ? PSID_V1_DATA_OFFSET : PSID_V2_DATA_OFFSET) - 6);
-
+#if DESKTOP
   if (fread(ptr, 1, length, f) != length) {
+#elif EMBEDDED
+  if (MEM_fread(ptr, 1, length, &binary_) != length) {
+#endif
     MOSDBG("[PSID] Error reading PSID header.\n");
     goto fail;
   }
@@ -190,7 +220,11 @@ int psid_load_file(const char* filename, int subtune)
   /* Zero load address => the load address is stored in the
      first two bytes of the binary C64 data. */
   if (psid->load_addr == 0) {
+#if DESKTOP
     if (fread(ptr, 1, 2, f) != 2) {
+#elif EMBEDDED
+  if (MEM_fread(ptr, 1, 2, &binary_) != 2) {
+#endif
       MOSDBG("[PSID] Error reading PSID load address.\n");
       goto fail;
     }
@@ -203,9 +237,14 @@ int psid_load_file(const char* filename, int subtune)
   }
 
   /* Read binary C64 data. */
+#if DESKTOP
   psid->data_size = (uint16_t)fread(psid->data, 1, sizeof(psid->data), f);
+#elif EMBEDDED
+  // psid->data_size = /* (uint16_t) */MEM_fread(psid->data, 1, (binsize_-(length+2)), &binary_);
+  psid->data_size = /* (uint16_t) */MEM_fread(psid->data, 1, (binsize_-length), &binary_);
+#endif
   psid->load_last_addr = (psid->load_addr + psid->data_size - 1);
-
+#if DESKTOP
   if (ferror(f)) {
     MOSDBG("[PSID] Reading PSID data.\n");
     goto fail;
@@ -215,7 +254,7 @@ int psid_load_file(const char* filename, int subtune)
     MOSDBG("[PSID] More than 64KiB PSID data.\n");
     goto fail;
   }
-
+#endif
   /* Relocation setup. */
   if (psid->start_page == 0x00) {
     /* Start and end pages. */
@@ -274,18 +313,20 @@ int psid_load_file(const char* filename, int subtune)
     MOSDBG("[PSID] No space for driver.\n");
     goto fail;
   }
-
+#if DESKTOP
   fclose(f);
-
-  return 0;
+#endif
+  return 1;
 
 fail:
   MOSDBG("[PSID] Load SID file failed!\n");
+#if DESKTOP
   fclose(f);
+#endif
   free(psid);
   psid = NULL;
 
-  return -1;
+  return 0;
 }
 
 void psid_shutdown(void)

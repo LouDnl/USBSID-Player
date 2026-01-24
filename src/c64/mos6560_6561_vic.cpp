@@ -35,6 +35,12 @@
 #include <timer.h>
 #include <c64util.h>
 
+#if EMBEDDED
+#include <pico/types.h>
+#include <pico/time.h>
+extern "C" uint32_t clockcycles(void);
+extern "C" void clockcycle_delay(uint32_t n_cycles);
+#endif
 
 /**
  * @brief Construct a new mos6560_6561::mos6560_6561 object

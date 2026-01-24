@@ -142,16 +142,6 @@ int setup_USBSID(void)
 
   return 1;
 }
-
-void clear_USBSID(void)
-{
-  if (usbsid) {
-    usbsid->USBSID_Mute();
-    usbsid->USBSID_ClearBus();
-    usbsid->USBSID_UnMute();
-  }
-  return;
-}
 #endif
 
 void getinfo_USBSID(int clockspeed)

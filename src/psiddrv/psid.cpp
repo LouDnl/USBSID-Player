@@ -394,7 +394,7 @@ void psid_init_tune(int install_driver_hook)
     /* CBM80 reset vector. */
     addr += psid_set_cbm80((uint16_t)(reloc_addr + 9), addr);
 
-    emu_write_byte(addr, (uint8_t)(start_song));
+    emu_dma_write_ram(addr, (uint8_t)(start_song));
   }
 
   /* put song number into address 780/1/2 (A/X/Y) for use by BASIC tunes */

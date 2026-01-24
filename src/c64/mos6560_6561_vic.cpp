@@ -502,7 +502,7 @@ void mos6560_6561::vsync_do_end_of_line(void)
       * If we are behind the emulator, this will be a giant number
       */
 
-    // BUG: withj PSID tunes ticks_until_target is WAY too high!!!
+    // BUG: with PSID tunes ticks_until_target is WAY too high!!!
     ticks_until_target = sync_target_tick - tick_now;
 
     if (ticks_until_target < tick_per_second()) {

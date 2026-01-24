@@ -38,7 +38,6 @@
 
 class mos6510;
 
-extern uint8_t RAM[];
 
 /* MOS 6526 CIA */
 class mos6526
@@ -218,7 +217,7 @@ class mos6526
 
   public:
     mos6526(uint_least16_t base_address);
-    ~mos6526(void) {};
+    ~mos6526(void);
 
     void glue_c64(mos6510 * _cpu);
 

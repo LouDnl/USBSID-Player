@@ -46,8 +46,8 @@
 #define MACHINE_SYNC_NTSCOLD 3
 #define MACHINE_SYNC_PALN    4
 
-extern uint8_t emu_read_byte(uint16_t address);
-extern void emu_write_byte(uint16_t address, uint8_t data);
+extern uint8_t emu_dma_read_ram(uint16_t address);
+extern void emu_dma_write_ram(uint16_t address, uint8_t data);
 extern "C" int reloc65(char** buf, int* fsize, int addr);
 
 bool is_pal = true;
@@ -305,9 +305,9 @@ static int psid_set_cbm80(uint16_t vec, uint16_t addr)
 
   for (i = 0; i < sizeof(cbm80); i++) {
     /* make backup of original content at 0x8000 */
-    emu_write_byte((uint16_t)(addr + i), emu_read_byte((uint16_t)(0x8000 + i)));
+    emu_dma_write_ram((uint16_t)(addr + i), emu_dma_read_ram((uint16_t)(0x8000 + i)));
     /* copy header */
-    emu_write_byte((uint16_t)(0x8000 + i), cbm80[i]);
+    emu_dma_write_ram((uint16_t)(0x8000 + i), cbm80[i]);
   }
 
   return i;
@@ -396,11 +396,11 @@ void psid_init_tune(int install_driver_hook)
   }
 
   /* put song number into address 780/1/2 (A/X/Y) for use by BASIC tunes */
-  emu_write_byte(780, (uint8_t)(start_song - 1));
-  emu_write_byte(781, (uint8_t)(start_song - 1));
-  emu_write_byte(782, (uint8_t)(start_song - 1));
+  emu_dma_write_ram(780, (uint8_t)(start_song - 1));
+  emu_dma_write_ram(781, (uint8_t)(start_song - 1));
+  emu_dma_write_ram(782, (uint8_t)(start_song - 1));
   /* force flag in c64 memory, many sids reads it and must be set AFTER the sid flag is read */
-  emu_write_byte((uint16_t)(0x02a6), (uint8_t)(sync == MACHINE_SYNC_NTSC ? 0 : 1));
+  emu_dma_write_ram((uint16_t)(0x02a6), (uint8_t)(sync == MACHINE_SYNC_NTSC ? 0 : 1));
 }
 
 void psid_init_driver(void)
@@ -485,7 +485,7 @@ void psid_init_driver(void)
 
   /* Clear low memory to minimize the damage of PSIDs doing bad reads. */
   for (addr = 0; addr < 0x0800; addr++) {
-    emu_write_byte(addr, (uint8_t)0x00);
+    emu_dma_write_ram(addr, (uint8_t)0x00);
   }
 
   /* Relocation of C64 PSID driver code. */
@@ -501,31 +501,31 @@ void psid_init_driver(void)
   }
 
   for (i = 0; i < psid_size; i++) {
-    emu_write_byte((uint16_t)(reloc_addr + i), psid_reloc[i]);
+    emu_dma_write_ram((uint16_t)(reloc_addr + i), psid_reloc[i]);
   }
 
   /* Store binary C64 data. */
   for (i = 0; i < psid->data_size; i++) {
-    emu_write_byte((uint16_t)(psid->load_addr + i), psid->data[i]);
+    emu_dma_write_ram((uint16_t)(psid->load_addr + i), psid->data[i]);
   }
 
   /* Skip JMP and CBM80 reset vector. */
   addr = reloc_addr + 3 + 9 + 9;
 
   /* Store parameters for PSID player. */
-  emu_write_byte(addr++, (uint8_t)(0));
-  emu_write_byte(addr++, (uint8_t)(psid->songs));
-  emu_write_byte(addr++, (uint8_t)(psid->load_addr & 0xff));
-  emu_write_byte(addr++, (uint8_t)(psid->load_addr >> 8));
-  emu_write_byte(addr++, (uint8_t)(psid->init_addr & 0xff));
-  emu_write_byte(addr++, (uint8_t)(psid->init_addr >> 8));
-  emu_write_byte(addr++, (uint8_t)(psid->play_addr & 0xff));
-  emu_write_byte(addr++, (uint8_t)(psid->play_addr >> 8));
-  emu_write_byte(addr++, (uint8_t)(psid->speed & 0xff));
-  emu_write_byte(addr++, (uint8_t)((psid->speed >> 8) & 0xff));
-  emu_write_byte(addr++, (uint8_t)((psid->speed >> 16) & 0xff));
-  emu_write_byte(addr++, (uint8_t)(psid->speed >> 24));
-  emu_write_byte(addr++, (uint8_t)((int)sync == MACHINE_SYNC_PAL ? 1 : 0));
-  emu_write_byte(addr++, (uint8_t)(psid->load_last_addr & 0xff));
-  emu_write_byte(addr++, (uint8_t)(psid->load_last_addr >> 8));
+  emu_dma_write_ram(addr++, (uint8_t)(0));
+  emu_dma_write_ram(addr++, (uint8_t)(psid->songs));
+  emu_dma_write_ram(addr++, (uint8_t)(psid->load_addr & 0xff));
+  emu_dma_write_ram(addr++, (uint8_t)(psid->load_addr >> 8));
+  emu_dma_write_ram(addr++, (uint8_t)(psid->init_addr & 0xff));
+  emu_dma_write_ram(addr++, (uint8_t)(psid->init_addr >> 8));
+  emu_dma_write_ram(addr++, (uint8_t)(psid->play_addr & 0xff));
+  emu_dma_write_ram(addr++, (uint8_t)(psid->play_addr >> 8));
+  emu_dma_write_ram(addr++, (uint8_t)(psid->speed & 0xff));
+  emu_dma_write_ram(addr++, (uint8_t)((psid->speed >> 8) & 0xff));
+  emu_dma_write_ram(addr++, (uint8_t)((psid->speed >> 16) & 0xff));
+  emu_dma_write_ram(addr++, (uint8_t)(psid->speed >> 24));
+  emu_dma_write_ram(addr++, (uint8_t)((int)sync == MACHINE_SYNC_PAL ? 1 : 0));
+  emu_dma_write_ram(addr++, (uint8_t)(psid->load_last_addr & 0xff));
+  emu_dma_write_ram(addr++, (uint8_t)(psid->load_last_addr >> 8));
 }

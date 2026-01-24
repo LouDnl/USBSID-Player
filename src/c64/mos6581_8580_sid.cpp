@@ -59,8 +59,9 @@ mos6581_8580::mos6581_8580()
  * @brief Glue required C64 parts
  *
  */
-void mos6581_8580::glue_c64(mos6510 * _cpu)
+void mos6581_8580::glue_c64(mmu * _mmu, mos6510 * _cpu)
 {
+  mmu_ = _mmu;
   cpu = _cpu;
 
   return;
@@ -207,7 +208,7 @@ uint8_t mos6581_8580::read_sid(uint16_t addr)
   uint8_t data = (rand() % 0xFF) + 1; /* Random value generator */
   uint8_t phyaddr = (sidaddr_translation(addr) & 0xFF);  /* 4 SIDs max */
   uint_fast16_t cycles = sid_delay();
-  if (phyaddr == 0xFE) data = RAM[addr];
+  if (phyaddr == 0xFE) data = mmu_->dma_read_ram(addr);
   if (log_sidrw) {
     printf("[R SID%d] $%04x $%02x:%02x [C]%5u\n",
       sidno,addr,phyaddr,data,cycles);
@@ -230,7 +231,7 @@ void mos6581_8580::write_sid(uint16_t addr, uint8_t data)
     usbsid->USBSID_WaitForCycle(cycles);
     usbsid->USBSID_WriteRingCycled(phyaddr, data, cycles);
   }
-  RAM[addr] = data; /* Always write to RAM as mirror */
+  mmu_->dma_write_ram(addr, data); /* Always write to RAM as mirror */
   if (log_sidrw) {
     printf("[W SID%d] $%04x $%02x:%02x [C]%5u\n",
       sidno,addr,phyaddr,data,cycles);

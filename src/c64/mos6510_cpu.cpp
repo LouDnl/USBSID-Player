@@ -29,16 +29,12 @@
  *
  */
 
+#include <mmu.h>
 #include <mos6510_cpu.h>
 #include <mos6560_6561_vic.h>
 #include <mos6526_cia.h>
 #include <c64util.h>
 
-
-/**
- * @brief External pointers
- */
-extern uint8_t RAM[];
 
 /**
  * @brief Init static CPU variables
@@ -1926,15 +1922,15 @@ void mos6510::dump_regs()
   if(cf())  sflags << "CF ";
 
   // MOSDBG("[VIC:%02x%02x%02x%02x%02x%02x] ",
-  //   RAM[0xd011],RAM[0xd012],
-  //   RAM[0xd016],RAM[0xd015],
-  //   RAM[0xd019],RAM[0xd01a]
+  //   mmu_->dma_read_ram(0xd011),dma_read_ram(0xd012),
+  //   mmu_->dma_read_ram(0xd016),dma_read_ram(0xd015),
+  //   mmu_->dma_read_ram(0xd019),dma_read_ram(0xd01a)
   // );
 
   // MOSDBG("[CIA1:%02x%02x%02x CIA2:%02x%02x%02x VIC:%02x%02x] ",
-  //   RAM[0xdc0d],RAM[0xdc0e],RAM[0xdc0f],
-  //   RAM[0xdd0d],RAM[0xdd0e],RAM[0xdd0f],
-  //   RAM[0xd019],RAM[0xd01a]
+  //   mmu_->dma_read_ram(0xdc0d),dma_read_ram(0xdc0e),dma_read_ram(0xdc0f),
+  //   mmu_->dma_read_ram(0xdd0d),dma_read_ram(0xdd0e),dma_read_ram(0xdd0f),
+  //   mmu_->dma_read_ram(0xd019),dma_read_ram(0xd01a)
   // );
   MOSDBG("[");
   cia1->dump_irqs();
@@ -1946,11 +1942,11 @@ void mos6510::dump_regs()
 
   MOSDBG("PC=%04x(%04x) M=%04X A=%02x X=%02x Y=%02x SP=%02x(%04x) [NV-BDIZC %d%d-%d%d%d%d%d] FL: %s\n",
     pc(), /* PC NOW */
-    (RAM[pc_address+1] | (RAM[pc_address+2] << 8)), /* MEM */
-    (RAM[d_address] | (RAM[d_address+1] << 8)),     /* RAM */
+    (mmu_->dma_read_ram(pc_address+1) | (mmu_->dma_read_ram(pc_address+2) << 8)), /* MEM */
+    (mmu_->dma_read_ram(d_address) | (mmu_->dma_read_ram(d_address+1) << 8)),     /* RAM */
     a(),x(),y(), /* A X Y */
     sp(), /* SP */
-    (RAM[pBaseAddrStack+sp()] | (RAM[(pBaseAddrStack+sp())+1] << 8)), /* SP VAL */
+    (mmu_->dma_read_ram(pBaseAddrStack+sp()) | (mmu_->dma_read_ram((pBaseAddrStack+sp())+1) << 8)), /* SP VAL */
     (flags()&SR_NEGATIVE)>>7,
     (flags()&SR_OVERFLOW)>>6,
     /* - */
@@ -1976,7 +1972,7 @@ void mos6510::dump_regs_insn(val_t insn)
     opcodenames[insn],
     pc_address, /* Opcode address */
     d_address,  /* Latest read/write address address */
-    RAM[d_address], /* READ/WRITE VALUE */
+    mmu_->dma_read_ram(d_address), /* READ/WRITE VALUE */
     (cycles()-prev_cycles));
   dump_regs();
   prev_cycles = cycles();
@@ -1996,7 +1992,7 @@ void mos6510::dump_regs_irq(uint_least8_t type, uint_least8_t source)
     interrupt_sources[source],
     pc_address, /* Opcode address */
     d_address,  /* Latest read/write address address */
-    RAM[d_address], /* READ/WRITE VALUE */
+    mmu_->dma_read_ram(d_address), /* READ/WRITE VALUE */
     7);
   dump_regs();
 }

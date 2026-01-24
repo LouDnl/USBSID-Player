@@ -84,6 +84,7 @@
 #define SET_CF(val) do { if (((val_t)(val)&0x100)!=0) { SETFLAG(SR_CARRY, 1) } else { SETFLAG(SR_CARRY, 0) } } while(0)
 
 
+class mmu;
 class mos6560_6561;
 class mos6526;
 
@@ -122,6 +123,7 @@ class mos6510
     std::array<InstructionHandler, 256> instruction_table;
   private: /* TODO: Group instructions by memory type */
     /* Glue */
+    mmu * mmu_;
     mos6560_6561 * vic;
     mos6526 * cia1;
     mos6526 * cia2;
@@ -265,10 +267,11 @@ class mos6510
     CPUCLOCK cia2_timb_nmi_callback = 0;
   public:
     mos6510(BusRead r, BusWrite w);
+    ~mos6510(void);
     void set_cycle_callback(ClockCycle c);
     void set_irq_nmi_callback(CPUCLOCK c, int src); /* ISSUE: Does _NOT_ work, do _NOT_ use */
 
-    void glue_c64(mos6560_6561 *_vic, mos6526 *_cia1, mos6526 *_cia2);
+    void glue_c64(mmu *_mmu, mos6560_6561 *_vic, mos6526 *_cia1, mos6526 *_cia2);
 
     /* Write / Read / Cycle callbacks */
     BusRead read_bus;

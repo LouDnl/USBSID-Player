@@ -33,6 +33,8 @@
 #ifndef _US_MMU_H_
 #define _US_MMU_H_
 
+#include <cstdint>
+
 class mos6510;
 class mos6526;
 class mos6560_6561;
@@ -45,8 +47,8 @@ class mos906114;
 class mmu
 {
   public:
-    mmu();
-    ~mmu(){};
+    mmu(void);
+    ~mmu(void);
 
     /* Debugging variables */
     bool log_instructions = false;
@@ -82,16 +84,14 @@ class mmu
     inline uint8_t rom_read_byte(uint16_t addr, char rom);
 
   public:
-    uint8_t * RAMptr;
-
     void glue_c64(mos6510 *_cpu, mos906114 *_pla, mos6560_6561 *_vic, mos6526 *_cia1, mos6526 *_cia2, mos6581_8580 *_sid);
 
     uint8_t vic_read_byte(uint16_t addr);
     uint8_t read_byte(uint16_t addr);
     void write_byte(uint16_t addr, uint8_t data);
 
-    uint8_t dma_read_ram(uint16_t addr) { return RAMptr[addr]; };
-    void dma_write_ram(uint16_t addr, uint8_t data) { RAMptr[addr] = data; };
+    uint8_t dma_read_ram(uint16_t addr);
+    void dma_write_ram(uint16_t addr, uint8_t data);
 
 };
 

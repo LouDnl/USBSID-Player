@@ -34,15 +34,14 @@
 
 #include <cstdint>
 
-
+class mmu;
 class mos6510;
-
-extern uint8_t RAM[];
 
 class mos906114
 {
   private:
     /* Glue */
+    mmu * mmu_;
     mos6510 * cpu;
 
     /* Memory banks */
@@ -57,7 +56,7 @@ class mos906114
     uint_least8_t generate_bank_setup(void);
 
   public:
-    mos906114();
+    mos906114(mmu * _mmu);
     ~mos906114(){};
 
     /** Bank Switching Zones

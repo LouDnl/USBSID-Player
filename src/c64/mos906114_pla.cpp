@@ -29,6 +29,7 @@
  *
  */
 
+#include <mmu.h>
 #include <mos6510_cpu.h>
 #include <mos906114_pla.h>
 #include <c64util.h>
@@ -40,14 +41,17 @@ extern bool log_pla;
  * @brief Construct a new mos906114::mos906114 object
  *
  */
-mos906114::mos906114()
+mos906114::mos906114(mmu * _mmu) :
+ mmu_(_mmu)
 {
   MOSDBG("[PLA] Init\n");
 
   default_bankmode = (kLORAM|kHIRAM|kCHARGEN|kGAME|kEXROM);
   setup_memory_banks(default_bankmode);
   /* configure data directional bits to default boot setting */
-  RAM[0x0001] = data_direction_default;
+  mmu_->dma_write_ram(0x0001, data_direction_default);
+  return;
+}
 }
 
 /**
@@ -69,7 +73,7 @@ void mos906114::reset(void)
 {
   setup_memory_banks(default_bankmode);
   /* configure data directional bits to default boot setting */
-  RAM[0x0001] = data_direction_default;
+  mmu_->dma_write_ram(0x0001, data_direction_default);
 }
 
 /**
@@ -279,7 +283,7 @@ void mos906114::switch_banks(uint8_t v)
       break;
     default:
       MOSDBG("[PLA] Unmapped bank switch mode from %02X to %02X %02X requested\n",
-        RAM[0x0001],
+        mmu_->dma_read_ram(0x0001),
         v, (v&0x1f));
       break;
   }
@@ -305,7 +309,7 @@ void mos906114::setup_memory_banks(uint8_t v)
   banks_at_runtime = banks_at_boot = v;
   switch_banks(banks_at_boot);
   /* write the raw value to the zero page (doesn't influence the cart bits) */
-  RAM[0x0001] = v;
+  mmu_->dma_write_ram(0x0001, v);
 }
 
 /**
@@ -338,8 +342,7 @@ void mos906114::runtime_bank_switching(uint8_t v)
   b &= (0x18|(v&0x7)); /* Preserve _cart bits_ and only set cpu latches */
   if (log_pla) printf("[PLA] Bank switch @ runtime from %02X to: %02X with %02X requested\n",banks_at_boot,b,v);
   switch_banks(b);
-  // if (c64_->havecart && ((v&0x18) != (banks_at_boot&0x18))) { /* Cart ROM switch requested */
   /* write the raw value to the zero page (doesn't influence the cart bits) */
-  RAM[0x0001] = v;
+  mmu_->dma_write_ram(0x0001, v);
   banks_at_runtime = v;
 }

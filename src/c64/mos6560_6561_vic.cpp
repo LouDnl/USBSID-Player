@@ -141,7 +141,6 @@ reg_t mos6560_6561::read_register(reg_t reg)
     case INTERRUPT: /* 0x19 */
       data = (0x0fu & irq_status);
       data |= (((data != 0) << 7) | 0x70u);
-      // RAM[0xd019] = data;
       return data;
     /**
      * interrupt enable register

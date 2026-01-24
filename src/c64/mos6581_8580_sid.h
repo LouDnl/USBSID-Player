@@ -34,10 +34,8 @@
 
 #include <types.h>
 
-
+class mmu;
 class mos6510;
-
-extern uint8_t RAM[];
 
 /**
  * @brief C64 Sound Interface Device
@@ -69,6 +67,7 @@ class mos6581_8580
 
   private:
     /* Glue */
+    mmu * mmu_;
     mos6510 * cpu;
 
     /* Clocks */
@@ -84,7 +83,7 @@ class mos6581_8580
     uint8_t krn = 0;
 
   public:
-    void glue_c64(mos6510 * _cpu);
+    void glue_c64(mmu * _mmu, mos6510 * _cpu);
 
     bool custom_sidaddr_check(uint16_t addr);
     inline uint8_t sidaddr_translation(uint16_t addr);

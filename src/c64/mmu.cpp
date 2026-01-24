@@ -41,24 +41,37 @@
 #include <mos906114_pla.h>
 #include <mmu.h>
 
+#if EMBEDDED
+#include <pico.h>
+#endif
 #include <basic.901226-01.h> /* basic_901226_01 */
 #include <characters.901225-01.h> /* characters_901225_01 */
 #include <kernal.901227-03.h> /* kernal_901227_03 */
 
 /* Create external accesible variable for C64 RAM initialized with zero values */
-uint8_t RAM[0x10000] = {0};
+uint8_t *RAM;
+#if EMBEDDED
+#include <pico.h>
+extern uint8_t __not_in_flash("c64_memory") c64memory[];
+#endif
 
 
 /**
  * @brief Construct a new mmu::mmu object
  *
  */
-mmu::mmu()
+mmu::mmu(void)
 {
   MOSDBG("[MMU] Init\n");
 
+#if DESKTOP
+  RAM = new uint8_t[0x10000];
+#elif EMBEDDED
+  RAM = c64memory;
+#endif
+
   /* Connect RAM pointer to RAM variable */
-  RAMptr = RAM;
+  memset(RAM,0,0x10000); /* Clear up that bitch */
 
   /* Set Data Direction bits defaults as per https://www.pagetable.com/c64ref/c64mem/ */
   RAM[pAddrDataDirection] = 0xef;
@@ -68,6 +81,19 @@ mmu::mmu()
   basic = basic_901226_01;
   chargen = characters_901225_01;
   kernal = kernal_901227_03;
+
+  return;
+}
+
+/**
+ * @brief Destroy the mmu::mmu object
+ *
+ */
+mmu::~mmu(void)
+{
+  MOSDBG("[MMU] Deinit\n");
+  memset(RAM,0,0x10000); /* Clear that bitch up */
+  return;
 }
 
 /**
@@ -412,4 +438,17 @@ void mmu::write_byte(uint16_t addr, uint8_t data)
   }
   /* Always write to RAM in all other cases */
   RAM[addr] = data;
+}
+
+uint8_t mmu::dma_read_ram(uint16_t addr)
+{
+  /* MOSDBG("[DMA  READ] $%04x:%02x\n", addr, RAM[addr]); */
+  return RAM[addr];
+}
+
+void mmu::dma_write_ram(uint16_t addr, uint8_t data)
+{
+  RAM[addr] = data;
+  /* MOSDBG("[DMA WRITE] $%04x:%02x(%02x)\n", addr, data, RAM[addr]); */
+  return;
 }

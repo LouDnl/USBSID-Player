@@ -42,7 +42,6 @@
 class mos6510;
 class mos6581_8580;
 
-extern uint8_t RAM[];
 
 /* MOS6560/6561 VIC-II */
 class mos6560_6561

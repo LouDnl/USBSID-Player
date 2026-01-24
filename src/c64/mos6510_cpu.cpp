@@ -73,6 +73,19 @@ mos6510::mos6510(BusRead r, BusWrite w)
 }
 
 /**
+ * @brief Glue required C64 modules
+ *
+ */
+void mos6510::glue_c64(mmu *_mmu, mos6560_6561 *_vic, mos6526 *_cia1, mos6526 *_cia2)
+{
+  mmu_ = _mmu;
+  vic  = _vic;
+  cia1 = _cia1;
+  cia2 = _cia2;
+  return;
+}
+
+/**
  * @brief Fill the CPU instruction table with opcodes
  *
  */
@@ -358,14 +371,18 @@ void mos6510::fill_instruction_table(void)
 }
 
 /**
- * @brief Glue required C64 modules
+ * @brief Execute an opcode by instruction number
  *
+ * @param opcode
  */
-void mos6510::glue_c64(mos6560_6561 *_vic, mos6526 *_cia1, mos6526 *_cia2)
-{
-  vic  = _vic;
-  cia1 = _cia1;
-  cia2 = _cia2;
+void mos6510::execute(uint8_t opcode) {
+  auto& handler = instruction_table[opcode];
+
+  if (handler) { /* Check if the std::function has a target */
+    handler();
+  } else { /* Handle unknown opcode (e.g., log an error or throw a custom exception) */
+    std::cerr << "Error: Unimplemented opcode " << (int)opcode << std::endl;
+  }
   return;
 }
 
@@ -416,8 +433,8 @@ bool mos6510::emulate(void)
   val_t insn = fetch_op();
   pb_crossed = false;
 
-  /* emulate instruction */
-  this->instruction_table[insn]();
+  /* execute instruction */
+  execute(insn);
 
   if (loginstructions) { dump_regs_insn(insn); }
 

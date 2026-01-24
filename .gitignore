@@ -11,6 +11,10 @@
 !usplayer.code-workspace
 !psiddrv.a65
 !Makefile
+!src/roms/6502_functional_test.h
+!src/roms/basic.901226-01.h
+!src/roms/characters.901225-01.h
+!src/roms/kernal.901227-03.h
 
 # File types to un-ignore
 !*.cpp
@@ -23,6 +27,5 @@
 !src/psid
 !src/psiddrv
 !src/util
-!src/roms
 !lib
 !lib/driver

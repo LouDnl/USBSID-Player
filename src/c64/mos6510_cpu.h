@@ -325,6 +325,8 @@ class mos6510
     void cycles(CPUCLOCK v){cycles_=v;};
     void tickle_me(cycle_t v);
   private:
+    bool initialized = false;
+    void fill_instruction_table(void);
     inline void tick_backup(cycle_t v);
     inline void tick(cycle_t v);
     inline void backtick(cycle_t v);

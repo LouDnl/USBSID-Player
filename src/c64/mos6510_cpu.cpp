@@ -63,8 +63,21 @@ mos6510::mos6510(BusRead r, BusWrite w)
 
   read_bus = (BusRead)r;
   write_bus = (BusWrite)w;
+  fill_instruction_table();
 
-  static bool initialized = false;
+  a_ = x_ = y_ = sp_ = 0x0;
+  _flags = 0b00110000;
+
+
+  return;
+}
+
+/**
+ * @brief Fill the CPU instruction table with opcodes
+ *
+ */
+void mos6510::fill_instruction_table(void)
+{
 	if (initialized) return;
 	initialized = true;
   { /* Fill instruction_table */
@@ -341,9 +354,6 @@ mos6510::mos6510(BusRead r, BusWrite w)
     instruction_table[0xFE] = [this]() { this->inc(this->addr_absx(), 7); };
     instruction_table[0xFF] = [this]() { this->isc(this->addr_absx(), 7); };
   }
-  a_ = x_ = y_ = sp_ = 0x0;
-  _flags = 0b00110000;
-
   return;
 }
 

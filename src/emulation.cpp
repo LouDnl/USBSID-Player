@@ -60,17 +60,45 @@
 #include <debugger.h>
 #endif
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnarrowing"
+
+/* USBSID variables */
 #if DESKTOP
 #include <USBSID.h>
-extern USBSID_NS::USBSID_Class* usbsid;
+USBSID_NS::USBSID_Class* usbsid;
+#elif EMBEDDED
+#include <config.h>
+extern "C" {
+// #include <sid.h>
+void reset_sid(void);
+int return_clockrate(void);
+void apply_clockrate(int n_clock, bool suspend_sids);
+extern Config usbsid_config;
+extern RuntimeCFG cfg;
+}
 #endif
-
+int pcbversion = -1;
+int fmoplsidno = -1;
+uint16_t sidone, sidtwo, sidthree, sidfour;
+int sidssockone = 0, sidssocktwo = 0;
+int sockonesidone = 0, sockonesidtwo = 0;
+int socktwosidone = 0, socktwosidtwo = 0;
+bool forcesockettwo = false; /* force play on socket two */
+int sidcount = 1;
+int sidno = 0;
 
 #define CIA1_ADDRESS 0xDC00
 #define CIA2_ADDRESS 0xDD00
 /* External player variables */
-extern volatile sig_atomic_t stop;
-extern uint8_t RAM[];
+#if DESKTOP
+volatile sig_atomic_t stop;
+#elif EMBEDDED
+volatile bool stop;
+volatile bool core2_init;
+extern void psid_shutdown(void);
+extern void hardwaresid_deinit(void);
+#endif
 
 /* C64 Variables */
 mos6510 *Cpu;
@@ -86,7 +114,6 @@ Debugger *r2;
 
 /* Emulation variables */
 bool enable_r2 = false;
-bool force_psiddrv = false;
 bool log_instructions = false;
 bool log_timers = false;
 bool log_pla = false;
@@ -98,6 +125,135 @@ bool log_cia1rw = false;
 bool log_cia2rw = false;
 bool log_sidrw = false;
 
+
+#if DESKTOP
+int setup_USBSID(void)
+{
+  usbsid = new USBSID_NS::USBSID_Class();
+
+  MOSDBG("[USBSID] Opening with buffer for cycle exact writing\n");
+  if (usbsid->USBSID_Init(true, true) < 0) {
+    MOSDBG("USBSID-Pico not found, exiting\n");
+    return 0;
+  }
+  /* Sleep 400ms for Reset to settle */
+  struct timespec tv = { .tv_sec = 0, .tv_nsec = (400 * 1000 * 1000) };
+  nanosleep(&tv, &tv);
+
+  return 1;
+}
+
+void clear_USBSID(void)
+{
+  if (usbsid) {
+    usbsid->USBSID_Mute();
+    usbsid->USBSID_ClearBus();
+    usbsid->USBSID_UnMute();
+  }
+  return;
+}
+#endif
+
+void getinfo_USBSID(int clockspeed)
+{
+#if DESKTOP
+  if(usbsid->USBSID_GetClockRate() != clockspeed) {
+    usbsid->USBSID_SetClockRate(clockspeed, true);
+  }
+
+  if(usbsid->USBSID_GetNumSIDs() < sidcount) {
+    MOSDBG("[WARNING] Tune no.sids %d is higher then USBSID-Pico no.sids %d\n", sidcount, usbsid->USBSID_GetNumSIDs());
+  }
+
+  uint8_t socket_config[10];
+  usbsid->USBSID_GetSocketConfig(socket_config);
+  MOSDBG("[USBSID] SOCKET CONFIG: ");
+  for (int i = 0; i < 10; i++) {
+    MOSDBG("%02X ", socket_config[i]);
+  }
+  MOSDBG("\n");
+
+  MOSDBG("[USBSID] SOCK1#.%d SID1:%d SID2:%d\n[USBSID] SOCK2#.%d SID1:%d SID2:%d\n",
+    usbsid->USBSID_GetSocketNumSIDS(1, socket_config),
+    usbsid->USBSID_GetSocketSIDType1(1, socket_config),
+    usbsid->USBSID_GetSocketSIDType2(1, socket_config),
+    usbsid->USBSID_GetSocketNumSIDS(2, socket_config),
+    usbsid->USBSID_GetSocketSIDType1(2, socket_config),
+    usbsid->USBSID_GetSocketSIDType2(2, socket_config)
+  );
+
+  sidssockone = usbsid->USBSID_GetSocketNumSIDS(1, socket_config);
+  sidssocktwo = usbsid->USBSID_GetSocketNumSIDS(2, socket_config);
+  sockonesidone = usbsid->USBSID_GetSocketSIDType1(1, socket_config);
+  sockonesidtwo = usbsid->USBSID_GetSocketSIDType2(1, socket_config);
+  socktwosidone = usbsid->USBSID_GetSocketSIDType1(2, socket_config);
+  socktwosidtwo = usbsid->USBSID_GetSocketSIDType2(2, socket_config);
+  fmoplsidno = usbsid->USBSID_GetFMOplSID();
+  pcbversion = usbsid->USBSID_GetPCBVersion();
+#elif EMBEDDED
+  int clockrates[] = { 1000000, 985248, 1022727, 1023440, 1022730 };
+  if(usbsid_config.clock_rate != clockspeed) {
+    for (uint i = 0; i < count_of(clockrates); i++) {
+      if (clockrates[i] == clockspeed) {
+        apply_clockrate(i, true);
+      }
+    }
+  }
+
+  if(cfg.numsids < sidcount) {
+    MOSDBG("[WARNING] Tune no.sids %d is higher then USBSID-Pico no.sids %d\n", sidcount, cfg.numsids);
+  }
+
+  MOSDBG("[USBSID] SOCK1#.%d SID1:%d SID2:%d\n[USBSID] SOCK2#.%d SID1:%d SID2:%d\n",
+    cfg.sids_one, usbsid_config.socketOne.sid1.type, usbsid_config.socketOne.sid2.type,
+    cfg.sids_two, usbsid_config.socketTwo.sid1.type, usbsid_config.socketTwo.sid2.type
+  );
+
+  sidssockone = cfg.sids_one;
+  sidssocktwo = cfg.sids_two;
+  sockonesidone = usbsid_config.socketOne.sid1.type;
+  sockonesidtwo = usbsid_config.socketOne.sid2.type;
+  socktwosidone = usbsid_config.socketTwo.sid1.type;
+  socktwosidtwo = usbsid_config.socketTwo.sid2.type;
+  fmoplsidno = cfg.fmopl_sid;
+#endif
+
+  return;
+}
+
+
+void hardwaresid_init(void)
+{
+  MOSDBG("[HARDWARESID] Init\n");
+#if DESKTOP
+  if (!setup_USBSID()) { usbsid = nullptr; }
+#elif EMBEDDED
+  reset_sid();
+#endif
+  return;
+}
+
+void hardwaresid_deinit(void)
+{
+  MOSDBG("[HARDWARESID] Deinit\n");
+#if DESKTOP
+  if (usbsid) {
+    usbsid->USBSID_Flush();
+    usbsid->USBSID_DisableThread();
+    usbsid->USBSID_Reset();
+    delete usbsid;
+  }
+#elif EMBEDDED
+  reset_sid();
+#endif
+
+  return;
+}
+
+/**
+ * @brief log the logs, talk the talks?
+ *
+ */
 void log_logs(void)
 { /* LOL :-) */
   MOSDBG("[ARGS] %d%d%d%d%d%d%d%d\n",
@@ -110,6 +266,52 @@ void log_logs(void)
     log_instructions,
     log_timers
   );
+}
+
+/**
+ * @brief Send keyboard command to emulator for next subtune
+ *
+ */
+void emu_next_subtune(void)
+{
+  Cia1->write_prab_bits(col_bit_plus,row_bit_plus,true);
+  // Cia1->write_prab_bits(col_bit_plus,row_bit_plus,false);
+  return;
+}
+
+/**
+ * @brief Send keyboard command to emulator for previous subtune
+ *
+ */
+void emu_previous_subtune(void)
+{
+  Cia1->write_prab_bits(col_bit_minus,row_bit_minus,true);
+  // Cia1->write_prab_bits(col_bit_minus,row_bit_minus,false);
+  return;
+}
+
+/**
+ * @brief Wrapper around MMU->dma_read_ram()
+ *
+ * @param address
+ * @return uint8_t
+ */
+uint8_t emu_dma_read_ram(uint16_t address)
+{
+  return MMU->dma_read_ram(address);
+}
+
+/**
+ * @brief Wrapper around MMU->dma_write_ram()
+ *
+ * @param address
+ * @param data
+ * @return uint8_t
+ */
+void emu_dma_write_ram(uint16_t address, uint8_t data)
+{
+  MMU->dma_write_ram(address,data);
+  return ;
 }
 
 /**
@@ -146,29 +348,25 @@ uint8_t emu_vic_read_byte(uint16_t address)
   return MMU->vic_read_byte(address);
 }
 
-/* Emulator init / de-init */
+/**
+ * @brief Emulator init
+ *
+ */
 void emu_init(void)
 {
   MOSDBG("[C64] Init\n");
-  Cpu = new mos6510(emu_read_byte, emu_write_byte);
-  MOSDBG("[CPU] created\n");
-  Pla = new mos906114();
-  MOSDBG("[PLA] created\n");
-  Vic = new mos6560_6561();
-  MOSDBG("[VIC] created\n");
-  Cia1 = new mos6526(CIA1_ADDRESS);
-  MOSDBG("[CIA] 1 created\n");
-  Cia2 = new mos6526(CIA2_ADDRESS);
-  MOSDBG("[CIA] 2 created\n");
-  SID = new mos6581_8580();
-  MOSDBG("[SID] created\n");
   MMU = new mmu();
-  MOSDBG("[MMU] created\n");
+  Cpu = new mos6510(emu_read_byte, emu_write_byte);
+  Pla = new mos906114(MMU);
+  Vic = new mos6560_6561();
+  Cia1 = new mos6526(CIA1_ADDRESS);
+  Cia2 = new mos6526(CIA2_ADDRESS);
+  SID = new mos6581_8580();
   Cia1->glue_c64(Cpu);
   Cia2->glue_c64(Cpu);
   Vic->glue_c64(emu_vic_read_byte,Cpu,SID);
   Pla->glue_c64(Cpu);
-  Cpu->glue_c64(Vic,Cia1,Cia2);
+  Cpu->glue_c64(MMU,Vic,Cia1,Cia2);
   MMU->glue_c64(Cpu,Pla,Vic,Cia1,Cia2,SID);
   MOSDBG("[C64] glued\n");
 
@@ -191,21 +389,31 @@ void emu_init(void)
     r2->glue_c64(Cpu,MMU);
   }
   #endif
-
   return;
 }
 
+/**
+ * @brief Emulator deinit
+ *
+ */
 void emu_deinit(void)
 {
   MOSDBG("[C64] Deinit\n");
-  if (MMU) delete MMU;
-  if (SID) delete SID;
-  if (Pla) delete Pla;
-  if (Cia1) delete Cia1;
-  if (Cia2) delete Cia2;
-  if (Vic) delete Vic;
+  stop = true; /* Make sure we're stopped if not already */
+  delete SID;
+  delete Pla;
+  delete Cia1;
+  delete Cia2;
+  delete Vic;
   delete Cpu;
-
+  delete MMU;
+  SID = nullptr;
+  Pla = nullptr;
+  Cia1 = nullptr;
+  Cia2 = nullptr;
+  Vic = nullptr;
+  Cpu = nullptr;
+  MMU = nullptr;
   return;
 }
 
@@ -259,7 +467,9 @@ void emulate_c64(void)
 {
   log_logs();
   while (!stop) {
+#if DESKTOP && DEBUGGER_SUPPORT
     if (enable_r2) { r2->emulate(); }
+#endif
     Vic->emulate();
     Cia1->emulate();
     Cia2->emulate();
@@ -287,7 +497,9 @@ void start_c64_test(void) /* Finishes successfully */
   emu_write_byte(pAddrMemoryLayout, 0);
   /* load tests into RAM */
   #include <6502_functional_test.h>
-  memcpy(RAM+startaddr,functional_6502_test,count_of(functional_6502_test));
+  for(int i = startaddr; i < count_of(functional_6502_test); i++) {
+    emu_dma_write_ram(i,functional_6502_test[(i-startaddr)]);
+  }
   Cpu->pc(0x400); /* Fix address at $400 for binary test*/
 
   emulate_c64_upto(0x3463);
@@ -296,3 +508,5 @@ void start_c64_test(void) /* Finishes successfully */
   MOSDBG("Test exiting\n");
   exit(1);
 }
+
+#pragma GCC diagnostic pop

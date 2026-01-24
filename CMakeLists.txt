@@ -111,8 +111,10 @@ endif (DESKTOP)
 
 ### Source files to compile
 set(SOURCEFILES
-  ${CMAKE_CURRENT_LIST_DIR}/src/main.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/usplayer.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/src/vsidpsid.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/src/microsid.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/src/prgrunner.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/emulation.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/c64/mos6510_cpu.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/c64/mos6526_cia.cpp

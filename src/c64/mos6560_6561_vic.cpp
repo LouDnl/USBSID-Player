@@ -328,7 +328,6 @@ void mos6560_6561::emulate(void)
     }
 
     ++current_raster_row_;
-    // vsync_do_end_of_line();
 
     if _MOS_UNLIKELY (current_raster_row_ >= raster_lines) {
       current_raster_row_ = 0;

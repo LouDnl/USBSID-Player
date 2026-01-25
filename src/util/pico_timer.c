@@ -1,4 +1,4 @@
-/*
+/**
  * USBSID-Player aims to be a command line SID file player that is also
  * suited for embedding where both implementations target use
  * with USBSID-Pico. USBSID-Pico is a RPi Pico/PicoW (RP2040) &
@@ -6,11 +6,18 @@
  * MOS SID chips and/or hardware SID emulators over (WEB)USB with
  * your computer, phone or ASID supporting player
  *
- * emulation.h
- * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
- * File author: LouD
+ * Parts if this emulator are based on other great emulators and players
+ * like Vice, SidplayFp, Websid, SidBerry and emudore/adorable
  *
- * Copyright (c) 2025-2026 LouD
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
+ *
+ * @file pico_timer.c
+ * @author LouD (usbsid-player@loudai.nl)
+ * @brief This file contains wrappers around rp2040/rp2350 SDK functions
+ * @version 0.1
+ * @date 2026-01-24
+ *
+ * @copyright Copyright (c) 2026
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -26,10 +33,37 @@
  *
  */
 
-#pragma once
-#ifndef _US_EMULATION_H_
-#define _US_EMULATION_H_
+#ifdef __cplusplus
+ extern "C" {
+#endif
 
-#include <types.h>
+#if EMBEDDED
 
-#endif /* _US_EMULATION_H_ */
+#include <pico.h>
+#include <pico/types.h>
+#include <pico/time.h>
+#include <hardware/structs/sio.h>
+#include <hardware/structs/systick.h>
+
+uint64_t pico_us_since_boot(void)
+{
+  return to_us_since_boot(get_absolute_time());
+}
+
+uint64_t pico_ns_since_boot(void)
+{
+  return (to_us_since_boot(get_absolute_time()) * 1000);
+}
+
+void sleep_ms_emu(uint32_t ms)
+{
+  sleep_ms(ms); /* Allow for player to stop */
+  return;
+}
+
+#endif /* EMBEDDED */
+
+
+#ifdef __cplusplus
+ }
+#endif

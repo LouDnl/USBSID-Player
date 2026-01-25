@@ -122,7 +122,8 @@ set(SOURCEFILES
   ${CMAKE_CURRENT_LIST_DIR}/src/c64/mos6581_8580_sid.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/c64/mos906114_pla.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/c64/mmu.cpp
-  ${CMAKE_CURRENT_LIST_DIR}/src/c64/timer.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/src/util/timer.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/src/util/wrappers.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/psid/sidfile.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/psiddrv/psid.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/psiddrv/reloc65.c

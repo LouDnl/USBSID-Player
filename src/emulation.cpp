@@ -69,6 +69,7 @@ USBSID_NS::USBSID_Class* usbsid;
 #include <config.h>
 extern "C" {
 void reset_sid(void);
+void reset_sid_registers(void);
 int return_clockrate(void);
 void apply_clockrate(int n_clock, bool suspend_sids);
 extern Config usbsid_config;
@@ -220,7 +221,8 @@ void hardwaresid_init(void)
 #if DESKTOP
   if (!setup_USBSID()) { usbsid = nullptr; }
 #elif EMBEDDED
-  reset_sid();
+  /* reset_sid(); */
+  reset_sid_registers();
 #endif
   return;
 }
@@ -236,7 +238,8 @@ void hardwaresid_deinit(void)
     delete usbsid;
   }
 #elif EMBEDDED
-  reset_sid();
+  /* reset_sid(); */
+  reset_sid_registers();
 #endif
 
   return;

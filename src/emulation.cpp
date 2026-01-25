@@ -98,6 +98,7 @@ volatile sig_atomic_t vsidpsid;
 volatile bool stop;
 volatile bool playing;
 volatile bool paused;
+volatile bool vsidpsid;
 #endif
 
 /* C64 Variables */

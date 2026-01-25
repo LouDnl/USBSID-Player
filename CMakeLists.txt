@@ -63,9 +63,20 @@ set(COMPILE_OPTS PRIVATE
   -Wno-maybe-uninitialized
   -save-temps
   -fverbose-asm
-  -DDESKTOP=${DESKTOP}
-  -DEMBEDDED=${EMBEDDED}
 )
+
+if (DESKTOP)
+
+endif (DESKTOP)
+set(COMPILE_OPTS ${COMPILE_OPTS}
+  -DDESKTOP=${DESKTOP}
+  )
+if (EMBEDDED)
+  set(COMPILE_OPTS ${COMPILE_OPTS}
+  -DEMBEDDED=${EMBEDDED}
+  )
+  add_compile_definitions(ONBOARD_SIDPLAYER=1)
+endif (EMBEDDED)
 
 # Windows additionals
 # if (WIN32)
@@ -139,12 +150,17 @@ set(TARGET_INCLUDE_DIRS PRIVATE
   ${CMAKE_CURRENT_LIST_DIR}/src/roms
   ${CMAKE_CURRENT_LIST_DIR}/src/psid
   ${CMAKE_CURRENT_LIST_DIR}/src/psiddrv
-  # ${WIN32_INC}
-  /usr/local/lib
-  /usr/local/include
-  /usr/lib
-  /usr/include
 )
+
+if (DESKTOP)
+  set(TARGET_INCLUDE_DIRS ${TARGET_INCLUDE_DIRS}
+    # ${WIN32_INC}
+    /usr/local/lib
+    /usr/local/include
+    /usr/lib
+    /usr/include
+)
+endif (DESKTOP)
 
 add_custom_command(
   # OUTPUT psiddrv.h psidextdrv.h
@@ -182,8 +198,8 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE UNIX_COMPILE)
 endif (UNIX)
 
 # if (WIN32)
-# target_compile_definitions(${PROJECT_NAME} PRIVATE TERMIWIN_DONOTREDEFINE=1)
 # target_compile_definitions(${PROJECT_NAME} PRIVATE WINDOWS_COMPILE)
+# target_compile_definitions(${PROJECT_NAME} PRIVATE TERMIWIN_DONOTREDEFINE=1)
 # endif (WIN32)
 
 target_include_directories(${PROJECT_NAME} ${TARGET_INCLUDE_DIRS})

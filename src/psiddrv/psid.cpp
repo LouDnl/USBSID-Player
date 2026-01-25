@@ -59,7 +59,9 @@ extern "C" int reloc65(char** buf, int* fsize, int addr);
 
 bool is_pal = true;
 int numsids = 1;
-int sid2loc = 0xd000,  sid3loc = 0xd000;
+int sid2loc = 0xd000, sid3loc = 0xd000;
+static uint16_t reloc_addr_ext;
+static uint16_t max_songs;
 
 typedef struct psid_s {
   /* PSID data */
@@ -376,7 +378,8 @@ void psid_init_tune(int install_driver_hook)
 
   psid->frames_played = 0;
 
-  reloc_addr = psid->start_page << 8;
+  reloc_addr_ext = reloc_addr = psid->start_page << 8;
+  max_songs = psid->songs;
 
   MOSDBG("[PSID] Driver=$%04X, Image=$%04X-$%04X, Init=$%04X, Play=$%04X\n",
     reloc_addr, psid->load_addr,
@@ -533,7 +536,8 @@ void psid_init_driver(void)
   }
 
   /* Relocation of C64 PSID driver code. */
-  reloc_addr = psid->start_page << 8;
+  reloc_addr_ext = reloc_addr = psid->start_page << 8;
+  max_songs = psid->songs;
   psid_size = sizeof(psid_driver);
   MOSDBG("[PSID] PSID free pages: $%04x-$%04x\n",
     reloc_addr, (reloc_addr + (psid->max_pages << 8)) - 1U);
@@ -582,4 +586,14 @@ void psid_init_driver(void)
   emu_dma_write_ram(addr++, (uint8_t)((int)sync == MACHINE_SYNC_PAL ? 1 : 0));
   emu_dma_write_ram(addr++, (uint8_t)(psid->load_last_addr & 0xff));
   emu_dma_write_ram(addr++, (uint8_t)(psid->load_last_addr >> 8));
+}
+
+uint16_t return_reloc_addr(void)
+{
+  return reloc_addr_ext;
+}
+
+uint16_t return_max_songs(void)
+{
+  return max_songs;
 }

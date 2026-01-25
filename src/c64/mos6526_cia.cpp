@@ -553,19 +553,22 @@ void mos6526::write_prab_bits(uint8_t a, uint8_t b, bool state)
   uint8_t mask;
   if (state) { /* ON */
     /* Set bus */
-    _pra |= (1<<a);        /* PRA ~ COL */
-    _prb |= (1<<b);        /* PRB ~ ROW */
+    _pra &= ~(1<<a);       /* PRA ~ COL */
+    _prb &= ~(1<<b);       /* PRB ~ ROW */
     /* Set keyboard matrix */
-    mask = ~(1 << b);      /* PRB is mask */
+    mask = ~(1 << b);      /* PRB is inverted mask */
     _kb_matrix[a] &= mask; /* PRA */
   } else { /* OFF */
     /* Set bus */
-    _pra &= ~(1<<b);       /* PRA ~ COL */
-    _prb &= ~(1<<b);       /* PRB ~ ROW */
+    _pra |= (1<<a);        /* PRA ~ COL */
+    _prb |= (1<<b);        /* PRB ~ ROW */
     /* Set keyboard matrix */
-    mask = (1 << b);       /* PRB is mask */
+    mask = (1 << b);       /* PRB is inverted mask */
     _kb_matrix[a] |= mask; /* PRA */
   }
+  /* MOSDBG("[CIA1] Keypress %s row %d col %d, pra %2x prb %2x mask %2x\n",
+    (state?"On":"Off"),a,b,_pra,_prb,mask
+  ); */
   return;
 }
 

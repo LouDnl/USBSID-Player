@@ -32,10 +32,13 @@
 #include <cstring>
 #include <cstdint>
 
+#include <signal.h>
 #include <sys/time.h>
 #include <stdio.h>
 
 #include <c64util.h>
+#include <wrappers.h>
+
 #include <mos6510_cpu.h>
 #include <mos6560_6561_vic.h>
 #include <mos6581_8580_sid.h>
@@ -46,6 +49,8 @@ extern void log_logs(void);
 extern void getinfo_USBSID(int clockspeed);
 extern uint8_t emu_read_byte(uint16_t addr);
 extern void emu_write_byte(uint16_t addr, uint8_t data);
+extern uint8_t emu_dma_read_ram(uint16_t address);
+extern void emu_dma_write_ram(uint16_t address, uint8_t data);
 extern void emulate_c64(void);
 
 /* External emulator variables */
@@ -61,6 +66,11 @@ extern bool
   log_cia2rw,
   log_vicrw,
   log_vicrrw;
+#if DESKTOP
+extern volatile sig_atomic_t paused;
+#elif EMBEDDED
+extern volatile bool paused;
+#endif
 
 /* external USBSID variables */
 #if DESKTOP
@@ -76,12 +86,16 @@ extern bool forcesockettwo;
 extern int sidcount;
 extern int sidno;
 
+/* PSIDDRV64 externals */
+extern uint16_t return_reloc_addr(void);
+extern uint16_t return_max_songs(void);
+
 /* VSID PSID variables */
 extern int numsids, sid2loc, sid3loc;
 
 
 /**
- * @brief Start VSID PSID player
+ * @brief Start VSID PSID player, has no input for next/previous tune etc.
  *
  * @param is_pal
  */
@@ -195,4 +209,43 @@ void start_vsid_player(bool is_pal)
   MOSDBG("[emulate_c64]\n");
   emulate_c64();
 
+}
+
+/**
+ * @brief Select next or previous tune for VSIDPSID playing tunes
+ * The psiddrv64 included in Vice that is used for VSID does not have
+ * a keyboard handling routine. This function pauses the emulator,
+ * then sets a new subtune, resets the emulator flags and jumps
+ * back to the starting address by setting it to the program counter
+ *
+ * @note This does not work for all tunes unfortunately
+ *
+ * @param next
+ */
+void next_prev_tune(bool next)
+{
+  /* Set paused variable */
+  paused = true;
+  /* Sleep a single frame to allow the emulator to finish before pausing */
+  emu_sleep_us((uint64_t)Vic->refresh_rate);
+
+  uint16_t max_songs = return_max_songs();
+  uint16_t reloc_addr = return_reloc_addr();
+  // uint16_t addr = reloc_addr + 3 + 9 + 9; /* Skip JMP and CM80 reset vector */
+  uint16_t addr = reloc_addr + 9; /* Skip JMP and CM80 reset vector */
+  int current_song = emu_dma_read_ram(addr);
+  int next_song = (next ? (current_song+1) : (current_song-1));
+  next_song = ((next_song > max_songs) ? 1 : (next_song < 1) ? max_songs : next_song);
+  MOSDBG("[USPLAYER] Next tune requested %d of %d\n", next_song, max_songs);
+  emu_dma_write_ram(addr, (uint8_t)(next_song));
+  /* put song number into address 780/1/2 (A/X/Y) for use by BASIC tunes */
+  emu_dma_write_ram(780, (uint8_t)((next_song) - 1));
+  emu_dma_write_ram(781, (uint8_t)((next_song) - 1));
+  emu_dma_write_ram(782, (uint8_t)((next_song) - 1));
+  MOSDBG("[USPLAYER] reloc_addr: $%04x\n",reloc_addr);
+  Cpu->hot_reset();
+  Cpu->pc(addr);
+  /* Set paused variable */
+  paused = false;
+  return;
 }

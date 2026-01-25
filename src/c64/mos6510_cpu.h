@@ -339,6 +339,7 @@ class mos6510
     inline void handle_interrupts(void);
 
   public:
+    void hot_reset(void){ _flags = 0b00110000;a_ = x_ = y_ = 0; sp_ = 0xFD; };
     void nmi_(val_t source);
     void irq_(val_t source);
     void nmi(val_t source);

@@ -39,7 +39,6 @@
 #include <chrono>
 #include <thread>
 
-#include <sys/time.h>
 #include <signal.h>
 
 #include <constants.h>
@@ -52,9 +51,8 @@
 #include <mmu.h>
 
 #include <sidfile.h>
-
 #include <c64util.h>
-#include <emulation.h>
+#include <wrappers.h>
 
 #if DESKTOP && DEBUGGER_SUPPORT
 #include <debugger.h>
@@ -70,7 +68,6 @@ USBSID_NS::USBSID_Class* usbsid;
 #elif EMBEDDED
 #include <config.h>
 extern "C" {
-// #include <sid.h>
 void reset_sid(void);
 int return_clockrate(void);
 void apply_clockrate(int n_clock, bool suspend_sids);
@@ -90,14 +87,16 @@ int sidno = 0;
 
 #define CIA1_ADDRESS 0xDC00
 #define CIA2_ADDRESS 0xDD00
-/* External player variables */
+/* Emulation variables */
 #if DESKTOP
 volatile sig_atomic_t stop;
+volatile sig_atomic_t playing;
+volatile sig_atomic_t paused;
+volatile sig_atomic_t vsidpsid;
 #elif EMBEDDED
 volatile bool stop;
-volatile bool core2_init;
-extern void psid_shutdown(void);
-extern void hardwaresid_deinit(void);
+volatile bool playing;
+volatile bool paused;
 #endif
 
 /* C64 Variables */
@@ -113,7 +112,7 @@ Debugger *r2;
 #endif
 
 /* Emulation variables */
-bool enable_r2 = false;
+bool threaded = true;
 bool log_instructions = false;
 bool log_timers = false;
 bool log_pla = false;
@@ -124,6 +123,9 @@ bool log_vicrrw = false;
 bool log_cia1rw = false;
 bool log_cia2rw = false;
 bool log_sidrw = false;
+
+/* VSIDPSID external functions */
+extern void next_prev_tune(bool next);
 
 
 #if DESKTOP
@@ -230,7 +232,7 @@ void hardwaresid_deinit(void)
   if (usbsid) {
     usbsid->USBSID_Flush();
     usbsid->USBSID_DisableThread();
-    usbsid->USBSID_Reset();
+    usbsid->USBSID_ResetAllRegisters();
     delete usbsid;
   }
 #elif EMBEDDED
@@ -259,13 +261,37 @@ void log_logs(void)
 }
 
 /**
+ * @brief Send keyboard command to emulator for pause
+ */
+void emu_pause_playing(bool pause)
+{
+  if (vsidpsid) {
+    paused = pause;
+#if DESKTOP
+    if (paused) usbsid->USBSID_Mute();
+    else usbsid->USBSID_UnMute();
+#endif
+  } else {
+    Cia1->write_prab_bits(row_bit_runstop,col_bit_runstop,true);
+    emu_sleep_us((uint64_t)Vic->refresh_rate);
+    Cia1->write_prab_bits(row_bit_runstop,col_bit_runstop,false);
+  }
+  return;
+}
+
+/**
  * @brief Send keyboard command to emulator for next subtune
  *
  */
 void emu_next_subtune(void)
 {
-  Cia1->write_prab_bits(col_bit_plus,row_bit_plus,true);
-  // Cia1->write_prab_bits(col_bit_plus,row_bit_plus,false);
+  if (vsidpsid) {
+    next_prev_tune(true);
+  } else {
+    Cia1->write_prab_bits(row_bit_plus,col_bit_plus,true);
+    emu_sleep_us((uint64_t)Vic->refresh_rate);
+    Cia1->write_prab_bits(row_bit_plus,col_bit_plus,false);
+  }
   return;
 }
 
@@ -275,8 +301,13 @@ void emu_next_subtune(void)
  */
 void emu_previous_subtune(void)
 {
-  Cia1->write_prab_bits(col_bit_minus,row_bit_minus,true);
-  // Cia1->write_prab_bits(col_bit_minus,row_bit_minus,false);
+  if (vsidpsid) {
+    next_prev_tune(false);
+  } else {
+    Cia1->write_prab_bits(row_bit_minus,col_bit_minus,true);
+    emu_sleep_us((uint64_t)Vic->refresh_rate);
+    Cia1->write_prab_bits(row_bit_minus,col_bit_minus,false);
+  }
   return;
 }
 
@@ -379,6 +410,8 @@ void emu_init(void)
     r2->glue_c64(Cpu,MMU);
   }
   #endif
+
+  playing = true;
   return;
 }
 
@@ -457,9 +490,7 @@ void emulate_c64(void)
 {
   log_logs();
   while (!stop) {
-#if DESKTOP && DEBUGGER_SUPPORT
-    if (enable_r2) { r2->emulate(); }
-#endif
+    while (paused){}
     Vic->emulate();
     Cia1->emulate();
     Cia2->emulate();
@@ -471,7 +502,6 @@ void emulate_c64(void)
       MOSDBG("\n");
     }
   }
-
   return;
 }
 

@@ -75,7 +75,6 @@ extern void readfile(const char * filename);
 /* VSID Pmos6581_8580 */
 extern int psid_load_file(const char* filename, int subtune);
 #elif EMBEDDED
-extern "C" void sleep_ms_emu(uint32_t ms);
 extern int psid_load_file(uint8_t * binary_, size_t binsize_, int subtune);
 extern void run_prg(uint8_t * binary_, size_t binsize_);
 #endif
@@ -430,7 +429,7 @@ extern "C" void start_sidplayer(bool loop)
   start_vsid_player(is_pal, loop);
   /* Intermission, thread will halt here until stopped */
   if (loop && stop) { /* If looping the thread comes back here so we need to stop the emulator here */
-    sleep_ms_emu(100); /* Allow for player to stop */
+    emu_sleep_ms(100); /* Allow for player to stop */
     deinit();
   }
 

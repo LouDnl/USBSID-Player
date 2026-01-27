@@ -38,16 +38,31 @@
 
 
 /**
- * @brief
+ * @brief Wrapper around sleeping for microseconds ;-) ZZZzzz...
  *
  * @param sleep_time_us
  */
-void emu_sleep_us(uint64_t sleep_time_us)
+void emu_sleep_us(uint64_t us)
 {
 #if DESKTOP
-  usleep(sleep_time_us);
+  usleep(us);
 #elif EMBEDDED
-  sleep_us(sleep_time_us);
+  sleep_us(us);
+#endif
+  return;
+}
+
+/**
+ * @brief Wrapper around sleeping for milliseconds ;-) ZZZzzz...
+ *
+ * @param sleep_time_us
+ */
+void emu_sleep_ms(uint32_t ms)
+{
+#if DESKTOP
+  usleep((ms * 1000));
+#elif EMBEDDED
+  sleep_ms(ms); /* Allow for player to stop */
 #endif
   return;
 }

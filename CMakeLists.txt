@@ -10,7 +10,7 @@
 # This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
 # File author: LouD
 #
-# Copyright (c) 2025 LouD
+# Copyright (c) 2025 ~ 2026 LouD
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by

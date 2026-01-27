@@ -44,7 +44,8 @@
 #include <pico/time.h>
 #endif
 
-void emu_sleep_us(uint64_t sleep_time_us);
+void emu_sleep_us(uint64_t us);
+void emu_sleep_ms(uint32_t ms);
 
 
 #endif /* _US_WRAPPERS_H */

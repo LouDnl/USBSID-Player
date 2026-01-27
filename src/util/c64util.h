@@ -41,6 +41,8 @@
 
 #if DESKTOP
 #define __in_flash(name)
+#define __not_in_flash_func(func) func
+#define __us_not_in_flash_func
 #endif
 
 #if DESKTOP

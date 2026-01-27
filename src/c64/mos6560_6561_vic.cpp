@@ -318,10 +318,7 @@ void __us_not_in_flash_func mos6560_6561::emulate(void)
       cpu->cycles(cpu->cycles()+23);
     }
 
-    // uint_fast16_t raster_row = (((control_register_one & RASTERROWMSB) << 1u) + raster_row_lines);
     uint_fast16_t current_raster_row_ = raster_row();
-
-    // ++raster_row;
 
     if _MOS_UNLIKELY ((irq_enabled & RASTERROW_MATCH_IRQ) &&
       (current_raster_row_ == raster_irq)) {

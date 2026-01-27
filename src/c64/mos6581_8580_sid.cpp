@@ -188,8 +188,6 @@ void __us_not_in_flash_func mos6581_8580::sid_flush(void)
     cycles -= 0xFFFF;
   }
   /* Delay for any remaining cycles is not nescessary anymore */
-#endif
-
   sid_main_clk = flush_main_clk = now;
   r_cyclecount = w_cyclecount = 0;
   return;

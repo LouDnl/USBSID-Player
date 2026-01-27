@@ -44,6 +44,7 @@
 #include <USBSID.h>
 extern USBSID_NS::USBSID_Class* usbsid;
 #elif EMBEDDED
+extern "C" uint8_t cycled_read_operation(uint8_t address, uint16_t cycles);
 extern "C" void cycled_write_operation(uint8_t address, uint8_t data, uint16_t cycles);
 #endif
 
@@ -229,6 +230,9 @@ uint8_t __us_not_in_flash_func mos6581_8580::read_sid(uint16_t addr)
   uint8_t phyaddr = (sidaddr_translation(addr) & 0xFF);  /* 4 SIDs max */
   uint_fast16_t cycles = sid_delay();
   if (phyaddr == 0xFE) data = mmu_->dma_read_ram(addr);
+#if EMBEDDED
+  else cycled_read_operation(phyaddr,cycles);
+#endif
   if (log_sidrw) {
     MOSDBG("[R SID%d] $%04x $%02x:%02x [C]%5u\n",
       sidno,addr,phyaddr,data,cycles);

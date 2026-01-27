@@ -82,6 +82,17 @@ mos6510::~mos6510()
   initialized = false;
   instruction_table.fill(InstructionHandler{});
 
+  /* Variables to default state */
+  cycles_ = 0;
+  prev_cycles_ = 0;
+  loginstructions = false;
+  pending_interrupt = false;
+  irq_pending = false;
+  nmi_pending = false;
+  last_insn = 0;
+  pc_address = 0;
+  d_address = 0;
+
   return;
 }
 

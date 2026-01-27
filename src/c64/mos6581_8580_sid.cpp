@@ -187,11 +187,7 @@ void __us_not_in_flash_func mos6581_8580::sid_flush(void)
   while(cycles > 0xFFFF) {
     cycles -= 0xFFFF;
   }
-#if DESKTOP
-  /* Delay for any remaining cycles */
-  if (usbsid) {
-    usbsid->USBSID_WaitForCycle(cycles);
-  }
+  /* Delay for any remaining cycles is not nescessary anymore */
 #endif
 
   sid_main_clk = flush_main_clk = now;
@@ -231,7 +227,9 @@ uint8_t __us_not_in_flash_func mos6581_8580::read_sid(uint16_t addr)
   uint_fast16_t cycles = sid_delay();
   if (phyaddr == 0xFE) data = mmu_->dma_read_ram(addr);
 #if EMBEDDED
-  else cycled_read_operation(phyaddr,cycles);
+  // else cycled_read_operation(phyaddr,cycles);
+  /* No cycles when embedding, not needed */
+  else cycled_read_operation(phyaddr,0);
 #endif
   if (log_sidrw) {
     MOSDBG("[R SID%d] $%04x $%02x:%02x [C]%5u\n",
@@ -253,12 +251,16 @@ void __us_not_in_flash_func mos6581_8580::write_sid(uint16_t addr, uint8_t data)
   uint_fast16_t cycles = sid_delay();
 #if DESKTOP
   if (usbsid && (phyaddr != 0xFE)) {
-    usbsid->USBSID_WaitForCycle(cycles);
+    /* Delays are essentially not nescessary
+       with current vsync implementation */
+    // usbsid->USBSID_WaitForCycle(cycles);
     usbsid->USBSID_WriteRingCycled(phyaddr, data, cycles);
   }
 #elif EMBEDDED
   if (phyaddr != 0xFE) {
-    cycled_write_operation(phyaddr, data, cycles);
+    // cycled_write_operation(phyaddr, data, cycles);
+    /* No cycles when embedding, not needed */
+    cycled_write_operation(phyaddr, data, 0);
   }
 #endif
   mmu_->dma_write_ram(addr, data); /* Always write to RAM as mirror */

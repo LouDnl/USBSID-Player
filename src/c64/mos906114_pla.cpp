@@ -67,7 +67,7 @@ mos906114::~mos906114(void)
  * @brief Glue required C64 parts
  *
  */
-void mos906114::glue_c64(mos6510 * _cpu)
+void __us_not_in_flash_func mos906114::glue_c64(mos6510 * _cpu)
 {
   cpu = _cpu;
 
@@ -78,7 +78,7 @@ void mos906114::glue_c64(mos6510 * _cpu)
  * @brief
  *
  */
-void mos906114::reset(void)
+void __us_not_in_flash_func mos906114::reset(void)
 {
   setup_memory_banks(default_bankmode);
   /* configure data directional bits to default boot setting */
@@ -118,7 +118,7 @@ void mos906114::reset(void)
  * [1,-1,3,-1,-1,2,4]
  *
  */
-void mos906114::switch_banks(uint8_t v)
+void __us_not_in_flash_func mos906114::switch_banks(uint8_t v)
 {
   /* Setup bank mode on boot */
   switch ((v&0x1F)) { /* Masked to check only available bits */
@@ -308,7 +308,7 @@ void mos906114::switch_banks(uint8_t v)
  * in count three bits : HIRAM/LORAM/CHAREN
  *
  */
-void mos906114::setup_memory_banks(uint8_t v)
+void __us_not_in_flash_func mos906114::setup_memory_banks(uint8_t v)
 {
   /* start with mode 0 and set everything to ram */
   for(size_t i=0 ; i < sizeof(banks_) ; i++) {
@@ -325,7 +325,7 @@ void mos906114::setup_memory_banks(uint8_t v)
  * @brief generates a banksetup byte from the banks_[] variable
  *
  */
-uint_least8_t mos906114::generate_bank_setup(void)
+uint_least8_t __us_not_in_flash_func mos906114::generate_bank_setup(void)
 {
   return
   banks_[kBankRam0]+
@@ -344,7 +344,7 @@ uint_least8_t mos906114::generate_bank_setup(void)
  * @param v
  *
  */
-void mos906114::runtime_bank_switching(uint8_t v)
+void __us_not_in_flash_func mos906114::runtime_bank_switching(uint8_t v)
 {
   /* Setup bank mode during runtime */
   uint8_t b = banks_at_boot; /* Use boot time state as preset */

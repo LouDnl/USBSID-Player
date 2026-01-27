@@ -101,7 +101,7 @@ mmu::~mmu(void)
  * @brief Glue required C64 parts
  *
  */
-void mmu::glue_c64(mos6510 *_cpu, mos906114 *_pla, mos6560_6561 *_vic, mos6526 *_cia1, mos6526 *_cia2, mos6581_8580 *_sid)
+void __us_not_in_flash_func mmu::glue_c64(mos6510 *_cpu, mos906114 *_pla, mos6560_6561 *_vic, mos6526 *_cia1, mos6526 *_cia2, mos6581_8580 *_sid)
 {
  cpu = _cpu;
  pla = _pla;
@@ -119,7 +119,7 @@ void mmu::glue_c64(mos6510 *_cpu, mos906114 *_pla, mos6560_6561 *_vic, mos6526 *
  * @param addr
  * @return uint8_t
  */
-uint8_t mmu::read_sid(uint16_t addr)
+uint8_t __us_not_in_flash_func mmu::read_sid(uint16_t addr)
 {
   return sid->read_sid(addr);
 }
@@ -130,7 +130,7 @@ uint8_t mmu::read_sid(uint16_t addr)
  * @param addr
  * @param data
  */
-void mmu::write_sid(uint16_t addr, uint8_t data)
+void __us_not_in_flash_func mmu::write_sid(uint16_t addr, uint8_t data)
 {
   sid->write_sid(addr,data);
   return;
@@ -142,7 +142,7 @@ void mmu::write_sid(uint16_t addr, uint8_t data)
  * @param addr
  * @return uint8_t
  */
-uint8_t mmu::read_cia(uint_least16_t addr)
+uint8_t __us_not_in_flash_func mmu::read_cia(uint_least16_t addr)
 {
   uint8_t data = RAM[addr]; /* Always read from RAM as fallback */
   uint_least16_t cia_page = (addr & 0xFF00);
@@ -164,7 +164,7 @@ uint8_t mmu::read_cia(uint_least16_t addr)
  * @param addr
  * @param data
  */
-void mmu::write_cia(uint_least16_t addr, uint8_t data)
+void __us_not_in_flash_func mmu::write_cia(uint_least16_t addr, uint8_t data)
 {
   uint_least16_t cia_page = (addr & 0xFF00);
   uint8_t cia_addr = (addr & 0xF);
@@ -185,7 +185,7 @@ void mmu::write_cia(uint_least16_t addr, uint8_t data)
  * @param addr
  * @return uint8_t
  */
-uint8_t mmu::read_vic(uint_least16_t addr)
+uint8_t __us_not_in_flash_func mmu::read_vic(uint_least16_t addr)
 {
   uint8_t data = 0xff;
   uint8_t vic_addr = (addr & 0x3f);
@@ -203,7 +203,7 @@ uint8_t mmu::read_vic(uint_least16_t addr)
  * @param addr
  * @param data
  */
-void mmu::write_vic(uint_least16_t addr, uint8_t data)
+void __us_not_in_flash_func mmu::write_vic(uint_least16_t addr, uint8_t data)
 {
   uint8_t vic_addr = (addr & 0x3F);
   if _MOS_LIKELY (vic_addr <=0x3f) {
@@ -222,7 +222,7 @@ void mmu::write_vic(uint_least16_t addr, uint8_t data)
  * @param rom
  * @return uint8_t
  */
-uint8_t mmu::rom_read_byte(uint16_t addr, char rom)
+uint8_t __us_not_in_flash_func mmu::rom_read_byte(uint16_t addr, char rom)
 {
   uint8_t data;
   switch (rom) {
@@ -260,7 +260,7 @@ uint8_t mmu::rom_read_byte(uint16_t addr, char rom)
  *  $1000/$1fff
  *  $9000/$9fff
  */
-uint8_t mmu::vic_read_byte(uint16_t addr) /* Unused */
+uint8_t __us_not_in_flash_func mmu::vic_read_byte(uint16_t addr) /* Unused */
 {
   uint8_t v;
   uint16_t vic_addr = cia2->vic_base_address() + (addr & 0x3fff);
@@ -287,7 +287,7 @@ uint8_t mmu::vic_read_byte(uint16_t addr) /* Unused */
  * @param addr
  * @return uint8_t
  */
-uint8_t mmu::read_byte(uint16_t addr)
+uint8_t __us_not_in_flash_func mmu::read_byte(uint16_t addr)
 {
   bsc = pla->memory_banks(mos906114::kBankBasic);
   crg = pla->memory_banks(mos906114::kBankChargen);
@@ -384,7 +384,7 @@ uint8_t mmu::read_byte(uint16_t addr)
  * @param addr
  * @param data
  */
-void mmu::write_byte(uint16_t addr, uint8_t data)
+void __us_not_in_flash_func mmu::write_byte(uint16_t addr, uint8_t data)
 {
   crg = pla->memory_banks(mos906114::kBankChargen);
   bool write_io = (crg == mos906114::kIO);
@@ -441,13 +441,13 @@ void mmu::write_byte(uint16_t addr, uint8_t data)
   RAM[addr] = data;
 }
 
-uint8_t mmu::dma_read_ram(uint16_t addr)
+uint8_t __us_not_in_flash_func mmu::dma_read_ram(uint16_t addr)
 {
   /* MOSDBG("[DMA  READ] $%04x:%02x\n", addr, RAM[addr]); */
   return RAM[addr];
 }
 
-void mmu::dma_write_ram(uint16_t addr, uint8_t data)
+void __us_not_in_flash_func mmu::dma_write_ram(uint16_t addr, uint8_t data)
 {
   RAM[addr] = data;
   /* MOSDBG("[DMA WRITE] $%04x:%02x(%02x)\n", addr, data, RAM[addr]); */

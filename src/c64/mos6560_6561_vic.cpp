@@ -433,22 +433,28 @@ int __us_not_in_flash_func mos6560_6561::set_timer_speed(int speed)
 
 /**
  * @brief Vice end of raster line VSYNC
+ * @note modifcations for embedding by LouD
  *
+ * @note For convenience and more clarity
+ *       DESKTOP and EMBEDDED are split
+ *       into separate blocks for the same
+ *       functions
  */
 void __us_not_in_flash_func mos6560_6561::vsync_do_end_of_line(void)
+#if DESKTOP
 {
   const int microseconds_between_sync = 2 * 1000;
 
   tick_t tick_between_sync = tick_per_second() / (1000000 / microseconds_between_sync);
-  tick_t tick_now;
-  tick_t tick_delta;
-  tick_t ticks_until_target;
+  tick_t tick_now = 0;
+  tick_t tick_delta = 0;
+  tick_t ticks_until_target = 0;
 
   bool tick_based_sync_timing = true; /* Fixed value */
 
   CPUCLOCK main_cpu_clock = cpu->cycles();
-  CPUCLOCK sync_clk_delta;
-  double sync_emulated_ticks;
+  CPUCLOCK sync_clk_delta = 0;
+  double sync_emulated_ticks = 0.0;
 
   /* used to preserve the fractional ticks betwen calls */
   static double sync_emulated_ticks_offset;
@@ -459,7 +465,6 @@ void __us_not_in_flash_func mos6560_6561::vsync_do_end_of_line(void)
     MOSDBG("[VIC] Sync reset @ tick: %u CPU @ %u cycles\n",
       tick_now, main_cpu_clock);
     sync_reset = false;
-    metrics_reset = true;
 
     last_sync_emulated_tick = tick_now;
     last_sync_tick = tick_now;
@@ -473,13 +478,11 @@ void __us_not_in_flash_func mos6560_6561::vsync_do_end_of_line(void)
   tick_delta = tick_now - last_sync_tick;
   /* is it time to consider keyboard, joystick ? */
   if (tick_delta >= tick_between_sync) {
-
     /*
      * Compare the emulated time vs host time.
      *
      * First, add the emulated clock cycles since last sync.
      */
-
     sync_clk_delta = main_cpu_clock - last_sync_clk;
 
     /* amount of host ticks that represents the emulated duration */
@@ -495,44 +498,85 @@ void __us_not_in_flash_func mos6560_6561::vsync_do_end_of_line(void)
     sync_emulated_ticks_offset = sync_emulated_ticks - (tick_t)sync_emulated_ticks;
 
     /*
-      * How many host ticks to catch up with emulator?
-      *
-      * If we are behind the emulator, this will be a giant number
-      */
-
-    // BUG: with PSID tunes ticks_until_target is WAY too high!!!
+     * How many host ticks to catch up with emulator?
+     *
+     * If we are behind the emulator, this will be a giant number
+     */
     ticks_until_target = sync_target_tick - tick_now;
 
     if (ticks_until_target < tick_per_second()) {
       /* Emulation timing / sync is OK. */
 
-      // /* If we can't rely on the audio device for timing, slow down here. */
+      /* If we can't rely on the audio device for timing, slow down here. */
       if (tick_based_sync_timing) {
-        // mainlock_yield_and_sleep(ticks_until_target);
         tick_sleep(ticks_until_target);
-        // MOSDBG("[VIC] SLEPT FOR %u\n",ticks_until_target);
+        /* MOSDBG("[VIC] SLEPT FOR %u\n",ticks_until_target); */
 
       }
     } else if ((tick_t)0 - ticks_until_target > tick_per_second()) {
       /* We are more than a second behind, reset sync and accept that we're not running at full speed. */
-
-      MOSDBG("Sync is %.3f ms behind (%.3f %u %u %u) (%u %u)\n", (double)TICK_TO_MICRO((tick_t)0 - ticks_until_target) / 1000,
-        (double)TICK_TO_MICRO(0 - ticks_until_target), tick_between_sync, ticks_until_target, tick_per_second(),
-        cpu->cycles(), sync_clk_delta);
+      MOSDBG("Sync is %.3fms behind %u | [NOW]%lu [UNT]%u [DLT]%lu [BT]%lu [TT]%lu [P/S]%lu [C]%lu [PC]%llu [DLT]%lu\n",
+        (double)TICK_TO_MICRO((tick_t)0 - ticks_until_target) / 1000, // sync double divided by 1000
+        ((tick_t)0 - ticks_until_target),
+        tick_now,
+        ticks_until_target, tick_delta, tick_between_sync, sync_target_tick,
+        tick_per_second(),
+        cpu->cycles(), last_sync_clk, sync_clk_delta);
       sync_reset = true;
     } else {
-      // tick_sleep(ticks_until_target*ticks_until_target);
-      // MOSDBG("[VIC] SLEPT FOR %u\n",ticks_until_target*ticks_until_target);
-      // sync_reset = true;
-      /* We are running slow - make sure we still yield to the UI thread if it's waiting */
-
-      // mainlock_yield();
+      /* We are running really slow - just reset sync */
+      sync_reset = true;
     }
 
     last_sync_tick = tick_now;
     last_sync_clk = main_cpu_clock;
   }
 }
+#elif EMBEDDED
+{
+  /* Get the current hardware time (1 tick = 1us) */
+  tick_t tick_now_val = tick_now();
+
+  if (sync_reset) {
+    MOSDBG("[VIC] Sync reset @ tick: %llu CPU @ %llu cycles\n",
+      tick_now_val, cpu->cycles());
+    sync_reset = false;
+    start_sync_tick = tick_now_val;
+    start_sync_clk = cpu->cycles();
+    return;
+  }
+
+  /* Use a local integer version of the frequency to allow modulo operator */
+  uint64_t freq = (uint64_t)emulated_clk_per_second;
+  /* Calculate the Total Intended Time since the emulator started
+     We use the total count to avoid rounding errors adding up over thousands of frames */
+  uint64_t total_cycles = cpu->cycles() - start_sync_clk;
+
+  /* To not loos any precision we calculate the target tick */
+  uint64_t absolute_target_tick = start_sync_tick +
+    (total_cycles / freq * TICK_PER_SECOND) +
+    (total_cycles % freq * TICK_PER_SECOND / freq);
+
+  /* Compare target time vs. real time */
+  int64_t diff = (int64_t)(absolute_target_tick - tick_now_val);
+
+  if (diff > 0) {
+    /* If higher then 0 we are ahead of time (too fast) */
+    tick_sleep((uint64_t)diff);
+  }
+  else if (diff < -500000) {
+    /* If lower then minus 500000 we are behind
+     * with significant lag of half a second.
+     * perform a sync reset to prevent speed bursts
+     */
+    sync_reset = true;
+  }
+
+  /* No setting last clock and tick needed.
+   * absolute_target_tick is our source of truth for every frame.
+   */
+}
+#endif
 
 /**
  * @brief Sets the VIC graphics mode, for debug and logging purposes only!

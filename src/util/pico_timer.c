@@ -47,12 +47,12 @@
 
 uint64_t pico_us_since_boot(void)
 {
-  return to_us_since_boot(get_absolute_time());
+  return time_us_64();
 }
 
 uint64_t pico_ns_since_boot(void)
 {
-  return (to_us_since_boot(get_absolute_time()) * 1000);
+  return (time_us_64() * 1000);
 }
 
 void sleep_ms_emu(uint32_t ms)

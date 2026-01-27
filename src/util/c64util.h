@@ -34,6 +34,11 @@
 #include <cstdio>
 #include <cstdint>
 
+#if EMBEDDED
+#include "pico/stdlib.h"
+#define __us_not_in_flash_func __attribute__((section(".time_critical")))
+#endif
+
 #if DESKTOP
 #define __in_flash(name)
 #endif

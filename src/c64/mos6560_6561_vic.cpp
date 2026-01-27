@@ -86,7 +86,6 @@ void __us_not_in_flash_func mos6560_6561::reset(void)
 {
   vic_cpu_clock = 0;
   prev_vic_cpu_clock = 0;
-  prev_vic_sync_clock = 0;
   start_sync_tick = 0;
   start_sync_clk = 0;
 

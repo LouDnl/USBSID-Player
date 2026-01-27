@@ -337,26 +337,7 @@ void __us_not_in_flash_func mos6560_6561::emulate(void)
 
     control_register_one = ((control_register_one & ~RASTERROWMSB) | ((current_raster_row_ & 0x100) >> 1));
     raster_row_lines = (current_raster_row_ & 0xFF);
-
-    // MOSDBG("[VIC] RL:%u RRC:%u RR:%u RRL:%u RCYC:%u IRQ@%u IRQE:%x IRQST:%x\n",
-    //   raster_lines,
-    //   raster_row_cycles,
-    //   raster_row_lines,
-    //   raster_row,
-    //   row_cycle_count,
-    //   raster_irq,
-    //   irq_enabled,
-    //   irq_status);
   }
-
-  // MOSDBG("[VIC] RL:%u RRC:%u RRL:%u RCYC:%u IRQ:%x ST:%x\n",
-  //   raster_lines,
-  //   raster_row_cycles,
-  //   raster_row_lines,
-  //   // raster_row,
-  //   row_cycle_count,
-  //   raster_irq,
-  //   irq_status);
 
   prev_vic_cpu_clock = vic_cpu_clock;
   return;

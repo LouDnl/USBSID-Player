@@ -39,7 +39,12 @@ typedef uint_fast64_t CPUCLOCK;
 typedef uint_fast32_t TIMER;
 
 /* Using a 32-bit type for tick_t prevents wraparound bugs on platforms with 32-bit timers (Vice) */
+#if DESKTOP
 typedef uint32_t tick_t;
+#elif EMBEDDED
+/* On rp2350 we can safely use a 64-bit type */
+typedef uint64_t tick_t;
+#endif
 typedef uint_fast16_t counter_t;
 typedef uint_fast8_t cycle_t;
 
@@ -47,13 +52,32 @@ typedef uint_fast8_t cycle_t;
 #define MICRO_PER_SECOND    (1000 * 1000)
 #define NANO_PER_SECOND     (1000 * 1000 * 1000)
 
-#define TICK_PER_SECOND     (MICRO_PER_SECOND)
+#if DESKTOP
+#define TICK_PER_SECOND     (NANO_PER_SECOND)
+#elif EMBEDDED
+/* The RP2040 and RP2350 hardware timer frequency is fixed at 1MHz (1 tick = 1 microsecond) */
+#define TICK_PER_SECOND 1000000
+#endif
 
-#define TICK_TO_MILLI(tick) ((uint_fast32_t) (uint_fast64_t)((double)(tick) * ((double)MILLI_PER_SECOND / TICK_PER_SECOND)))
-#define TICK_TO_MICRO(tick) ((uint_fast32_t) (uint_fast64_t)((double)(tick) * ((double)MICRO_PER_SECOND / TICK_PER_SECOND)))
-#define TICK_TO_NANO(tick)  ((uint_fast64_t) (uint_fast64_t)((double)(tick) * ((double)NANO_PER_SECOND  / TICK_PER_SECOND)))
-#define NANO_TO_TICK(nano)  ((tick_t)   (uint_fast64_t)((double)(nano) / ((double)NANO_PER_SECOND  / TICK_PER_SECOND)))
-
+#define TICK_TO_MILLI(tick) ( \
+  (uint_fast32_t) \
+  (uint_fast64_t)( \
+    (double)(tick) * ( \
+      (double)MILLI_PER_SECOND / TICK_PER_SECOND)))
+#define TICK_TO_MICRO(tick) ( \
+  (uint_fast32_t) ( \
+    uint_fast64_t)((double)(tick) * ( \
+      (double)MICRO_PER_SECOND / TICK_PER_SECOND)))
+#define TICK_TO_NANO(tick)  ( \
+  (uint_fast64_t) ( \
+    uint_fast64_t)( \
+      (double)(tick) * ( \
+        (double)NANO_PER_SECOND  / TICK_PER_SECOND)))
+#define NANO_TO_TICK(nano)  ( \
+  (tick_t)   \
+  (uint_fast64_t)( \
+    (double)(nano) / ( \
+      (double)NANO_PER_SECOND  / TICK_PER_SECOND)))
 
 /* DATA */
 typedef uint_least32_t longword_t;

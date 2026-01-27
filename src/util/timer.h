@@ -47,9 +47,6 @@ tick_t tick_now(void);
 /* Get time in ticks, compensating for the +/- 1 tick that is possible on Windows. */
 tick_t tick_now_after(tick_t previous_tick);
 
-/* Get number of ticks since a previous tick, compensating for the +/- 1 tick that is possible on Windows. */
-tick_t tick_now_delta(tick_t previous_tick);
-
 /* Sleep a number of ticks. */
 void tick_sleep(tick_t delay);
 

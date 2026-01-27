@@ -35,13 +35,6 @@
 #include <timer.h>
 #include <c64util.h>
 
-#if EMBEDDED
-#include <pico/types.h>
-#include <pico/time.h>
-extern "C" uint32_t clockcycles(void);
-extern "C" void clockcycle_delay(uint32_t n_cycles);
-#endif
-
 
 /**
  * @brief Construct a new mos6560_6561::mos6560_6561 object
@@ -91,17 +84,13 @@ void __us_not_in_flash_func mos6560_6561::glue_c64(VicReadDMA rdma, mos6510 *_cp
  */
 void __us_not_in_flash_func mos6560_6561::reset(void)
 {
-  row_cycle_count = 0;
+  vic_cpu_clock = 0;
+  prev_vic_cpu_clock = 0;
+  prev_vic_sync_clock = 0;
+  start_sync_tick = 0;
+  start_sync_clk = 0;
 
-  control_register_one = 0;
-  control_register_one_read = 0;
-  control_register_two = 0;
-  raster_row_lines = 0;
-  sprite_enabled = 0;
-  raster_irq = 0;
-  irq_status = 0;
-  irq_enabled = 0;
-  prev_raster_line = 0;
+  graphic_mode_ = pCharMode;
 
   r_sprite_x[8]   = {0};
   r_sprite_y[8]   = {0};
@@ -111,7 +100,19 @@ void __us_not_in_flash_func mos6560_6561::reset(void)
   r_lightpen_x   = 0;
   r_lightpen_y   = 0;
 
+  control_register_one = 0;
+  control_register_one_read = 0;
+  control_register_two = 0;
+  raster_row_lines = 0;
+  sprite_enabled = 0;
+  irq_status = 0;
+  irq_enabled = 0;
+  prev_raster_line = 0;
+
   memory_ptrs = 0b1u; /* Bit 0 is not used and always set to 1 */
+
+  row_cycle_count = 0;
+  raster_irq = 0;
 
   return;
 }

@@ -51,7 +51,7 @@ class mos906114
     uint_least8_t banks_[7];
 
     /* default bank setup is m31 0x1F */
-    uint_least8_t default_bankmode;
+    uint_least8_t default_bankmode; /* Set at start */
 
     uint_least8_t generate_bank_setup(void);
 

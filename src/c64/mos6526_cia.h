@@ -174,10 +174,10 @@ class mos6526
     bool irq_enabled;           /* _imr & 0b10000000 ~ write */
     bool irq_triggered;         /* _icr & 0b10000000 ~ read */
 
-    bool flag_irq_enabled;       /* _imr & 0b00010000 */
-    bool alarm_irq_enabled;      /* _imr & 0b00000100 */
-    bool flag_irq_triggered;     /* _icr & 0b00010000 */
-    bool alarm_irq_triggered;    /* _icr & 0b00000100 */
+    bool flag_irq_enabled;      /* _imr & 0b00010000 */
+    bool alarm_irq_enabled;     /* _imr & 0b00000100 */
+    bool flag_irq_triggered;    /* _icr & 0b00010000 */
+    bool alarm_irq_triggered;   /* _icr & 0b00000100 */
 
     bool timer_a_irq_enabled;   /* _imr & 0b00000001 ~ pIRQMode */
     bool timer_a_irq_triggered; /* _icr & 0b00000001 ~ pIRQMode */

@@ -143,27 +143,32 @@ class mos6560_6561
     /* VIC-II DMA read callback function */
     VicReadDMA vic_dma_read;
 
+     /* Set in set_timer_speed() start */
     double ticks_per_frame;
     double emulated_clk_per_second;
 
+    /* Set to 0 in reset() */
     tick_t last_sync_emulated_tick;
     tick_t last_sync_tick;
     CPUCLOCK last_sync_clk;
-
     tick_t sync_target_tick;
+    tick_t   start_sync_tick;
+    CPUCLOCK start_sync_clk;
 
     int timer_speed = 0; /* Percentage */
     bool sync_reset = true;
     bool metrics_reset = false;
 
+    /* Number of clock cycles per seconds on the real machine. */
+    long cycles_per_sec;
     /* Number of frames per second on the real machine. */
     double refresh_frequency;
     double refresh_rate;
-    /* Number of clock cycles per seconds on the real machine. */
-    long cycles_per_sec;
+    /* Set on start */
     counter_t raster_lines;
-    cycle_t prev_raster_line;
     cycle_t raster_row_cycles;
+
+    cycle_t prev_raster_line; /* Set to 0 in reset() */
 
     void graphic_mode(void);
     void dump_regs(void);

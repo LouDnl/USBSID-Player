@@ -466,22 +466,6 @@ void mos6510::set_cycle_callback(ClockCycle c)
 }
 
 /**
- * @brief Performs a cold reset
- *
- * https://www.c64-wiki.com/index.php/Reset_(Process)
- */
-void mos6510::reset()
-{
-  a_ = x_ = y_ = 0;
-  sp_ = 0xFD;
-  _flags = 0b00110000;
-  val_t pc_lo = load_byte(pAddrResetVector);
-  val_t pc_hi = load_byte(pAddrResetVector+1);
-  pc(pc_lo | pc_hi << 8);
-  prev_cycles_ = 0, cycles_ = 6;
-}
-
-/**
  * @brief emulate a single instruction
  * @return returns false if something goes wrong
  *

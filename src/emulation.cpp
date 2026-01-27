@@ -54,10 +54,6 @@
 #include <c64util.h>
 #include <wrappers.h>
 
-#if DESKTOP && DEBUGGER_SUPPORT
-#include <debugger.h>
-#endif
-
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wnarrowing"
 
@@ -109,9 +105,6 @@ mos6560_6561 *Vic;
 mos906114 *Pla;
 mos6581_8580 *SID;
 mmu *MMU;
-#if DESKTOP && DEBUGGER_SUPPORT
-Debugger *r2;
-#endif
 
 /* Emulation variables */
 bool threaded = true;
@@ -221,9 +214,15 @@ void hardwaresid_init(void)
   MOSDBG("[HARDWARESID] Init\n");
 #if DESKTOP
   if (!setup_USBSID()) { usbsid = nullptr; }
+  if (usbsid) {
+    usbsid->USBSID_ResetAllRegisters();
+    usbsid->USBSID_Reset();
+  }
 #elif EMBEDDED
-  /* reset_sid(); */
   reset_sid_registers();
+  sleep_us(100);
+  reset_sid();
+  sleep_us(100);
 #endif
   return;
 }
@@ -236,11 +235,14 @@ void hardwaresid_deinit(void)
     usbsid->USBSID_Flush();
     usbsid->USBSID_DisableThread();
     usbsid->USBSID_ResetAllRegisters();
+    usbsid->USBSID_Reset();
     delete usbsid;
   }
 #elif EMBEDDED
-  /* reset_sid(); */
   reset_sid_registers();
+  sleep_us(100);
+  reset_sid();
+  sleep_us(100);
 #endif
 
   return;
@@ -276,6 +278,7 @@ void emu_pause_playing(bool pause)
     else usbsid->USBSID_UnMute();
 #endif
   } else {
+    /* This is actually not a pause but a stop command */
     Cia1->write_prab_bits(row_bit_runstop,col_bit_runstop,true);
     emu_sleep_us((uint64_t)Vic->refresh_rate);
     Cia1->write_prab_bits(row_bit_runstop,col_bit_runstop,false);
@@ -374,12 +377,49 @@ uint8_t emu_vic_read_byte(uint16_t address)
 }
 
 /**
+ * @brief Reset the player state between restarts
+ */
+void reset_player_state(void)
+{
+    /* Reset all global flags to their initial state */
+    stop = false;
+    playing = false;
+    paused = false;
+    vsidpsid = false;
+
+    /* Reset SID-related variables */
+    sidcount = 1;
+    sidno = 0;
+    sidssockone = 0;
+    sidssocktwo = 0;
+    sockonesidone = 0;
+    sockonesidtwo = 0;
+    socktwosidone = 0;
+    socktwosidtwo = 0;
+    fmoplsidno = -1;
+    pcbversion = -1;
+
+    /* Reset any SID-specific state */
+    sidone = 0;
+    sidtwo = 0;
+    sidthree = 0;
+    sidfour = 0;
+
+    /* Reset socket flags */
+    forcesockettwo = false;
+}
+
+/**
  * @brief Emulator init
  *
  */
 void emu_init(void)
 {
   MOSDBG("[C64] Init\n");
+
+  /* Reset state to ensure clean start when embedding */
+  reset_player_state();
+
   MMU = new mmu();
   Cpu = new mos6510(emu_read_byte, emu_write_byte);
   Pla = new mos906114(MMU);
@@ -407,14 +447,6 @@ void emu_init(void)
 
   SID->log_sidrw = log_sidrw;
 
-  /* r2 support */
-  #if DEBUGGER_SUPPORT
-  if (enable_r2) {
-    r2 = new Debugger();
-    r2->glue_c64(Cpu,MMU);
-  }
-  #endif
-
   playing = true;
   return;
 }
@@ -427,6 +459,15 @@ void emu_deinit(void)
 {
   MOSDBG("[C64] Deinit\n");
   stop = true; /* Make sure we're stopped if not already */
+
+  /* Required or the player will not restart when embedding */
+  Pla->reset();
+  Cia1->reset();
+  Cia2->reset();
+  Vic->reset();
+  Cpu->reset();
+
+  /* Delete all objects */
   delete SID;
   delete Pla;
   delete Cia1;
@@ -434,13 +475,16 @@ void emu_deinit(void)
   delete Vic;
   delete Cpu;
   delete MMU;
-  SID = nullptr;
-  Pla = nullptr;
-  Cia1 = nullptr;
-  Cia2 = nullptr;
-  Vic = nullptr;
-  Cpu = nullptr;
-  MMU = nullptr;
+
+  /* Nullify all objects */
+  SID = NULL;
+  Pla = NULL;
+  Cia1 = NULL;
+  Cia2 = NULL;
+  Vic = NULL;
+  Cpu = NULL;
+  MMU = NULL;
+
   return;
 }
 
@@ -490,21 +534,36 @@ void emulate_until_rti(void)
   return;
 }
 
+void emulate_c64_single(void)
+{
+  if (!stop) {
+    Cpu->emulate();
+    Vic->emulate();
+    Cia1->emulate();
+    Cia2->emulate();
+  }
+  return;
+}
+
 void emulate_c64(void)
 {
   log_logs();
   while (!stop) {
+#if DESKTOP
     while (paused){}
+#endif
+    Cpu->emulate();
     Vic->emulate();
     Cia1->emulate();
     Cia2->emulate();
-    Cpu->emulate();
+#if DESKTOP
     if __unlikely (log_timers) {
       Cia1->dump_timers();
       Cia2->dump_timers();
       Vic->dump_timers();
       MOSDBG("\n");
     }
+#endif
   }
   return;
 }

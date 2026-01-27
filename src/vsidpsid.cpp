@@ -99,7 +99,7 @@ extern int numsids, sid2loc, sid3loc;
  *
  * @param is_pal
  */
-void start_vsid_player(bool is_pal)
+void start_vsid_player(bool is_pal, bool loop)
 {
 #if DESKTOP
   if (usbsid) {
@@ -185,30 +185,10 @@ void start_vsid_player(bool is_pal)
 
   Cpu->reset();
 
-  // MOSDBG("$fffa:$%02x%02x $fffc:$%02x%02x $fffe:$%02x%02x\n",
-  //  emu_dma_read_ram(0xfffa),emu_dma_read_ram(0xfffb),
-  //  emu_dma_read_ram(0xfffc),emu_dma_read_ram(0xfffd),
-  //  emu_dma_read_ram(0xfffe),emu_dma_read_ram(0xffff)
-  // );
-  // /* Install default NMI/RESET/IRQ vectors */
-  // emu_dma_write_ram(0x0316, 0xe2); /* BRK lo */
-  // emu_dma_write_ram(0x0317, 0xfc); /* BRK hi */
-  // emu_dma_write_ram(0xfffa, 0x43);
-  // emu_dma_write_ram(0xfffb, 0xfe);
-  // emu_dma_write_ram(0xfffc, 0xe2);
-  // emu_dma_write_ram(0xfffd, 0xfc);
-  // emu_dma_write_ram(0xfffe, 0x48);
-  // emu_dma_write_ram(0xffff, 0xff);
-
-  // MOSDBG("$fffa:$%02x%02x $fffc:$%02x%02x $fffe:$%02x%02x\n",
-  //  emu_dma_read_ram(0xfffa),emu_dma_read_ram(0xfffb),
-  //  emu_dma_read_ram(0xfffc),emu_dma_read_ram(0xfffd),
-  //  emu_dma_read_ram(0xfffe),emu_dma_read_ram(0xffff)
-  // );
-
-  MOSDBG("[emulate_c64]\n");
-  emulate_c64();
-
+  if (loop) {
+    MOSDBG("[emulate_c64]\n");
+    emulate_c64();
+  }
 }
 
 /**

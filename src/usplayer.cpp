@@ -75,37 +75,25 @@ extern void readfile(const char * filename);
 /* VSID Pmos6581_8580 */
 extern int psid_load_file(const char* filename, int subtune);
 #elif EMBEDDED
+extern "C" void sleep_ms_emu(uint32_t ms);
 extern int psid_load_file(uint8_t * binary_, size_t binsize_, int subtune);
 extern void run_prg(uint8_t * binary_, size_t binsize_);
 #endif
 extern void psid_init_tune(int install_driver_hook);
 extern void psid_init_driver(void);
 extern void psid_shutdown(void);
-extern void start_vsid_player(bool pal);
+extern void start_vsid_player(bool is_pal, bool loop);
 extern bool is_pal;
 char * filename;
+bool from_stdin = false;
 bool force_microsidplayer = false;
 
-#if EMBEDDED
-#ifdef ANALYSE_STACKUSAGE
-extern "C" {
-#include "tool_heapusage.c"
-extern void heapbefore(void);
-extern void heapafter(void);
-extern void getFreeStack(void);
-}
-#else
-extern void heapbefore(void){};
-extern void heapafter(void){};
-extern void getFreeStack(void){};
-#endif
-#endif
-
 /* External emulation functions and variables */
+extern void emulate_c64_single(void);
+extern void emu_pause_playing(bool pause);
+extern void emu_next_subtune(void);
+extern void emu_previous_subtune(void);
 #if DESKTOP
-void emu_pause_playing(bool pause);
-void emu_next_subtune(void);
-void emu_previous_subtune(void);
 extern volatile sig_atomic_t stop;
 extern volatile sig_atomic_t playing;
 extern volatile sig_atomic_t vsidpsid;
@@ -159,6 +147,7 @@ void deinit(void)
 void inthand(int signum)
 {
   stop = 1;
+  playing = false;
 }
 
 void run_player(void);
@@ -200,7 +189,7 @@ void run_player(void)
     psid_init_tune(1); /* 1 to install driver hook */
     MOSDBG("[USPLAYER] is_pal: %d\n",is_pal);
     psid_shutdown();
-    start_vsid_player(is_pal);
+    start_vsid_player(is_pal, true);
     goto END;
   }
   if (force_microsidplayer && process_sid_file(fname)) {
@@ -408,56 +397,60 @@ int main(int argc, char **argv)
 #elif EMBEDDED
 extern "C" {
 bool sidplayer_init = false;
-bool sidplayer_playing = false;
 bool sidplayer_start = false;
+bool sidplayer_playing = false;
+bool sidplayer_stop = false;
 }
 
 extern "C" int load_sidtune(uint8_t * sidfile, int sidfilesize, char subt)
 {
-  (void) heapbefore();
   MOSDBG("[USPLAYER] load_sidtune\n");
   stop = false; /* Always init to false on sidtune load */
   init();
   songno = ((int)subt == 0 ? -1 : (int)subt);
   MOSDBG("[USPLAYER] psid_load_file %d\n",songno);
   psid_load_file(sidfile,sidfilesize,(int)((songno != -1) ? (songno+1) : songno));
-  (void) heapafter();
   return 0;
 }
 
-extern "C" void start_sidplayer(void)
+extern "C" void init_sidplayer(void)
 {
-  (void) heapbefore();
   MOSDBG("[USPLAYER] psid_init_driver\n");
   psid_init_driver();
   MOSDBG("[USPLAYER] psid_init_tune\n");
   psid_init_tune(1); /* 1 to install driver hook */
-  (void) heapafter();
   return;
 }
 
-extern "C" unsigned int run_psidplayer(void)
+extern "C" void start_sidplayer(bool loop)
 {
-  (void) heapbefore();
-  MOSDBG("[USPLAYER] start_sidplayer\n");
-  MOSDBG("[USPLAYER] is_pal: %d\n",is_pal);
   psid_shutdown();
-  start_vsid_player(is_pal);
-  (void) heapafter();
-  return 0;
+  MOSDBG("[USPLAYER] start_vsid_player\n");
+  MOSDBG("[USPLAYER] is_pal: %d\n",is_pal);
+  start_vsid_player(is_pal, loop);
+  /* Intermission, thread will halt here until stopped */
+  if (loop && stop) { /* If looping the thread comes back here so we need to stop the emulator here */
+    sleep_ms_emu(100); /* Allow for player to stop */
+    deinit();
+  }
+
+  return;
 }
 
-extern "C" void sleep_ms_emu(uint32_t ms);
-
-extern "C" bool stop_emulator(void)
+extern "C" void loop_sidplayer(void)
 {
-  (void) heapbefore();
-  MOSDBG("[USPLAYER] stop_emulator\n");
+  emulate_c64_single();
+  return;
+}
+
+extern "C" bool stop_sidplayer(void)
+{
+  MOSDBG("[USPLAYER] stop_psidplayer\n");
   stop = true;
-  sleep_ms_emu(100); /* Allow for player to stop */
+
   deinit();
-  (void) heapafter();
-  return 0;
+
+  return stop;
 }
 
 extern "C" void next_subtune(void)

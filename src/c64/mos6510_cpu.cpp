@@ -89,12 +89,44 @@ mos6510::~mos6510()
  * @brief Glue required C64 modules
  *
  */
-void mos6510::glue_c64(mmu *_mmu, mos6560_6561 *_vic, mos6526 *_cia1, mos6526 *_cia2)
+void __us_not_in_flash_func mos6510::glue_c64(mmu *_mmu, mos6560_6561 *_vic, mos6526 *_cia1, mos6526 *_cia2)
 {
   mmu_ = _mmu;
   vic  = _vic;
   cia1 = _cia1;
   cia2 = _cia2;
+
+  return;
+}
+
+/**
+ * @brief Performs a cold reset
+ *
+ * https://www.c64-wiki.com/index.php/Reset_(Process)
+ */
+void __us_not_in_flash_func mos6510::reset(void)
+{
+  a_ = x_ = y_ = 0;
+  sp_ = 0xFD;
+  _flags = 0b00110000;
+  val_t pc_lo = load_byte(pAddrResetVector);
+  val_t pc_hi = load_byte(pAddrResetVector+1);
+  pc(pc_lo | pc_hi << 8);
+  prev_cycles_ = 0, cycles_ = 6;
+
+  return;
+}
+
+/**
+ * @brief Performs a "hot" reset
+ *
+ */
+void __us_not_in_flash_func mos6510::hot_reset(void)
+{
+  _flags = 0b00110000;
+  a_ = x_ = y_ = 0;
+  sp_ = 0xFD;
+
   return;
 }
 
@@ -398,6 +430,18 @@ void mos6510::execute(uint8_t opcode) {
   }
   return;
 }
+
+CPUCLOCK __us_not_in_flash_func mos6510::cycles(void)
+{
+  return cycles_;
+}
+
+void __us_not_in_flash_func mos6510::cycles(CPUCLOCK v)
+{
+  cycles_=v;
+  return;
+}
+
 
 /**
  * @brief Sets the callback function at cycle ticks

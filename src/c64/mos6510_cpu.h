@@ -268,10 +268,9 @@ class mos6510
   public:
     mos6510(BusRead r, BusWrite w);
     ~mos6510(void);
+    void glue_c64(mmu *_mmu, mos6560_6561 *_vic, mos6526 *_cia1, mos6526 *_cia2);
     void set_cycle_callback(ClockCycle c);
     void set_irq_nmi_callback(CPUCLOCK c, int src); /* ISSUE: Does _NOT_ work, do _NOT_ use */
-
-    void glue_c64(mmu *_mmu, mos6560_6561 *_vic, mos6526 *_cia1, mos6526 *_cia2);
 
     /* Write / Read / Cycle callbacks */
     BusRead read_bus;
@@ -287,6 +286,7 @@ class mos6510
 
     /* cpu state */
     void reset(void);
+    void hot_reset(void);
     bool emulate(void);
     bool emulate_n(tick_t n_cycles);
     inline void stall_cpu(bool stall) { vic_stall_cpu_ = stall; };
@@ -321,8 +321,8 @@ class mos6510
     inline void nf(bool v)  { SETFLAG(SR_NEGATIVE, v); }; /* nf_=v */
 
     /* clock */
-    CPUCLOCK cycles(){return cycles_;};
-    void cycles(CPUCLOCK v){cycles_=v;};
+    CPUCLOCK cycles(void);
+    void cycles(CPUCLOCK v);
     void tickle_me(cycle_t v);
   private:
     bool initialized = false;
@@ -339,7 +339,6 @@ class mos6510
     inline void handle_interrupts(void);
 
   public:
-    void hot_reset(void){ _flags = 0b00110000;a_ = x_ = y_ = 0; sp_ = 0xFD; };
     void nmi_(val_t source);
     void irq_(val_t source);
     void nmi(val_t source);

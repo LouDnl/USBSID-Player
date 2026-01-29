@@ -206,3 +206,14 @@ target_include_directories(${PROJECT_NAME} ${TARGET_INCLUDE_DIRS})
 target_link_libraries(${PROJECT_NAME} ${TARGET_LL})
 target_sources(${PROJECT_NAME} PUBLIC ${SOURCEFILES})
 target_compile_options(${PROJECT_NAME} ${COMPILE_OPTS})
+
+### Copy build output to main directory
+add_custom_command(TARGET
+  ${PROJECT_NAME}
+  POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:${PROJECT_NAME}> ${CMAKE_CURRENT_LIST_DIR})
+### Remove build output from build directory
+add_custom_command(TARGET
+  ${PROJECT_NAME}
+  POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E rm $<TARGET_FILE:${PROJECT_NAME}>)

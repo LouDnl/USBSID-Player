@@ -20,8 +20,11 @@
 !*.cpp
 !*.c
 !*.h
+!*.yml
 
 # Directories to un-ignore
+!.github
+!.github/workflows
 !src
 !src/c64
 !src/psid

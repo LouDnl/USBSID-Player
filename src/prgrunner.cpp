@@ -95,7 +95,7 @@ using namespace std;
  *
  * @param fname
  */
-void run_prg(string fname)
+void run_prg(string fname, bool loop)
 #elif EMBEDDED
 /**
  * @brief Start and run a PRG from a pointer by size
@@ -103,7 +103,7 @@ void run_prg(string fname)
  * @param binary_
  * @param binsize_
  */
-void run_prg(uint8_t * binary_, size_t binsize_)
+void run_prg(uint8_t * binary_, size_t binsize_, bool loop)
 #endif
 {
   /* Init emulator vars */
@@ -135,7 +135,7 @@ void run_prg(uint8_t * binary_, size_t binsize_)
   size_t prg_size = fread(prg, 1, 0x10000, f);
 #elif EMBEDDED
   uint_least8_t * prg = binary_;
-  uint_least8_t prg_size = binsize_;
+  size_t prg_size = binsize_;
 #endif
   MOSDBG("[PRG] File with size %u loaded into buffer\n", prg_size);
   uint_least16_t l_addr = (prg[0]|prg[1]<<8);
@@ -199,7 +199,11 @@ void run_prg(uint8_t * binary_, size_t binsize_)
   Cpu->dump_flags();
   Cpu->reset();
   Cpu->pc(s_addr+0x02);  Cpu->dump_flags();
-  emulate_c64();
+
+  if (loop) {
+    MOSDBG("[emulate_c64]\n");
+    emulate_c64();
+  }
 
   return;
 }

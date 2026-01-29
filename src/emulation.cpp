@@ -122,6 +122,9 @@ bool log_sidrw = false;
 /* VSIDPSID external functions */
 extern void next_prev_tune(bool next);
 
+/* Pre declarations */
+void emulate_c64_single(void);
+
 
 #if DESKTOP
 int setup_USBSID(void)
@@ -219,10 +222,10 @@ void hardwaresid_init(void)
     usbsid->USBSID_Reset();
   }
 #elif EMBEDDED
-  reset_sid_registers();
-  sleep_us(100);
   reset_sid();
-  sleep_us(100);
+  emu_sleep_us(100);
+  reset_sid_registers();
+  emu_sleep_us(100);
 #endif
   return;
 }
@@ -240,9 +243,9 @@ void hardwaresid_deinit(void)
   }
 #elif EMBEDDED
   reset_sid_registers();
-  sleep_us(100);
+  emu_sleep_us(100);
   reset_sid();
-  sleep_us(100);
+  emu_sleep_us(100);
 #endif
 
   return;
@@ -293,10 +296,19 @@ void emu_pause_playing(bool pause)
 void emu_next_subtune(void)
 {
   if (vsidpsid) {
+    MOSDBG("[EMU] Next tune SID\n");
     next_prev_tune(true);
   } else {
+    MOSDBG("[EMU] Next tune PRG\n");
     Cia1->write_prab_bits(row_bit_plus,col_bit_plus,true);
+#if DESKTOP /* On DESKTOP we can just do a simple refresh rate long sleep */
     emu_sleep_us((uint64_t)Vic->refresh_rate);
+#elif EMBEDDED /* On EMBEDDED we need the emulator to finish the current frame instead of sleeping */
+    uint64_t start_cycles = Cpu->cycles();
+    while (Cpu->cycles() - start_cycles < (uint64_t)Vic->refresh_rate) {
+        emulate_c64_single();
+    }
+#endif
     Cia1->write_prab_bits(row_bit_plus,col_bit_plus,false);
   }
   return;
@@ -309,10 +321,19 @@ void emu_next_subtune(void)
 void emu_previous_subtune(void)
 {
   if (vsidpsid) {
+    MOSDBG("[EMU] Previous tune SID\n");
     next_prev_tune(false);
   } else {
+    MOSDBG("[EMU] Previous tune PRG\n");
     Cia1->write_prab_bits(row_bit_minus,col_bit_minus,true);
+#if DESKTOP /* On DESKTOP we can just do a simple refresh rate long sleep */
     emu_sleep_us((uint64_t)Vic->refresh_rate);
+#elif EMBEDDED /* On EMBEDDED we need the emulator to finish the current frame instead of sleeping */
+    uint64_t start_cycles = Cpu->cycles();
+    while (Cpu->cycles() - start_cycles < (uint64_t)Vic->refresh_rate) {
+        emulate_c64_single();
+    }
+#endif
     Cia1->write_prab_bits(row_bit_minus,col_bit_minus,false);
   }
   return;

@@ -62,21 +62,22 @@ extern void emu_init(void);
 extern void emu_deinit(void);
 extern void emu_next_subtune(void);
 extern void emu_previous_subtune(void);
+extern void emu_pause_playing(bool pause);
+extern void emulate_c64_single(void);
 extern void hardwaresid_init(void);
 extern void hardwaresid_deinit(void);
 #if DESKTOP
 extern bool process_sid_file(string fname);
-extern void run_prg(string fname);
+extern void run_prg(string fname, bool loop);
 extern void start_player(void);
 extern void start_test(void);
-
 /* New smaller sidfile reader */
 extern void readfile(const char * filename);
 /* VSID Pmos6581_8580 */
 extern int psid_load_file(const char* filename, int subtune);
 #elif EMBEDDED
 extern int psid_load_file(uint8_t * binary_, size_t binsize_, int subtune);
-extern void run_prg(uint8_t * binary_, size_t binsize_);
+extern void run_prg(uint8_t * binary_, size_t binsize_, bool loop);
 #endif
 extern void psid_init_tune(int install_driver_hook);
 extern void psid_init_driver(void);
@@ -87,11 +88,7 @@ char * filename;
 bool from_stdin = false;
 bool force_microsidplayer = false;
 
-/* External emulation functions and variables */
-extern void emulate_c64_single(void);
-extern void emu_pause_playing(bool pause);
-extern void emu_next_subtune(void);
-extern void emu_previous_subtune(void);
+/* External emulation variables */
 #if DESKTOP
 extern volatile sig_atomic_t stop;
 extern volatile sig_atomic_t playing;
@@ -99,6 +96,7 @@ extern volatile sig_atomic_t vsidpsid;
 #elif EMBEDDED
 extern volatile bool stop;
 extern volatile bool playing;
+extern volatile bool vsidpsid;
 #endif
 extern uint8_t songno;
 extern bool
@@ -179,7 +177,7 @@ void run_player(void)
 {
   if (prgfile) {
     vsidpsid = false;
-    run_prg(fname);
+    run_prg(fname, true);
     goto END;
   }
   if (!force_microsidplayer && psid_load_file(filename, (int)((songno != -1) ? (songno+1) : songno))) {
@@ -247,17 +245,22 @@ void wait_for_input(void)
       stop=true; //ESC/Enter?
       skip_capture=true;
     } else if (pressed_key_char==' ') {
-      emu_pause_playing(!paused);
+      paused = !paused;
+      emu_pause_playing(paused);
       // cRSID.PlaybackSpeed=1; cRSID.Paused^=1; if(cRSID.Paused) cRSID_pauseSIDtune(); else cRSID_playSIDtune();
     } else if (pressed_key_char==0x09 || pressed_key_char=='`') {
       // if(cRSID.PlaybackSpeed==1) cRSID.PlaybackSpeed = FFWD_SPEED; else cRSID.PlaybackSpeed = 1;
     } else if ('1'<=pressed_key_char &&  pressed_key_char<='9') {
       // SubTune=pressed_key_char-'1'+1; cRSID_startSubtune(SubTune); printTuneInfo_callBack( 1, (void*) &PrevFrameCycles );
     } else if (pressed_key_char==KEY_RIGHT) {
+      emu_pause_playing(true);
       emu_next_subtune();
+      emu_pause_playing(false);
       // printTuneInfo_callBack( nextTuneButton(), (void*) &PrevFrameCycles );
     } else if (pressed_key_char==KEY_LEFT) {
+      emu_pause_playing(true);
       emu_previous_subtune();
+      emu_pause_playing(false);
       // printTuneInfo_callBack( prevTuneButton(), (void*) &PrevFrameCycles );
     } else if (pressed_key_char==KEY_UP) {
       // volumeUpButton();
@@ -394,22 +397,31 @@ int main(int argc, char **argv)
 }
 
 #elif EMBEDDED
-extern "C" {
-bool sidplayer_init = false;
-bool sidplayer_start = false;
-bool sidplayer_playing = false;
-bool sidplayer_stop = false;
-}
-
-extern "C" int load_sidtune(uint8_t * sidfile, int sidfilesize, char subt)
+extern "C" void load_prg(uint8_t * binary_, size_t binsize_, bool loop)
 {
-  MOSDBG("[USPLAYER] load_sidtune\n");
+  MOSDBG("[USPLAYER] load_prg, size: %u\n", binsize_);
   stop = false; /* Always init to false on sidtune load */
   init();
+  vsidpsid = false;
+  run_prg(binary_, binsize_, loop);
+  /* Intermission, thread will halt here until stopped */
+  if (loop && stop) { /* If looping the thread comes back here so we need to stop the emulator here */
+    emu_sleep_ms(100); /* Allow for player to stop */
+    deinit();
+  }
+  return;
+}
+
+extern "C" void load_sidtune(uint8_t * sidfile, int sidfilesize, char subt)
+{
+  MOSDBG("[USPLAYER] load_sidtune, size: %u\n", sidfilesize);
+  stop = false; /* Always init to false on sidtune load */
+  init();
+  vsidpsid = true;
   songno = ((int)subt == 0 ? -1 : (int)subt);
   MOSDBG("[USPLAYER] psid_load_file %d\n",songno);
   psid_load_file(sidfile,sidfilesize,(int)((songno != -1) ? (songno+1) : songno));
-  return 0;
+  return;
 }
 
 extern "C" void init_sidplayer(void)
@@ -444,7 +456,7 @@ extern "C" void loop_sidplayer(void)
 
 extern "C" bool stop_sidplayer(void)
 {
-  MOSDBG("[USPLAYER] stop_psidplayer\n");
+  MOSDBG("[USPLAYER] stop_sidplayer\n");
   stop = true;
 
   deinit();
@@ -455,11 +467,16 @@ extern "C" bool stop_sidplayer(void)
 extern "C" void next_subtune(void)
 {
   emu_next_subtune();
-};
+
+  return;
+}
+
 extern "C" void previous_subtune(void)
 {
   emu_previous_subtune();
-};
+
+  return;
+}
 
 extern "C" int load_sidtune_fromflash(int sidflashid, char tuneno){ return 0; };
 extern "C" void reset_sidplayer(void){};

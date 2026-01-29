@@ -91,7 +91,7 @@ extern uint16_t return_reloc_addr(void);
 extern uint16_t return_max_songs(void);
 
 /* VSID PSID variables */
-extern int numsids, sid2loc, sid3loc;
+extern int numsids, sid2loc, sid3loc, start_song;
 
 
 /**
@@ -211,20 +211,19 @@ void next_prev_tune(bool next)
 
   uint16_t max_songs = return_max_songs();
   uint16_t reloc_addr = return_reloc_addr();
-  // uint16_t addr = reloc_addr + 3 + 9 + 9; /* Skip JMP and CM80 reset vector */
-  uint16_t addr = reloc_addr + 9; /* Skip JMP and CM80 reset vector */
-  int current_song = emu_dma_read_ram(addr);
-  int next_song = (next ? (current_song+1) : (current_song-1));
+  uint16_t addr = reloc_addr + 21; /* Skip JMP and CM80 reset vector */
+  int next_song = (next ? (start_song+1) : (start_song-1));
   next_song = ((next_song > max_songs) ? 1 : (next_song < 1) ? max_songs : next_song);
+  start_song = next_song;
   MOSDBG("[USPLAYER] Next tune requested %d of %d\n", next_song, max_songs);
   emu_dma_write_ram(addr, (uint8_t)(next_song));
   /* put song number into address 780/1/2 (A/X/Y) for use by BASIC tunes */
-  emu_dma_write_ram(780, (uint8_t)((next_song) - 1));
-  emu_dma_write_ram(781, (uint8_t)((next_song) - 1));
-  emu_dma_write_ram(782, (uint8_t)((next_song) - 1));
+  emu_dma_write_ram(780, (uint8_t)(next_song - 1));
+  emu_dma_write_ram(781, (uint8_t)(next_song - 1));
+  emu_dma_write_ram(782, (uint8_t)(next_song - 1));
   MOSDBG("[USPLAYER] reloc_addr: $%04x\n",reloc_addr);
   Cpu->hot_reset();
-  Cpu->pc(addr);
+  Cpu->pc(reloc_addr);
   /* Set paused variable */
   paused = false;
   return;

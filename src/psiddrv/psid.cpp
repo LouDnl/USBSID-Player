@@ -94,7 +94,8 @@ typedef struct psid_s {
 #define PSID_V2_DATA_OFFSET 0x7c
 
 static psid_t* psid = nullptr;
-static int psid_tune = -1;       /* currently selected tune, 0: default 1: first, 2: second, etc */
+static int psid_tune = -1; /* currently selected tune, 0: default 1: first, 2: second, etc */
+int start_song;  /* currently selected tune, 0: default 1: first, 2: second, etc */
 
 #if DESKTOP
 void *psid_calloc(size_t nmemb, size_t size)
@@ -361,7 +362,7 @@ static int psid_set_cbm80(uint16_t vec, uint16_t addr)
 
 void psid_init_tune(int install_driver_hook)
 {
-  int start_song = psid_tune;
+  start_song = psid_tune;
   int sync, sid_model;
   int i;
   uint16_t reloc_addr;

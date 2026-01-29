@@ -43,6 +43,27 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y pkg-config cmake build-essential libusb-1.0-0 libusb-1.0-0-dev
 
+      # - name: Install xa dependency
+      #   if: matrix.os == 'ubuntu-latest'
+      #   run: |
+      #     sudo apt-get update && sudo apt-get install -y xa65
+
+      # - name: Checkout bin2h source
+      #   uses: actions/checkout@v4
+      #   with:
+      #     repository: elnormous/bin2h
+      #     path: bin2h-src
+
+      # - name: Build and add to PATH
+      #   run: |
+      #     cd bin2h-src
+      #     make
+      #     # Add the current directory containing the built 'bin2h' to the runner's PATH
+      #     echo "$(pwd)" >> $GITHUB_PATH
+
+      # - name: Verify installation
+      #   run: bin2h --help
+
       - name: Set up MSYS2 (Windows)
         if: matrix.os == 'windows-2022'
         uses: msys2/setup-msys2@v2

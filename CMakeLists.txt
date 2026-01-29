@@ -162,6 +162,9 @@ if (DESKTOP)
 )
 endif (DESKTOP)
 
+## Workaround for WIN32 github actions
+## Need to implement the download and compilation of XA for this
+if (UNIX)
 add_custom_command(
   # OUTPUT psiddrv.h psidextdrv.h
   OUTPUT psiddrv.h
@@ -173,6 +176,7 @@ add_custom_target(
   # DEPENDS psiddrv.h psidextdrv.h
   DEPENDS psiddrv.h
 )
+endif (UNIX)
 
 if (DESKTOP)
   set(SOURCEFILES

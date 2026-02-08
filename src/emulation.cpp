@@ -191,7 +191,8 @@ void getinfo_USBSID(int clockspeed)
   }
 
   if(cfg.numsids < sidcount) {
-    MOSDBG("[WARNING] Tune no.sids %d is higher then USBSID-Pico no.sids %d\n", sidcount, cfg.numsids);
+    MOSDBG("[WARNING] Tune no.sids %d is higher then USBSID-Pico no.sids %d forcing max sidcount to %d\n", sidcount, cfg.numsids, cfg.numsids);
+    sidcount = cfg.numsids;
   }
 
   MOSDBG("[USBSID] SOCK1#.%d SID1:%d SID2:%d\n[USBSID] SOCK2#.%d SID1:%d SID2:%d\n",

@@ -46,9 +46,15 @@
 #include <signal.h>
 #include <stdio.h>
 
-#if defined(DESKTOP) && defined(UNIX_COMPILE)
+#ifdef DESKTOP
+#ifdef _WIN32
+#include <conio.h>
+#else
 #include <termios.h>
-#endif
+#include <unistd.h>
+#include <fcntl.h>
+#endif /* _WIN32 */
+#endif /* DESKTOP */
 
 #include <c64util.h>
 #include <wrappers.h>
@@ -199,18 +205,51 @@ END:
 }
 
 /**
- * @brief Set the key capture object function with courtesy of Hermit's CrSID
+ * @brief Check for key press multiplatform
  *
- * @param state
+ * @return boolean key pressed
  */
-void set_key_capture (char state) {
-#ifdef UNIX_COMPILE
-  struct termios TTYstate;
-  tcgetattr(STDIN_FILENO, &TTYstate);
-  if (state) TTYstate.c_lflag &= ~ICANON; else TTYstate.c_lflag |= ICANON;
-  tcsetattr(STDIN_FILENO, TCSANOW, &TTYstate);
+bool kbhit() {
+#ifdef _WIN32
+  return _kbhit() != 0;
+#else
+  struct termios oldt, newt;
+  int ch;
+  int oldf;
+
+  tcgetattr(STDIN_FILENO, &oldt);
+  newt = oldt;
+  newt.c_lflag &= ~(ICANON | ECHO);
+  tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+  oldf = fcntl(STDIN_FILENO, F_GETFL, 0);
+  fcntl(STDIN_FILENO, F_SETFL, oldf | O_NONBLOCK);
+
+  ch = getchar();
+
+  tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+  fcntl(STDIN_FILENO, F_SETFL, oldf);
+
+  if (ch != EOF) {
+      ungetc(ch, stdin);
+      return true;
+  }
+  return false;
 #endif
 }
+
+/**
+ * @brief Return the pressed key multiplatform
+ *
+ * @return integer pressed key
+ */
+int getch_noblock() {
+#ifdef _WIN32
+    return _getch();
+#else
+    return getchar();
+#endif
+}
+
 
 /**
  * @brief Wait for input function with courtesy of Hermit's CrSID
@@ -218,61 +257,62 @@ void set_key_capture (char state) {
  */
 void wait_for_input(void)
 {
-#ifdef UNIX_COMPILE
-  enum cursor_keys { KEY_LEFT=0x44, KEY_RIGHT=0x43, KEY_UP=0x41, KEY_DOWN=0x42 };
-#elif defined(WINDOWS)
-  enum cursor_keys { KEY_LEFT=0x4B, KEY_RIGHT=0x4D, KEY_UP=0x48, KEY_DOWN=0x50 };
-#elif defined(DARWIN)
-  enum cursor_keys { KEY_LEFT=276, KEY_RIGHT=275, KEY_UP=273, KEY_DOWN=274 };
+#if defined(_WIN32) || defined(__CYGWIN__)
+  /* Windows scancodes (usually following a 0 or 0xE0 prefix) */
+  enum cursor_keys { KEY_UP=0x48, KEY_DOWN=0x50, KEY_LEFT=0x4B, KEY_RIGHT=0x4D };
+#elif defined(__APPLE__) && defined(__MACH__)
+  /* macOS / Darwin specific codes (often used in Carbon/Cocoa or specific frameworks) */
+  enum cursor_keys { KEY_UP=273, KEY_DOWN=274, KEY_LEFT=276, KEY_RIGHT=275 };
+#elif defined(__linux__) || defined(__unix__) || defined(__unix)
+  /* Unix/Linux: These are the suffix bytes for ANSI escape sequences (\033[A, etc.) */
+  enum cursor_keys { KEY_UP=0x41, KEY_DOWN=0x42, KEY_RIGHT=0x43, KEY_LEFT=0x44 };
+#else
+  #error "Unknown Platform"
 #endif
-  char pressed_key_char=0;
+
+  char pressed_key_char = 0;
   bool skip_capture = false;
   bool paused = false;
 
-  set_key_capture(1);
+  MOSDBG("[USPLAYER] Waiting for input\n");
+
   while(playing) {
     if (!skip_capture) {
-#ifdef UNIX_COMPILE
-    pressed_key_char = getchar();
-#elif defined(WINDOWS)
-    pressed_key_char = getch();
-#elif defined(DARWIN)
-    pressed_key_char = getchar();
-#endif
-    //printf("%2.2X\n",pressed_key_char);
-    if(/*pressed_key_char==27 ||*/ pressed_key_char=='\n' || pressed_key_char=='\r') {
-      emu_pause_playing(false);
-      stop=true; //ESC/Enter?
-      skip_capture=true;
-    } else if (pressed_key_char==' ') {
-      paused = !paused;
-      emu_pause_playing(paused);
-      // cRSID.PlaybackSpeed=1; cRSID.Paused^=1; if(cRSID.Paused) cRSID_pauseSIDtune(); else cRSID_playSIDtune();
-    } else if (pressed_key_char==0x09 || pressed_key_char=='`') {
-      // if(cRSID.PlaybackSpeed==1) cRSID.PlaybackSpeed = FFWD_SPEED; else cRSID.PlaybackSpeed = 1;
-    } else if ('1'<=pressed_key_char &&  pressed_key_char<='9') {
-      // SubTune=pressed_key_char-'1'+1; cRSID_startSubtune(SubTune); printTuneInfo_callBack( 1, (void*) &PrevFrameCycles );
-    } else if (pressed_key_char==KEY_RIGHT) {
-      emu_pause_playing(true);
-      emu_next_subtune();
-      emu_pause_playing(false);
-      // printTuneInfo_callBack( nextTuneButton(), (void*) &PrevFrameCycles );
-    } else if (pressed_key_char==KEY_LEFT) {
-      emu_pause_playing(true);
-      emu_previous_subtune();
-      emu_pause_playing(false);
-      // printTuneInfo_callBack( prevTuneButton(), (void*) &PrevFrameCycles );
-    } else if (pressed_key_char==KEY_UP) {
-      // volumeUpButton();
-    } else if (pressed_key_char==KEY_DOWN) {
-      // volumeDownButton();
-    } else {
-      // cRSID.PlaybackSpeed=1;
+      if (kbhit()) {
+        int ch = (char)getch_noblock();
+        pressed_key_char = (char)ch;
+        if(/*pressed_key_char==27 ||*/ pressed_key_char=='\n' || pressed_key_char=='\r') {
+          std::cout << "\rKEY_STOP       \n" << std::flush;
+          emu_pause_playing(false);
+          stop=true;
+          skip_capture=true;
+        } else if (pressed_key_char=='p') {
+          paused = !paused;
+          std::cout << "\rKEY_PAUSE       " << (int)paused << std::flush;
+          emu_pause_playing(paused);
+        } else if (pressed_key_char==0x09 || pressed_key_char=='`') {
+        } else if ('1'<=pressed_key_char &&  pressed_key_char<='9') {
+        } else if (pressed_key_char==KEY_RIGHT) {
+          std::cout << "\rKEY_RIGHT      \n" << std::flush;
+          emu_pause_playing(true);
+          emu_next_subtune();
+          emu_pause_playing(false);
+        } else if (pressed_key_char==KEY_LEFT) {
+          std::cout << "\rKEY_LEFT       \n" << std::flush;
+          emu_pause_playing(true);
+          emu_previous_subtune();
+          emu_pause_playing(false);
+        } else if (pressed_key_char==KEY_UP) {
+          std::cout << "\rKEY_UP         " << std::flush;
+        } else if (pressed_key_char==KEY_DOWN) {
+          std::cout << "\rKEY_DOWN       " << std::flush;
+        } else {
+          std::cout << "\rKEY: " << (char)ch << "   " << std::flush;
+        }
+        // emu_sleep_us(5000);
+      }
     }
-    emu_sleep_us(5000);
   }
-  }
-  set_key_capture(0);
   return;
 }
 

@@ -78,17 +78,6 @@ if (EMBEDDED)
   add_compile_definitions(ONBOARD_SIDPLAYER=1)
 endif (EMBEDDED)
 
-# Windows additionals
-# if (WIN32)
-# set(WIN32_SRC
-#   ${CMAKE_CURRENT_LIST_DIR}/src/termiwin/termiWin.c
-# )
-# set(WIN32_INC
-#   ${CMAKE_CURRENT_LIST_DIR}/src/termiwin
-# )
-# endif (WIN32)
-
-
 # Run the project command
 project(${PROJECT_NAME} C CXX ASM)
 

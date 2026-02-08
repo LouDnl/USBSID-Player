@@ -107,7 +107,6 @@ mos6581_8580 *SID;
 mmu *MMU;
 
 /* Emulation variables */
-bool threaded = true;
 bool log_instructions = false;
 bool log_timers = false;
 bool log_pla = false;

@@ -93,6 +93,7 @@ extern bool is_pal;
 char * filename;
 bool from_stdin = false;
 bool force_microsidplayer = false;
+bool threaded = true;
 
 /* External emulation variables */
 #if DESKTOP
@@ -109,8 +110,8 @@ extern bool
   forcesockettwo,
   is_rsid,
   havefile,
-  prgfile,
-  threaded;
+  prgfile;
+
 extern bool
   log_instructions,
   log_timers,
@@ -381,10 +382,11 @@ void process_arguments(int argc, char **argv)
       threaded = false;
     }
   }
-  MOSDBG("[USPLAYER] FILE:%d PRG:%d FORCEMICROSID:%d SONGO:%d CPU:%d L:%d%d%d%d%d%d%d%d%d\n",
+  MOSDBG("[USPLAYER ARGS] FILE:%d PRG:%d FORCEMICROSID:%d FORCESOCK2:%d SONGO:%d CPU:%d L:%d%d%d%d%d%d%d%d%d\n",
     havefile,
     prgfile,
     force_microsidplayer,
+    forcesockettwo,
     songno,
     log_instructions,
     log_timers,
@@ -406,7 +408,7 @@ int main(int argc, char **argv)
   signal(SIGINT, inthand);
   process_arguments(argc,argv);
   init();
-  MOSDBG("[USPLAYER] FILE:%d PRG:%d FORCEMICROSID:%d SONGO:%d CPU:%d L:%d%d%d%d%d%d%d%d%d\n",
+  MOSDBG("[USPLAYER MAIN] FILE:%d PRG:%d FORCEMICROSID:%d SONGO:%d CPU:%d L:%d%d%d%d%d%d%d%d%d\n",
     havefile,
     prgfile,
     force_microsidplayer,
@@ -427,7 +429,9 @@ int main(int argc, char **argv)
     int error;
     error = pthread_create(&usplayer_ptid, NULL, &Emulation_Thread, NULL);
     if (error != 0) {
-      MOSDBG("[DEBUGGER] Thread can't be created :[%s]\n", strerror(error));
+      MOSDBG("[USPLAYER] Thread can't be created :[%s]\n", strerror(error));
+    } else {
+      MOSDBG("[USPLAYER] Thread created\n");
     }
     wait_for_input();
   } else {

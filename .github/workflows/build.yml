@@ -22,8 +22,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest, shell: bash, buildname: usbsidplayer }
-          - { os: windows-2022,  shell: 'msys2 {0}', buildname: usbsidplayer.exe }
+          - { os: ubuntu-latest, shell: bash, buildname: usbsid }
+          - { os: macos-14,  shell: bash, buildname: usbsid_macos14 }
+          - { os: macos-15-intel,  shell: bash, buildname: usbsid_macos15intel }
+          - { os: windows-2022,  shell: 'msys2 {0}', buildname: usbsid.exe }
     defaults:
       run:
         shell: ${{ matrix.shell }}

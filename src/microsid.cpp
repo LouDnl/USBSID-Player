@@ -108,7 +108,7 @@ static const char *clockspeed[5] = {"Unknown", "PAL", "NTSC", "PAL and NTSC", "D
 /* SID file variables applied to C64 */
 SidFile *sidfile_;
 uint8_t songno = -1;
-string filename = "";
+string ms_filename = "";
 int clock_speed,
   raster_lines,
   frame_cycles,
@@ -450,8 +450,8 @@ bool process_sid_file(uint8_t * binary_, size_t binsize_)
 {
   sidfile_ = new SidFile();
 #if DESKTOP
-  filename = fname;
-  int res = (havefile ? sidfile_->Parse(filename) : -1);
+  ms_filename = fname;
+  int res = (havefile ? sidfile_->Parse(ms_filename) : -1);
 #elif EMBEDDED
   int res = (havefile ? sidfile_->ParsePtr(binary_, binsize_) : -1);
 #endif

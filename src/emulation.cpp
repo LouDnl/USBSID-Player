@@ -182,7 +182,7 @@ void getinfo_USBSID(int clockspeed)
 #elif EMBEDDED
   int clockrates[] = { 1000000, 985248, 1022727, 1023440, 1022730 };
   if(usbsid_config.clock_rate != clockspeed) {
-    for (uint i = 0; i < count_of(clockrates); i++) {
+    for (int i = 0; i < count_of(clockrates); i++) {
       if (clockrates[i] == clockspeed) {
         apply_clockrate(i, true);
       }

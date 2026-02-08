@@ -564,9 +564,9 @@ void __us_not_in_flash_func mos6560_6561::vsync_do_end_of_line(void)
  */
 void __us_not_in_flash_func mos6560_6561::graphic_mode(void)
 {
-  uint ecm = (control_register_one & 0x40u);
-  uint bmm = (control_register_one & 0x20u);
-  uint mcm = (control_register_two & 0x10u);
+  uint8_t ecm = (control_register_one & 0x40u);
+  uint8_t bmm = (control_register_one & 0x20u);
+  uint8_t mcm = (control_register_two & 0x10u);
 
   if(!ecm && !bmm && !mcm)
     graphic_mode_ = pCharMode;

@@ -40,6 +40,8 @@ set(EXECUTABLE ${PROJECT_NAME} CACHE STRING "EXECUTABLE")
 set(DESKTOP 1 CACHE STRING "DESKTOP")
 # enable or disable embedded build
 set(EMBEDDED 0 CACHE STRING "EMBEDDED")
+# enable or disable the (re)build of psiddrv.h
+set(BUILDPSIDDRV 0 CACHE STRING "BUILDPSIDDRV")
 # enable or disable radare2 debugging support
 set(RADARE2 1 CACHE STRING "RADARE2")
 
@@ -150,21 +152,23 @@ if (DESKTOP)
 )
 endif (DESKTOP)
 
-## Workaround for WIN32 and MacOs github actions failing
-## Need to implement the download and compilation of XA for this
-if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
-add_custom_command(
-  # OUTPUT psiddrv.h psidextdrv.h
-  OUTPUT psiddrv.h
-  COMMAND $(MAKE) all
-  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/psiddrv/
-)
-add_custom_target(
-  RSIDDriver ALL
-  # DEPENDS psiddrv.h psidextdrv.h
-  DEPENDS psiddrv.h
-)
-endif ()
+## Workaround for github actions failing
+## Needs download and compilation of XA for this part to work
+if (BUILDPSIDDRV)
+  if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  add_custom_command(
+    # OUTPUT psiddrv.h psidextdrv.h
+    OUTPUT psiddrv.h
+    COMMAND $(MAKE) all
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/psiddrv/
+  )
+  add_custom_target(
+    RSIDDriver ALL
+    # DEPENDS psiddrv.h psidextdrv.h
+    DEPENDS psiddrv.h
+  )
+  endif ()
+endif (BUILDPSIDDRV)
 
 if (DESKTOP)
   set(SOURCEFILES

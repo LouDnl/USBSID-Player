@@ -87,7 +87,7 @@ tick_t tick_per_second(void)
 tick_t tick_now(void)
 {
   struct timespec now;
-  clock_gettime(CLOCK_MONOTONIC_RAW, &now);
+  clock_gettime(US_MONOTONIC_CLOCK, &now);
   return NANO_TO_TICK(((uint64_t)NANO_PER_SECOND * now.tv_sec) + now.tv_nsec);
 }
 

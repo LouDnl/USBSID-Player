@@ -38,6 +38,15 @@
 
 #include <types.h>
 
+#ifndef US_MONOTONIC_CLOCK
+#if defined(_WIN32) || defined(__CYGWIN__)
+#define US_MONOTONIC_CLOCK CLOCK_MONOTONIC
+#else
+#define US_MONOTONIC_CLOCK CLOCK_MONOTONIC_RAW
+#endif
+#endif /* US_MONOTONIC_CLOCK */
+
+
 /* number of ticks per second */
 tick_t tick_per_second(void);
 

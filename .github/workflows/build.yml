@@ -96,5 +96,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.buildname }}-${{ matrix.os }}
-          path: repo/${{ matrix.buildname }}
+          path: repo/${{ matrix.buildname }}*
           if-no-files-found: ignore

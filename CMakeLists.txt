@@ -150,9 +150,9 @@ if (DESKTOP)
 )
 endif (DESKTOP)
 
-## Workaround for WIN32 github actions
+## Workaround for WIN32 and MacOs github actions failing
 ## Need to implement the download and compilation of XA for this
-if (UNIX)
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
 add_custom_command(
   # OUTPUT psiddrv.h psidextdrv.h
   OUTPUT psiddrv.h
@@ -164,7 +164,7 @@ add_custom_target(
   # DEPENDS psiddrv.h psidextdrv.h
   DEPENDS psiddrv.h
 )
-endif (UNIX)
+endif ()
 
 if (DESKTOP)
   set(SOURCEFILES
@@ -183,11 +183,11 @@ endif (DESKTOP)
 ### Compile time
 add_executable(${EXECUTABLE} ${SOURCEFILES})
 
-if (UNIX)
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
 target_compile_definitions(${EXECUTABLE} PRIVATE UNIX_COMPILE)
 # target_compile_definitions(${PROJECT_NAME} PRIVATE __LINUX_ALSA__)
 # target_compile_definitions(${PROJECT_NAME} PRIVATE __RTMIDI_DEBUG__)
-endif (UNIX)
+endif ()
 
 # if (WIN32)
 # target_compile_definitions(${PROJECT_NAME} PRIVATE WINDOWS_COMPILE)

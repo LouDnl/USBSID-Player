@@ -82,7 +82,7 @@ jobs:
       - name: Configure and build ${{ matrix.buildname }}
         run: |
           pushd repo
-          cmake -S . -B build && cmake --build build -j$(nproc)
+          cmake -S . -B build -DEXECUTABLE=${{ matrix.buildname }} && cmake --build build -j$(nproc)
           ls -lhai
           popd
 

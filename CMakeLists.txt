@@ -34,6 +34,7 @@ set(CMAKE_CXX_STANDARD 17)
 
 ### Project magic sprinkles
 set(PROJECT_NAME usbsid)
+set(EXECUTABLE ${PROJECT_NAME} CACHE STRING "EXECUTABLE")
 
 # enable or disable desktop build
 set(DESKTOP 1 CACHE STRING "DESKTOP")
@@ -195,18 +196,18 @@ endif (UNIX)
 # target_compile_definitions(${PROJECT_NAME} PRIVATE TERMIWIN_DONOTREDEFINE=1)
 # endif (WIN32)
 
-target_include_directories(${PROJECT_NAME} ${TARGET_INCLUDE_DIRS})
-target_link_libraries(${PROJECT_NAME} ${TARGET_LL})
-target_sources(${PROJECT_NAME} PUBLIC ${SOURCEFILES})
-target_compile_options(${PROJECT_NAME} ${COMPILE_OPTS})
+target_include_directories(${EXECUTABLE} ${TARGET_INCLUDE_DIRS})
+target_link_libraries(${EXECUTABLE} ${TARGET_LL})
+target_sources(${EXECUTABLE} PUBLIC ${SOURCEFILES})
+target_compile_options(${EXECUTABLE} ${COMPILE_OPTS})
 
 ### Copy build output to main directory
 add_custom_command(TARGET
-  ${PROJECT_NAME}
+  ${EXECUTABLE}
   POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:${PROJECT_NAME}> ${CMAKE_CURRENT_LIST_DIR})
+  COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:${EXECUTABLE}> ${CMAKE_CURRENT_LIST_DIR})
 ### Remove build output from build directory
 add_custom_command(TARGET
-  ${PROJECT_NAME}
+  ${EXECUTABLE}
   POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E rm $<TARGET_FILE:${PROJECT_NAME}>)
+  COMMAND ${CMAKE_COMMAND} -E rm $<TARGET_FILE:${EXECUTABLE}>)

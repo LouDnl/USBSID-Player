@@ -83,30 +83,28 @@ endif (EMBEDDED)
 project(${PROJECT_NAME} C CXX ASM)
 
 if (DESKTOP)
-  # the `pkg_check_modules` function is created with this call
   find_package(PkgConfig REQUIRED)
-
-  # these calls create special `PkgConfig::<MODULE>` variables
   pkg_check_modules(libusb REQUIRED IMPORTED_TARGET libusb-1.0)
 
-  ### Libraries to link
-  if (UNIX)
+  set(TARGET_LL PkgConfig::libusb)
+
+  ### Linux ONLY (Exclude macOS/Darwin)
+  if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     pkg_check_modules(udev REQUIRED IMPORTED_TARGET libudev)
-    # pkg_check_modules(asound REQUIRED IMPORTED_TARGET alsa)
-    # pkg_check_modules(jack REQUIRED IMPORTED_TARGET jack)
-    # pkg_check_modules(pthread REQUIRED IMPORTED_TARGET libpthread)
-    set(TARGET_LL
-      PkgConfig::libusb
-      PkgConfig::udev
-      # PkgConfig::asound
-      # PkgConfig::pthread
-    )
-  endif (UNIX)
+    list(APPEND TARGET_LL PkgConfig::udev)
+  endif ()
+
+  ### macOS ONLY
+  if (APPLE)
+    # libusb on macOS often requires these native frameworks
+    find_library(IOKIT_FRAMEWORK IOKit)
+    find_library(COREFOUNDATION_FRAMEWORK CoreFoundation)
+    list(APPEND TARGET_LL ${IOKIT_FRAMEWORK} ${COREFOUNDATION_FRAMEWORK})
+  endif ()
+
   if (WIN32)
-    set(TARGET_LL
-      PkgConfig::libusb
-    )
-  endif (WIN32)
+    # PkgConfig::libusb is already in TARGET_LL
+  endif ()
 
 endif (DESKTOP)
 

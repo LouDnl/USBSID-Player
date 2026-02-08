@@ -181,10 +181,10 @@ if (DESKTOP)
 endif (DESKTOP)
 
 ### Compile time
-add_executable(${PROJECT_NAME} ${SOURCEFILES})
+add_executable(${EXECUTABLE} ${SOURCEFILES})
 
 if (UNIX)
-target_compile_definitions(${PROJECT_NAME} PRIVATE UNIX_COMPILE)
+target_compile_definitions(${EXECUTABLE} PRIVATE UNIX_COMPILE)
 # target_compile_definitions(${PROJECT_NAME} PRIVATE __LINUX_ALSA__)
 # target_compile_definitions(${PROJECT_NAME} PRIVATE __RTMIDI_DEBUG__)
 endif (UNIX)

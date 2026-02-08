@@ -504,7 +504,7 @@ extern "C" bool stop_sidplayer(void)
 {
   MOSDBG("[USPLAYER] stop_sidplayer\n");
   stop = true;
-
+  if (vsidpsid) { psid_shutdown(); }
   deinit();
 
   return stop;

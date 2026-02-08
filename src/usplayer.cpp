@@ -41,6 +41,8 @@
 #include <chrono>
 #include <string>
 #include <thread>
+#include <algorithm> // Required for std::transform
+#include <cctype>    // Required for ::tolower
 
 #include <sys/time.h>
 #include <signal.h>
@@ -210,7 +212,7 @@ END:
  *
  * @return boolean key pressed
  */
-bool kbhit() {
+bool check_keyboard() {
 #ifdef _WIN32
   return _kbhit() != 0;
 #else
@@ -279,7 +281,7 @@ void wait_for_input(void)
 
   while(playing) {
     if (!skip_capture) {
-      if (kbhit()) {
+      if (check_keyboard()) {
         int ch = (char)getch_noblock();
         pressed_key_char = (char)ch;
         if(/*pressed_key_char==27 ||*/ pressed_key_char=='\n' || pressed_key_char=='\r') {

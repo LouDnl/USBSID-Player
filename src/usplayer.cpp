@@ -174,6 +174,7 @@ void* Emulation_Thread(void* arg)
   pthread_detach(pthread_self());
   MOSDBG("[EMU] Thread detached\r\n");
   pthread_mutex_lock(&usplayer_mutex);
+  playing = true;
   run_player();
   MOSDBG("[EMU] Thread finished\r\n");
   playing = false;
@@ -209,6 +210,7 @@ END:
 
 /**
  * @brief Check for key press multiplatform
+ *        Note: On Unix, terminal must already be in non-canonical non-blocking mode
  *
  * @return boolean key pressed
  */
@@ -216,22 +218,7 @@ bool check_keyboard() {
 #ifdef _WIN32
   return _kbhit() != 0;
 #else
-  struct termios oldt, newt;
-  int ch;
-  int oldf;
-
-  tcgetattr(STDIN_FILENO, &oldt);
-  newt = oldt;
-  newt.c_lflag &= ~(ICANON | ECHO);
-  tcsetattr(STDIN_FILENO, TCSANOW, &newt);
-  oldf = fcntl(STDIN_FILENO, F_GETFL, 0);
-  fcntl(STDIN_FILENO, F_SETFL, oldf | O_NONBLOCK);
-
-  ch = getchar();
-
-  tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
-  fcntl(STDIN_FILENO, F_SETFL, oldf);
-
+  int ch = getchar();
   if (ch != EOF) {
       ungetc(ch, stdin);
       return true;
@@ -277,14 +264,46 @@ void wait_for_input(void)
   bool skip_capture = false;
   bool paused = false;
 
+#if !defined(_WIN32)
+  /* Set terminal to non-canonical non-blocking mode once at start */
+  struct termios oldt, newt;
+  int oldf;
+
+  tcgetattr(STDIN_FILENO, &oldt);
+  newt = oldt;
+  newt.c_lflag &= ~(ICANON | ECHO);
+  tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+  oldf = fcntl(STDIN_FILENO, F_GETFL, 0);
+  fcntl(STDIN_FILENO, F_SETFL, oldf | O_NONBLOCK);
+#endif
+
   MOSDBG("[USPLAYER] Waiting for input\n");
 
   while(playing) {
     if (!skip_capture) {
       if (check_keyboard()) {
-        int ch = (char)getch_noblock();
+        int ch = getch_noblock();
         pressed_key_char = (char)ch;
-        if(/*pressed_key_char==27 ||*/ pressed_key_char=='\n' || pressed_key_char=='\r') {
+#if !defined(_WIN32)
+        /* Handle escape sequences for arrow keys on Unix/Linux/macOS */
+        if (pressed_key_char == 0x1B) { /* ESC character */
+          int ch2 = getch_noblock();
+          if (ch2 == '[') {
+            int ch3 = getch_noblock();
+            if (ch3 != EOF) {
+              pressed_key_char = (char)ch3; /* A, B, C, or D for arrow keys */
+            }
+          } else if (ch2 == EOF) {
+            /* Actual ESC key pressed */
+            std::cout << "\rKEY_STOP       \n" << std::flush;
+            emu_pause_playing(false);
+            stop=true;
+            skip_capture=true;
+            continue;
+          }
+        }
+#endif
+        if(pressed_key_char=='\n' || pressed_key_char=='\r') {
           std::cout << "\rKEY_STOP       \n" << std::flush;
           emu_pause_playing(false);
           stop=true;
@@ -293,8 +312,10 @@ void wait_for_input(void)
           paused = !paused;
           std::cout << "\rKEY_PAUSE       " << (int)paused << std::flush;
           emu_pause_playing(paused);
-        } else if (pressed_key_char==0x09 || pressed_key_char=='`') {
-        } else if ('1'<=pressed_key_char &&  pressed_key_char<='9') {
+        // } else if (pressed_key_char==0x09 || pressed_key_char=='`') {
+
+        // } else if ('1'<=pressed_key_char && pressed_key_char<='9') {
+
         } else if (pressed_key_char==KEY_RIGHT) {
           std::cout << "\rKEY_RIGHT      \n" << std::flush;
           emu_pause_playing(true);
@@ -312,10 +333,17 @@ void wait_for_input(void)
         } else {
           std::cout << "\rKEY: " << (char)ch << "   " << std::flush;
         }
-        // emu_sleep_us(5000);
       }
     }
+    emu_sleep_us(1000); /* Small sleep to avoid busy-waiting */
   }
+
+#if !defined(_WIN32)
+  /* Restore terminal settings */
+  tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+  fcntl(STDIN_FILENO, F_SETFL, oldf);
+#endif
+
   return;
 }
 

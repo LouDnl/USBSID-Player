@@ -49,8 +49,8 @@ class mos6526
     uint_least16_t cia_address;
 
     /* Debugging */
-    uint_least8_t w_shadow[0xf];
-    uint_least8_t r_shadow[0xf];
+    uint_least8_t w_shadow[0x10];
+    uint_least8_t r_shadow[0x10];
 
     /* Variables */
     CPUCLOCK cia_cpu_clock;

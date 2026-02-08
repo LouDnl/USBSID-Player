@@ -67,6 +67,7 @@ extern int sidcount;
 extern int sidno;
 
 /* External emulator functions */
+extern void getinfo_USBSID(int clockspeed);
 extern void emulate_c64(void);
 extern void start_c64_test(void);
 extern void emu_write_byte(uint16_t addr, uint8_t data);
@@ -106,12 +107,15 @@ void run_prg(string fname, bool loop)
 void run_prg(uint8_t * binary_, size_t binsize_, bool loop)
 #endif
 {
-  /* Init emulator vars */
+  /* Init emulator base vars */
   {
     sidcount = 1;
     sidone = 0xd400;
-    // sidtwo = 0xd420;
     sidtwo = 0xd000;
+
+    /* Get info from USBSID-Pico */
+    getinfo_USBSID(985248); /* Assume PAL system */
+
     SID->sidcount = sidcount; /* Default is 1 */
     SID->sidno    = 0;        /* Default startnum */
     SID->sidone   = sidone;   /* Default */
@@ -129,7 +133,6 @@ void run_prg(uint8_t * binary_, size_t binsize_, bool loop)
   }
 
   /* Copy SID data to RAM */
-  // uint8_t file[0x10000]; /* 64KB */
   uint_least8_t *prg = new uint_least8_t[0x10000];
 
   size_t prg_size = fread(prg, 1, 0x10000, f);

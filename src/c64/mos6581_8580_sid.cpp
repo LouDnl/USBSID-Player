@@ -96,6 +96,7 @@ bool __us_not_in_flash_func mos6581_8580::custom_sidaddr_check(uint16_t addr)
 {
   uint16_t test_addr = (addr & 0xfff0);
   switch (test_addr) {
+    case 0xd440 ... 0xd45f: /* Fix for MCH tunes e.g. Hot Earwax and MWC */
     case 0xd5c0 ... 0xd5df:
       return true;
     default:

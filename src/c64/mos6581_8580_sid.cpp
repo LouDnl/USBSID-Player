@@ -86,7 +86,10 @@ void mos6581_8580::glue_c64(mmu * _mmu, mos6510 * _cpu)
 /**
  * @brief Some tunes write to a mirror address instead of regular $d400
  *        This function provides a work-around
- *        Example: 5-Channel-digi-tune writes to $d5c0
+ *
+ * @note  $d420/$d43f Samplr_-_Jogeir_Nearly_There.sid & Mythus_-_a dorian tale.sid
+ * @note  $d440/$d45f MCH tunes e.g. Hot Earwax and MWC
+ * @note  $d5c0/$d5df 5-Channel_Digi-Tune.sid
  *
  * @param addr
  * @return true
@@ -96,7 +99,7 @@ bool __us_not_in_flash_func(custom_sidaddr_check) mos6581_8580::custom_sidaddr_c
 {
   uint16_t test_addr = (addr & 0xfff0);
   switch (test_addr) {
-    case 0xd440 ... 0xd45f: /* Fix for MCH tunes e.g. Hot Earwax and MWC */
+    case 0xd420 ... 0xd45f:
     case 0xd5c0 ... 0xd5df:
       return true;
     default:

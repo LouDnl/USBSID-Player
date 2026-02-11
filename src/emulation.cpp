@@ -41,18 +41,7 @@
 
 #include <signal.h>
 
-#include <constants.h>
-
-#include <mos6510_cpu.h>
-#include <mos6526_cia.h>
-#include <mos6581_8580_sid.h>
-#include <mos6560_6561_vic.h>
-#include <mos906114_pla.h>
-#include <mmu.h>
-
-#include <sidfile.h>
-#include <c64util.h>
-#include <wrappers.h>
+#include <emulation.h>
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wnarrowing"
@@ -72,51 +61,6 @@ extern Config usbsid_config;
 extern RuntimeCFG cfg;
 }
 #endif
-int pcbversion = -1;
-int fmoplsidno = -1;
-uint16_t sidone, sidtwo, sidthree, sidfour;
-int sidssockone = 0, sidssocktwo = 0;
-int sockonesidone = 0, sockonesidtwo = 0;
-int socktwosidone = 0, socktwosidtwo = 0;
-bool forcesockettwo = false; /* force play on socket two */
-int sidcount = 1;
-int sidno = 0;
-
-#define CIA1_ADDRESS 0xDC00
-#define CIA2_ADDRESS 0xDD00
-/* Emulation variables */
-#if DESKTOP
-volatile sig_atomic_t stop;
-volatile sig_atomic_t playing;
-volatile sig_atomic_t paused;
-volatile sig_atomic_t vsidpsid;
-#elif EMBEDDED
-volatile bool stop;
-volatile bool playing;
-volatile bool paused;
-volatile bool vsidpsid;
-#endif
-
-/* C64 Variables */
-mos6510 *Cpu;
-mos6526 *Cia1;
-mos6526 *Cia2;
-mos6560_6561 *Vic;
-mos906114 *Pla;
-mos6581_8580 *SID;
-mmu *MMU;
-
-/* Emulation variables */
-bool log_instructions = false;
-bool log_timers = false;
-bool log_pla = false;
-bool log_readwrites = false;
-bool log_romrw = false;
-bool log_vicrw = false;
-bool log_vicrrw = false;
-bool log_cia1rw = false;
-bool log_cia2rw = false;
-bool log_sidrw = false;
 
 /* VSIDPSID external functions */
 extern void next_prev_tune(bool next);

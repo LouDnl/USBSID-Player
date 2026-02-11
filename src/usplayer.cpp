@@ -208,6 +208,10 @@ END:
   deinit();
 }
 
+#if !defined(_WIN32)
+static int pending_char = -1;  /* -1 means no pending character */
+#endif
+
 /**
  * @brief Check for key press multiplatform
  *        Note: On Unix, terminal must already be in non-canonical non-blocking mode
@@ -218,10 +222,14 @@ bool check_keyboard() {
 #ifdef _WIN32
   return _kbhit() != 0;
 #else
-  int ch = getchar();
-  if (ch != EOF) {
-      ungetc(ch, stdin);
-      return true;
+  if (pending_char >= 0) {
+    return true;
+  }
+  unsigned char ch;
+  ssize_t n = read(STDIN_FILENO, &ch, 1);
+  if (n == 1) {
+    pending_char = ch;
+    return true;
   }
   return false;
 #endif
@@ -234,9 +242,19 @@ bool check_keyboard() {
  */
 int getch_noblock() {
 #ifdef _WIN32
-    return _getch();
+  return _getch();
 #else
-    return getchar();
+  if (pending_char >= 0) {
+    int ch = pending_char;
+    pending_char = -1;
+    return ch;
+  }
+  unsigned char ch;
+  ssize_t n = read(STDIN_FILENO, &ch, 1);
+  if (n == 1) {
+    return ch;
+  }
+  return EOF;
 #endif
 }
 

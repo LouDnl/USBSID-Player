@@ -1995,7 +1995,7 @@ void mos6510::dump_regs()
   vic->dump_irqs();
   MOSDBG("] ");
 
-  MOSDBG("PC=%04x(%04x) M=%04X A=%02x X=%02x Y=%02x SP=%02x(%04x) [NV-BDIZC %d%d-%d%d%d%d%d] FL: %s\n",
+  MOSDBG("PC=%04x(%04x) M=%04X A=%02x X=%02x Y=%02x SP=%02x(%04x) [NV-BDIZC %d%d-%d%d%d%d%d] FL: %s",
     pc(), /* PC NOW */
     (mmu_->dma_read_ram(pc_address+1) | (mmu_->dma_read_ram(pc_address+2) << 8)), /* MEM */
     (mmu_->dma_read_ram(d_address) | (mmu_->dma_read_ram(d_address+1) << 8)),     /* RAM */
@@ -2030,7 +2030,9 @@ void mos6510::dump_regs_insn(val_t insn)
     mmu_->dma_read_ram(d_address), /* READ/WRITE VALUE */
     (cycles()-prev_cycles));
   dump_regs();
+  MOSDBG("\n");
   prev_cycles = cycles();
+  return;
 }
 
 void mos6510::dump_regs_irq(uint_least8_t type, uint_least8_t source)
@@ -2050,6 +2052,8 @@ void mos6510::dump_regs_irq(uint_least8_t type, uint_least8_t source)
     mmu_->dma_read_ram(d_address), /* READ/WRITE VALUE */
     7);
   dump_regs();
+  MOSDBG("\n");
+  return;
 }
 
 void mos6510::dump_regs_json()

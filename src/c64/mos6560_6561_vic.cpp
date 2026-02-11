@@ -71,7 +71,7 @@ mos6560_6561::~mos6560_6561(void)
  * @brief Glue required C64 parts
  *
  */
-void __us_not_in_flash_func mos6560_6561::glue_c64(VicReadDMA rdma, mos6510 *_cpu, mos6581_8580 *_sid)
+void __us_not_in_flash_func(glue_c64) mos6560_6561::glue_c64(VicReadDMA rdma, mos6510 *_cpu, mos6581_8580 *_sid)
 {
   cpu = _cpu;
   sid = _sid;
@@ -82,7 +82,7 @@ void __us_not_in_flash_func mos6560_6561::glue_c64(VicReadDMA rdma, mos6510 *_cp
  * @brief Reset the VIC-II register values to default settings
  *
  */
-void __us_not_in_flash_func mos6560_6561::reset(void)
+void __us_not_in_flash_func(reset) mos6560_6561::reset(void)
 {
   vic_cpu_clock = 0;
   prev_vic_cpu_clock = 0;
@@ -122,7 +122,7 @@ void __us_not_in_flash_func mos6560_6561::reset(void)
  * @param reg
  * @return reg_t
  */
-reg_t __us_not_in_flash_func mos6560_6561::read_register(reg_t reg)
+reg_t __us_not_in_flash_func(read_register) mos6560_6561::read_register(reg_t reg)
 {
   /* DMA read return value from shadow RAM first */
   val_t data = shadow_regs[reg];
@@ -198,7 +198,7 @@ reg_t __us_not_in_flash_func mos6560_6561::read_register(reg_t reg)
  * @param reg
  * @param value
  */
-void __us_not_in_flash_func mos6560_6561::write_register(reg_t reg, val_t value)
+void __us_not_in_flash_func(write_register) mos6560_6561::write_register(reg_t reg, val_t value)
 {
 
   switch (reg) {
@@ -273,7 +273,7 @@ void __us_not_in_flash_func mos6560_6561::write_register(reg_t reg, val_t value)
  * NOTE: not single cycle exact
  *
  */
-void __us_not_in_flash_func mos6560_6561::emulate(void)
+void __us_not_in_flash_func(emulate) mos6560_6561::emulate(void)
 {
   vic_cpu_clock = cpu->cycles();
   static tick_t cycles;
@@ -348,7 +348,7 @@ void __us_not_in_flash_func mos6560_6561::emulate(void)
  *
  * @return uint_fast16_t
  */
-uint_fast16_t __us_not_in_flash_func mos6560_6561::raster_row(void)
+uint_fast16_t __us_not_in_flash_func(raster_row) mos6560_6561::raster_row(void)
 {
   return (((control_register_one & RASTERROWMSB) << 1u) + raster_row_lines);
 }
@@ -359,7 +359,7 @@ uint_fast16_t __us_not_in_flash_func mos6560_6561::raster_row(void)
  * @return true
  * @return false
  */
-bool __us_not_in_flash_func mos6560_6561::stun(void)
+bool __us_not_in_flash_func(stun) mos6560_6561::stun(void)
 {
   uint_fast16_t current_raster_row_ = raster_row();
   bool _stun = (
@@ -375,7 +375,7 @@ bool __us_not_in_flash_func mos6560_6561::stun(void)
  * @param speed
  * @return int
  */
-int __us_not_in_flash_func mos6560_6561::set_timer_speed(int speed)
+int __us_not_in_flash_func(set_timer_speed) mos6560_6561::set_timer_speed(int speed)
 {
   double cpu_percent;
 
@@ -420,7 +420,7 @@ int __us_not_in_flash_func mos6560_6561::set_timer_speed(int speed)
  *       into separate blocks for the same
  *       functions
  */
-void __us_not_in_flash_func mos6560_6561::vsync_do_end_of_line(void)
+void __us_not_in_flash_func(vsync_do_end_of_line) mos6560_6561::vsync_do_end_of_line(void)
 #if DESKTOP
 {
   const int microseconds_between_sync = 2 * 1000;
@@ -562,7 +562,7 @@ void __us_not_in_flash_func mos6560_6561::vsync_do_end_of_line(void)
  * @brief Sets the VIC graphics mode, for debug and logging purposes only!
  *
  */
-void __us_not_in_flash_func mos6560_6561::graphic_mode(void)
+void __us_not_in_flash_func(graphic_mode) mos6560_6561::graphic_mode(void)
 {
   uint8_t ecm = (control_register_one & 0x40u);
   uint8_t bmm = (control_register_one & 0x20u);

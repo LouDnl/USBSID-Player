@@ -92,7 +92,7 @@ void mos6581_8580::glue_c64(mmu * _mmu, mos6510 * _cpu)
  * @return true
  * @return false
  */
-bool __us_not_in_flash_func mos6581_8580::custom_sidaddr_check(uint16_t addr)
+bool __us_not_in_flash_func(custom_sidaddr_check) mos6581_8580::custom_sidaddr_check(uint16_t addr)
 {
   uint16_t test_addr = (addr & 0xfff0);
   switch (test_addr) {
@@ -104,7 +104,7 @@ bool __us_not_in_flash_func mos6581_8580::custom_sidaddr_check(uint16_t addr)
   return false;
 }
 
-uint8_t __us_not_in_flash_func mos6581_8580::sidaddr_translation(uint16_t addr)
+uint8_t __us_not_in_flash_func(sidaddr_translation) mos6581_8580::sidaddr_translation(uint16_t addr)
 {
   uint8_t sock2add = (forcesockettwo ? (sidssockone == 1 ? 0x20 : sidssockone == 2 ? 0x40 : 0x0) : 0x0);
   if (addr == 0xDF40 || addr == 0xDF50) {
@@ -171,7 +171,7 @@ uint8_t __us_not_in_flash_func mos6581_8580::sidaddr_translation(uint16_t addr)
  *
  * @return * void
  */
-void __us_not_in_flash_func mos6581_8580::sid_flush(void)
+void __us_not_in_flash_func(sid_flush) mos6581_8580::sid_flush(void)
 {
   const CPUCLOCK now = cpu->cycles();
   CPUCLOCK cycles = (now - sid_main_clk);
@@ -198,7 +198,7 @@ void __us_not_in_flash_func mos6581_8580::sid_flush(void)
  *
  * @return unsigned int
  */
-unsigned int __us_not_in_flash_func mos6581_8580::sid_delay(void)
+unsigned int __us_not_in_flash_func(sid_delay) mos6581_8580::sid_delay(void)
 {
   CPUCLOCK now = cpu->cycles();
   CPUCLOCK cycles = (now - sid_main_clk);
@@ -218,7 +218,7 @@ unsigned int __us_not_in_flash_func mos6581_8580::sid_delay(void)
  * @param addr
  * @return uint8_t
  */
-uint8_t __us_not_in_flash_func mos6581_8580::read_sid(uint16_t addr)
+uint8_t __us_not_in_flash_func(read_sid) mos6581_8580::read_sid(uint16_t addr)
 {
   uint8_t data = (rand() % 0xFF) + 1; /* Random value generator */
   uint8_t phyaddr = (sidaddr_translation(addr) & 0xFF);  /* 4 SIDs max */
@@ -243,7 +243,7 @@ uint8_t __us_not_in_flash_func mos6581_8580::read_sid(uint16_t addr)
  * @param addr
  * @param data
  */
-void __us_not_in_flash_func mos6581_8580::write_sid(uint16_t addr, uint8_t data)
+void __us_not_in_flash_func(write_sid) mos6581_8580::write_sid(uint16_t addr, uint8_t data)
 {
   uint8_t phyaddr = (sidaddr_translation(addr) & 0xFF);  /* 4 SIDs max */
   uint_fast16_t cycles = sid_delay();

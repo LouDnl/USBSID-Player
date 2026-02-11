@@ -36,13 +36,13 @@
 
 #if EMBEDDED
 #include "pico/stdlib.h"
-#define __us_not_in_flash_func __attribute__((section(".time_critical")))
+#define __us_not_in_flash_func(func_name) __attribute__((section(".time_critical." #func_name)))
 #endif
 
 #if DESKTOP
 #define __in_flash(name)
 #define __not_in_flash_func(func) func
-#define __us_not_in_flash_func
+#define __us_not_in_flash_func(func_name)
 #endif
 
 #if DESKTOP

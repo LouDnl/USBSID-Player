@@ -76,7 +76,7 @@ mos6526::~mos6526(void)
  * @brief Glue required C64 parts
  *
  */
-void __us_not_in_flash_func mos6526::glue_c64(mos6510 * _cpu)
+void __us_not_in_flash_func(glue_c64) mos6526::glue_c64(mos6510 * _cpu)
 {
   cpu = _cpu;
 
@@ -98,7 +98,7 @@ void mos6526::set_cycle_fn(ReadCycles c)
  * @brief Reset the CIA register values to default settings
  *
  */
-void __us_not_in_flash_func mos6526::reset()
+void __us_not_in_flash_func(reset) mos6526::reset()
 {
   /* Base */
   cia_cpu_clock = prev_cia_cpu_clock = 0;
@@ -162,7 +162,7 @@ void __us_not_in_flash_func mos6526::reset()
  * @param reg
  * @return uint8_t
  */
-uint8_t __us_not_in_flash_func mos6526::read_register(uint8_t reg)
+uint8_t __us_not_in_flash_func(read_register) mos6526::read_register(uint8_t reg)
 {
   uint8_t data = 0;
   switch(reg) {
@@ -327,7 +327,7 @@ uint8_t __us_not_in_flash_func mos6526::read_register(uint8_t reg)
  * @param reg
  * @param value
  */
-void __us_not_in_flash_func mos6526::write_register(uint8_t reg, uint8_t value)
+void __us_not_in_flash_func(write_register) mos6526::write_register(uint8_t reg, uint8_t value)
 {
   w_shadow[reg] = value;
   switch(reg) {
@@ -548,7 +548,7 @@ void __us_not_in_flash_func mos6526::write_register(uint8_t reg, uint8_t value)
  *
  * TODO: Make sure that only enabled lines(bits) are set according to DDRA/DDRB
  */
-void __us_not_in_flash_func mos6526::write_prab_bits(uint8_t a, uint8_t b, bool state)
+void __us_not_in_flash_func(write_prab_bits) mos6526::write_prab_bits(uint8_t a, uint8_t b, bool state)
 {
   uint8_t mask;
   if (state) { /* ON */
@@ -578,7 +578,7 @@ void __us_not_in_flash_func mos6526::write_prab_bits(uint8_t a, uint8_t b, bool 
  *
  * @return uint_least16_t
  */
-uint_least16_t __us_not_in_flash_func mos6526::vic_base_address(void)
+uint_least16_t __us_not_in_flash_func(vic_base_address) mos6526::vic_base_address(void)
 {
   return vic_base_addr;
 }
@@ -587,7 +587,7 @@ uint_least16_t __us_not_in_flash_func mos6526::vic_base_address(void)
  * @brief Cia1/Cia2 Timer A emulation
  *
  */
-void __us_not_in_flash_func mos6526::timer_a(void)
+void __us_not_in_flash_func(timer_a) mos6526::timer_a(void)
 {
   /* Check for force load latch requested */
   if _MOS_UNLIKELY (timer_a_force_load) {
@@ -642,7 +642,7 @@ void __us_not_in_flash_func mos6526::timer_a(void)
  * @brief Cia1/Cia2 Timer B emulation
  *
  */
-void __us_not_in_flash_func mos6526::timer_b(void)
+void __us_not_in_flash_func(timer_b) mos6526::timer_b(void)
 {
   /* Check for force load latch requested */
   if _MOS_UNLIKELY (timer_b_force_load) {
@@ -721,7 +721,7 @@ void __us_not_in_flash_func mos6526::timer_b(void)
  * /MUSICIANS/K/Kawasaki_Ryo/Kawasaki_Synthesizer_Demo.sid
  * /MUSICIANS/M/Merman/Traffic.sid
  */
-void __us_not_in_flash_func mos6526::tod(void)
+void __us_not_in_flash_func(tod) mos6526::tod(void)
 {
   if (tod_running) {
 
@@ -766,7 +766,7 @@ void __us_not_in_flash_func mos6526::tod(void)
  * @brief: emulate a single CIA timer run
  * NOTE: not single cycle exact
  */
-bool __us_not_in_flash_func mos6526::emulate(void)
+bool __us_not_in_flash_func(emulate) mos6526::emulate(void)
 {
   // if _MOS_UNLIKELY (!check_cyclefn()) {
   //   D("[CIA] ERROR! Cannot emulate without CPU cycles!\n");

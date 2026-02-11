@@ -100,7 +100,7 @@ mos6510::~mos6510()
  * @brief Glue required C64 modules
  *
  */
-void __us_not_in_flash_func mos6510::glue_c64(mmu *_mmu, mos6560_6561 *_vic, mos6526 *_cia1, mos6526 *_cia2)
+void __us_not_in_flash_func(glue_c64) mos6510::glue_c64(mmu *_mmu, mos6560_6561 *_vic, mos6526 *_cia1, mos6526 *_cia2)
 {
   mmu_ = _mmu;
   vic  = _vic;
@@ -115,7 +115,7 @@ void __us_not_in_flash_func mos6510::glue_c64(mmu *_mmu, mos6560_6561 *_vic, mos
  *
  * https://www.c64-wiki.com/index.php/Reset_(Process)
  */
-void __us_not_in_flash_func mos6510::reset(void)
+void __us_not_in_flash_func(reset) mos6510::reset(void)
 {
   a_ = x_ = y_ = 0;
   sp_ = 0xFD;
@@ -132,7 +132,7 @@ void __us_not_in_flash_func mos6510::reset(void)
  * @brief Performs a "hot" reset
  *
  */
-void __us_not_in_flash_func mos6510::hot_reset(void)
+void __us_not_in_flash_func(hot_reset) mos6510::hot_reset(void)
 {
   _flags = 0b00110000;
   a_ = x_ = y_ = 0;
@@ -146,7 +146,7 @@ void __us_not_in_flash_func mos6510::hot_reset(void)
  *
  */
 
-void __us_not_in_flash_func mos6510::fill_instruction_table(void)
+void __us_not_in_flash_func(fill_instruction_table) mos6510::fill_instruction_table(void)
 {
 	if (initialized) return;
 	initialized = true;
@@ -432,7 +432,7 @@ void __us_not_in_flash_func mos6510::fill_instruction_table(void)
  *
  * @param opcode
  */
-void __us_not_in_flash_func mos6510::execute(uint8_t opcode)
+void __us_not_in_flash_func(execute) mos6510::execute(uint8_t opcode)
 {
   auto& handler = instruction_table[opcode];
 
@@ -444,12 +444,12 @@ void __us_not_in_flash_func mos6510::execute(uint8_t opcode)
   return;
 }
 
-CPUCLOCK __us_not_in_flash_func mos6510::cycles(void)
+CPUCLOCK __us_not_in_flash_func(cycles) mos6510::cycles(void)
 {
   return cycles_;
 }
 
-void __us_not_in_flash_func mos6510::cycles(CPUCLOCK v)
+void __us_not_in_flash_func(cycles) mos6510::cycles(CPUCLOCK v)
 {
   cycles_=v;
   return;
@@ -474,7 +474,7 @@ void mos6510::set_cycle_callback(ClockCycle c)
  * Current limitations:
  * - Some known cpu bugs are not emulated (correctly)
  */
-bool __us_not_in_flash_func mos6510::emulate(void)
+bool __us_not_in_flash_func(emulate) mos6510::emulate(void)
 {
   bool retval = true;
 
@@ -509,7 +509,7 @@ bool __us_not_in_flash_func mos6510::emulate(void)
  *        until RTI
  * @return returns false if something goes wrong
  */
-bool __us_not_in_flash_func mos6510::emulate_n(tick_t n_cycles)
+bool __us_not_in_flash_func(emulate_n) mos6510::emulate_n(tick_t n_cycles)
 {
   bool retval = true;
 
@@ -537,46 +537,46 @@ bool __us_not_in_flash_func mos6510::emulate_n(tick_t n_cycles)
  * @param addr
  * @param val
  */
-void __us_not_in_flash_func mos6510::save_byte(addr_t addr, val_t val)
+void __us_not_in_flash_func(save_byte) mos6510::save_byte(addr_t addr, val_t val)
 {
   d_address = addr;
   write_bus(addr,val);
 }
 
-val_t __us_not_in_flash_func mos6510::load_byte(addr_t addr)
+val_t __us_not_in_flash_func(load_byte) mos6510::load_byte(addr_t addr)
 {
   d_address = addr;
   return read_bus(addr);
 }
 
-addr_t __us_not_in_flash_func mos6510::load_word(addr_t addr)
+addr_t __us_not_in_flash_func(load_word) mos6510::load_word(addr_t addr)
 {
   addr_t v = load_byte(addr) | (load_byte(addr+1) << 8);
   d_address = addr;
   return v;
 }
 
-void __us_not_in_flash_func mos6510::push(val_t v)
+void __us_not_in_flash_func(push) mos6510::push(val_t v)
 {
   addr_t addr = pBaseAddrStack+sp_;
   save_byte(addr,v);
   sp_--;
 }
 
-val_t __us_not_in_flash_func mos6510::pop()
+val_t __us_not_in_flash_func(pop) mos6510::pop()
 {
   addr_t addr = ++sp_+pBaseAddrStack;
   return load_byte(addr);
 }
 
-val_t __us_not_in_flash_func mos6510::fetch_op()
+val_t __us_not_in_flash_func(fetch_op) mos6510::fetch_op()
 {
   pc_address = pc_;
   uint_least8_t op = load_byte(pc_++);
   return op;
 }
 
-addr_t __us_not_in_flash_func mos6510::fetch_opw()
+addr_t __us_not_in_flash_func(fetch_opw) mos6510::fetch_opw()
 {
   addr_t retval = load_word(pc_);
   pc_+=2;
@@ -584,20 +584,20 @@ addr_t __us_not_in_flash_func mos6510::fetch_opw()
   return retval;
 }
 
-addr_t __us_not_in_flash_func mos6510::addr_zero()
+addr_t __us_not_in_flash_func(addr_zero) mos6510::addr_zero()
 {
   addr_t addr = fetch_op();
   return addr;
 }
 
-addr_t __us_not_in_flash_func mos6510::addr_zerox()
+addr_t __us_not_in_flash_func(addr_zerox) mos6510::addr_zerox()
 {
   /* wraps around the zeropage */
   addr_t addr = (fetch_op() + x()) & 0xff;
   return addr;
 }
 
-addr_t __us_not_in_flash_func mos6510::addr_zeroy()
+addr_t __us_not_in_flash_func(addr_zeroy) mos6510::addr_zeroy()
 {
   /* wraps around the zeropage */
   addr_t addr = (fetch_op() + y()) & 0xff;
@@ -605,13 +605,13 @@ addr_t __us_not_in_flash_func mos6510::addr_zeroy()
   return addr;
 }
 
-addr_t __us_not_in_flash_func mos6510::addr_abs()
+addr_t __us_not_in_flash_func(addr_abs) mos6510::addr_abs()
 {
   addr_t addr = fetch_opw();
   return addr;
 }
 
-addr_t __us_not_in_flash_func mos6510::addr_absy()
+addr_t __us_not_in_flash_func(addr_absy) mos6510::addr_absy()
 {
   addr_t addr = fetch_opw();
   curr_page = addr&0xff00;
@@ -621,7 +621,7 @@ addr_t __us_not_in_flash_func mos6510::addr_absy()
   return addr;
 }
 
-addr_t __us_not_in_flash_func mos6510::addr_absx()
+addr_t __us_not_in_flash_func(addr_absx) mos6510::addr_absx()
 {
   addr_t addr = fetch_opw();
   curr_page = addr&0xff00;
@@ -631,14 +631,14 @@ addr_t __us_not_in_flash_func mos6510::addr_absx()
   return addr;
 }
 
-addr_t __us_not_in_flash_func mos6510::addr_indx()
+addr_t __us_not_in_flash_func(addr_indx) mos6510::addr_indx()
 {
   /* wraps around the zeropage */
   addr_t addr = load_word((addr_zero() + x()) & 0xff);
   return addr;
 }
 
-addr_t __us_not_in_flash_func mos6510::addr_indy()
+addr_t __us_not_in_flash_func(addr_indy) mos6510::addr_indy()
 {
   addr_t addr = load_word(addr_zero());
   curr_page = addr&0xff00;
@@ -653,7 +653,7 @@ addr_t __us_not_in_flash_func mos6510::addr_indy()
 /**
  * @brief STore Accumulator
  */
-void __us_not_in_flash_func mos6510::sta(addr_t addr, cycle_t cycles)
+void __us_not_in_flash_func(sta) mos6510::sta(addr_t addr, cycle_t cycles)
 {
   save_byte(addr,a());
   tick(cycles);
@@ -662,7 +662,7 @@ void __us_not_in_flash_func mos6510::sta(addr_t addr, cycle_t cycles)
 /**
  * @brief STore X
  */
-void __us_not_in_flash_func mos6510::stx(addr_t addr, cycle_t cycles)
+void __us_not_in_flash_func(stx) mos6510::stx(addr_t addr, cycle_t cycles)
 {
   save_byte(addr,x());
   tick(cycles);
@@ -671,7 +671,7 @@ void __us_not_in_flash_func mos6510::stx(addr_t addr, cycle_t cycles)
 /**
  * @brief STore Y
  */
-void __us_not_in_flash_func mos6510::sty(addr_t addr, cycle_t cycles)
+void __us_not_in_flash_func(sty) mos6510::sty(addr_t addr, cycle_t cycles)
 {
   save_byte(addr,y());
   tick(cycles);
@@ -680,7 +680,7 @@ void __us_not_in_flash_func mos6510::sty(addr_t addr, cycle_t cycles)
 /**
  * @brief Transfer X to Stack pointer
  */
-void __us_not_in_flash_func mos6510::txs()
+void __us_not_in_flash_func(txs) mos6510::txs()
 {
   sp(x());
   tick(2);
@@ -689,7 +689,7 @@ void __us_not_in_flash_func mos6510::txs()
 /**
  * @brief Transfer Stack pointer to X
  */
-void __us_not_in_flash_func mos6510::tsx()
+void __us_not_in_flash_func(tsx) mos6510::tsx()
 {
   x(sp());
   SET_ZF(x());
@@ -700,7 +700,7 @@ void __us_not_in_flash_func mos6510::tsx()
 /**
  * @brief LoaD Accumulator
  */
-void __us_not_in_flash_func mos6510::lda(val_t v, cycle_t cycles)
+void __us_not_in_flash_func(lda) mos6510::lda(val_t v, cycle_t cycles)
 {
   a(v);
   // SET_ZF(a());
@@ -714,7 +714,7 @@ void __us_not_in_flash_func mos6510::lda(val_t v, cycle_t cycles)
 /**
  * @brief LoaD X
  */
-void __us_not_in_flash_func mos6510::ldx(val_t v, cycle_t cycles)
+void __us_not_in_flash_func(ldx) mos6510::ldx(val_t v, cycle_t cycles)
 {
   x(v);
   SET_ZF(x());
@@ -726,7 +726,7 @@ void __us_not_in_flash_func mos6510::ldx(val_t v, cycle_t cycles)
 /**
  * @brief LoaD Y
  */
-void __us_not_in_flash_func mos6510::ldy(val_t v, cycle_t cycles)
+void __us_not_in_flash_func(ldy) mos6510::ldy(val_t v, cycle_t cycles)
 {
   y(v);
   SET_ZF(y());
@@ -738,7 +738,7 @@ void __us_not_in_flash_func mos6510::ldy(val_t v, cycle_t cycles)
 /**
  * @brief Transfer X to Accumulator
  */
-void __us_not_in_flash_func mos6510::txa()
+void __us_not_in_flash_func(txa) mos6510::txa()
 {
   a(x());
   SET_ZF(a());
@@ -749,7 +749,7 @@ void __us_not_in_flash_func mos6510::txa()
 /**
  * @brief Transfer Accumulator to X
  */
-void __us_not_in_flash_func mos6510::tax()
+void __us_not_in_flash_func(tax) mos6510::tax()
 {
   x(a());
   SET_ZF(x());
@@ -760,7 +760,7 @@ void __us_not_in_flash_func mos6510::tax()
 /**
  * @brief Transfer Accumulator to Y
  */
-void __us_not_in_flash_func mos6510::tay()
+void __us_not_in_flash_func(tay) mos6510::tay()
 {
   y(a());
   SET_ZF(y());
@@ -771,7 +771,7 @@ void __us_not_in_flash_func mos6510::tay()
 /**
  * @brief Transfer Y to Accumulator
  */
-void __us_not_in_flash_func mos6510::tya()
+void __us_not_in_flash_func(tya) mos6510::tya()
 {
   a(y());
   SET_ZF(a());
@@ -782,7 +782,7 @@ void __us_not_in_flash_func mos6510::tya()
 /**
  * @brief PusH Accumulator
  */
-void __us_not_in_flash_func mos6510::pha()
+void __us_not_in_flash_func(pha) mos6510::pha()
 {
   push(a());
   tick(3);
@@ -791,7 +791,7 @@ void __us_not_in_flash_func mos6510::pha()
 /**
  * @brief PuLl Accumulator
  */
-void __us_not_in_flash_func mos6510::pla()
+void __us_not_in_flash_func(pla) mos6510::pla()
 {
   a(pop());
   SET_ZF(a());
@@ -804,7 +804,7 @@ void __us_not_in_flash_func mos6510::pla()
 /**
  * @brief Logical OR on Accumulator
  */
-void __us_not_in_flash_func mos6510::ora(val_t v, cycle_t cycles)
+void __us_not_in_flash_func(ora) mos6510::ora(val_t v, cycle_t cycles)
 {
   a(a()|v);
   SET_ZF(a());
@@ -816,7 +816,7 @@ void __us_not_in_flash_func mos6510::ora(val_t v, cycle_t cycles)
 /**
  * @brief Logical AND
  */
-void __us_not_in_flash_func mos6510::_and(val_t v, cycle_t cycles)
+void __us_not_in_flash_func(_and) mos6510::_and(val_t v, cycle_t cycles)
 {
   a(a()&v);
   SET_ZF(a());
@@ -828,7 +828,7 @@ void __us_not_in_flash_func mos6510::_and(val_t v, cycle_t cycles)
 /**
  * @brief BIT test
  */
-void __us_not_in_flash_func mos6510::bit(addr_t addr, cycle_t cycles)
+void __us_not_in_flash_func(bit) mos6510::bit(addr_t addr, cycle_t cycles)
 {
   val_t t = load_byte(addr);
   SET_NF(t);
@@ -840,7 +840,7 @@ void __us_not_in_flash_func mos6510::bit(addr_t addr, cycle_t cycles)
 /**
  * @brief ROtate Left
  */
-val_t __us_not_in_flash_func mos6510::rol(val_t v)
+val_t __us_not_in_flash_func(rol) mos6510::rol(val_t v)
 {
   addr_t t = (v << 1) | (val_t)cf();
   cf((t&0x100)!=0);
@@ -853,7 +853,7 @@ val_t __us_not_in_flash_func mos6510::rol(val_t v)
 /**
  * @brief ROL A register
  */
-void __us_not_in_flash_func mos6510::rol_a()
+void __us_not_in_flash_func(rol_a) mos6510::rol_a()
 {
   a(rol(a()));
   tick(2);
@@ -862,7 +862,7 @@ void __us_not_in_flash_func mos6510::rol_a()
 /**
  * @brief ROL mem
  */
-void __us_not_in_flash_func mos6510::rol_mem(addr_t addr, cycle_t cycles)
+void __us_not_in_flash_func(rol_mem) mos6510::rol_mem(addr_t addr, cycle_t cycles)
 {
   val_t v = load_byte(addr);
   /* see ASL doc */
@@ -874,7 +874,7 @@ void __us_not_in_flash_func mos6510::rol_mem(addr_t addr, cycle_t cycles)
 /**
  * @brief ROtate Right
  */
-val_t __us_not_in_flash_func mos6510::ror(val_t v)
+val_t __us_not_in_flash_func(ror) mos6510::ror(val_t v)
 {
   addr_t t = (v >> 1) | (val_t)(cf() << 7);
   cf((v&0x1)!=0);
@@ -886,7 +886,7 @@ val_t __us_not_in_flash_func mos6510::ror(val_t v)
 /**
  * @brief ROR A register
  */
-void __us_not_in_flash_func mos6510::ror_a()
+void __us_not_in_flash_func(ror_a) mos6510::ror_a()
 {
   a(ror(a()));
   tick(2);
@@ -895,7 +895,7 @@ void __us_not_in_flash_func mos6510::ror_a()
 /**
  * @brief ROR mem
  */
-void __us_not_in_flash_func mos6510::ror_mem(addr_t addr, cycle_t cycles)
+void __us_not_in_flash_func(ror_mem) mos6510::ror_mem(addr_t addr, cycle_t cycles)
 {
   val_t v = load_byte(addr);
   /* see ASL doc */
@@ -907,7 +907,7 @@ void __us_not_in_flash_func mos6510::ror_mem(addr_t addr, cycle_t cycles)
 /**
  * @brief Logic Shift Right
  */
-val_t __us_not_in_flash_func mos6510::lsr(val_t v)
+val_t __us_not_in_flash_func(lsr) mos6510::lsr(val_t v)
 {
   val_t t = v >> 1;
   cf((v&0x1)!=0);
@@ -919,7 +919,7 @@ val_t __us_not_in_flash_func mos6510::lsr(val_t v)
 /**
  * @brief LSR A
  */
-void __us_not_in_flash_func mos6510::lsr_a()
+void __us_not_in_flash_func(lsr_a) mos6510::lsr_a()
 {
   a(lsr(a()));
   tick(2);
@@ -928,7 +928,7 @@ void __us_not_in_flash_func mos6510::lsr_a()
 /**
  * @brief LSR mem
  */
-void __us_not_in_flash_func mos6510::lsr_mem(addr_t addr, cycle_t cycles)
+void __us_not_in_flash_func(lsr_mem) mos6510::lsr_mem(addr_t addr, cycle_t cycles)
 {
   val_t v = load_byte(addr);
   /* see ASL doc */
@@ -940,7 +940,7 @@ void __us_not_in_flash_func mos6510::lsr_mem(addr_t addr, cycle_t cycles)
 /**
  * @brief Arithmetic Shift Left
  */
-val_t __us_not_in_flash_func mos6510::asl(val_t v)
+val_t __us_not_in_flash_func(asl) mos6510::asl(val_t v)
 {
   val_t t = (v << 1) & 0xff;
   cf((v&0x80)!=0);
@@ -952,7 +952,7 @@ val_t __us_not_in_flash_func mos6510::asl(val_t v)
 /**
  * @brief ASL A
  */
-void __us_not_in_flash_func mos6510::asl_a()
+void __us_not_in_flash_func(asl_a) mos6510::asl_a()
 {
   a(asl(a()));
   tick(2);
@@ -980,7 +980,7 @@ void __us_not_in_flash_func mos6510::asl_a()
  *
  * So.. we need to mimic the behaviour.
  */
-void __us_not_in_flash_func mos6510::asl_mem(addr_t addr, cycle_t cycles)
+void __us_not_in_flash_func(asl_mem) mos6510::asl_mem(addr_t addr, cycle_t cycles)
 {
   val_t v = load_byte(addr);
   save_byte(addr,v);
@@ -991,7 +991,7 @@ void __us_not_in_flash_func mos6510::asl_mem(addr_t addr, cycle_t cycles)
 /**
  * @brief Exclusive OR
  */
-void __us_not_in_flash_func mos6510::eor(val_t v, cycle_t cycles)
+void __us_not_in_flash_func(eor) mos6510::eor(val_t v, cycle_t cycles)
 {
   a(a()^v);
   SET_ZF(a());
@@ -1005,7 +1005,7 @@ void __us_not_in_flash_func mos6510::eor(val_t v, cycle_t cycles)
 /**
  * @brief INCrement
  */
-void __us_not_in_flash_func mos6510::inc(addr_t addr, cycle_t cycles)
+void __us_not_in_flash_func(inc) mos6510::inc(addr_t addr, cycle_t cycles)
 {
   val_t v = load_byte(addr);
   /* see ASL doc */
@@ -1020,7 +1020,7 @@ void __us_not_in_flash_func mos6510::inc(addr_t addr, cycle_t cycles)
 /**
  * @brief DECrement
  */
-void __us_not_in_flash_func mos6510::dec(addr_t addr, cycle_t cycles)
+void __us_not_in_flash_func(dec) mos6510::dec(addr_t addr, cycle_t cycles)
 {
   val_t v = load_byte(addr);
   /* see ASL doc */
@@ -1035,7 +1035,7 @@ void __us_not_in_flash_func mos6510::dec(addr_t addr, cycle_t cycles)
 /**
  * @brief INcrement X
  */
-void __us_not_in_flash_func mos6510::inx()
+void __us_not_in_flash_func(inx) mos6510::inx()
 {
   x_+=1;
   SET_ZF(x());
@@ -1046,7 +1046,7 @@ void __us_not_in_flash_func mos6510::inx()
 /**
  * @brief INcrement Y
  */
-void __us_not_in_flash_func mos6510::iny()
+void __us_not_in_flash_func(iny) mos6510::iny()
 {
   // y_+=1;
   y(y()+1);
@@ -1058,7 +1058,7 @@ void __us_not_in_flash_func mos6510::iny()
 /**
  * @brief DEcrement X
  */
-void __us_not_in_flash_func mos6510::dex()
+void __us_not_in_flash_func(dex) mos6510::dex()
 {
   x_-=1;
   SET_ZF(x());
@@ -1069,7 +1069,7 @@ void __us_not_in_flash_func mos6510::dex()
 /**
  * @brief DEcrement Y
  */
-void __us_not_in_flash_func mos6510::dey()
+void __us_not_in_flash_func(dey) mos6510::dey()
 {
   y_-=1;
   // y(y()-1);
@@ -1081,7 +1081,7 @@ void __us_not_in_flash_func mos6510::dey()
 /**
  * @brief ADd with Carry
  */
-void __us_not_in_flash_func mos6510::adc(val_t v, cycle_t cycles)
+void __us_not_in_flash_func(adc) mos6510::adc(val_t v, cycle_t cycles)
 {
   addr_t t;
   if(dmf())
@@ -1110,7 +1110,7 @@ void __us_not_in_flash_func mos6510::adc(val_t v, cycle_t cycles)
 /**
  * @brief SuBstract with Carry
  */
-void __us_not_in_flash_func mos6510::sbc(val_t v, cycle_t cycles)
+void __us_not_in_flash_func(sbc) mos6510::sbc(val_t v, cycle_t cycles)
 {
   addr_t t;
   if(dmf())
@@ -1142,7 +1142,7 @@ void __us_not_in_flash_func mos6510::sbc(val_t v, cycle_t cycles)
 /**
  * @brief SEt Interrupt flag
  */
-void __us_not_in_flash_func mos6510::sei()
+void __us_not_in_flash_func(sei) mos6510::sei()
 {
   idf(true);
   tick(2);
@@ -1151,7 +1151,7 @@ void __us_not_in_flash_func mos6510::sei()
 /**
  * @brief CLear Interrupt flag
  */
-void __us_not_in_flash_func mos6510::cli()
+void __us_not_in_flash_func(cli) mos6510::cli()
 {
   idf(false);
   tick(2);
@@ -1160,16 +1160,16 @@ void __us_not_in_flash_func mos6510::cli()
 /**
  * @brief SEt Carry flag
  */
-void __us_not_in_flash_func mos6510::sec()
+void __us_not_in_flash_func(sec) mos6510::sec()
 {
   cf(true);
   tick(2);
 }
 
 /**
- * @brief CLear Carry flag
+ * @brief CLC implied
  */
-void __us_not_in_flash_func mos6510::clc()
+void __us_not_in_flash_func(clc) mos6510::clc()
 {
   cf(false);
   tick(2);
@@ -1178,7 +1178,7 @@ void __us_not_in_flash_func mos6510::clc()
 /**
  * @brief SEt Decimal flag
  */
-void __us_not_in_flash_func mos6510::sed()
+void __us_not_in_flash_func(sed) mos6510::sed()
 {
   dmf(true);
   tick(2);
@@ -1187,7 +1187,7 @@ void __us_not_in_flash_func mos6510::sed()
 /**
  * @brief CLear Decimal flag
  */
-void __us_not_in_flash_func mos6510::cld()
+void __us_not_in_flash_func(cld) mos6510::cld()
 {
   dmf(false);
   tick(2);
@@ -1196,48 +1196,20 @@ void __us_not_in_flash_func mos6510::cld()
 /**
  * @brief CLear oVerflow flag
  */
-void __us_not_in_flash_func mos6510::clv()
+void __us_not_in_flash_func(clv) mos6510::clv()
 {
   of(false);
   tick(2);
 }
 
-// val_t __us_not_in_flash_func mos6510::flags()
-// {
-//   val_t v=0;
-//   v |= cf()  << 0;
-//   v |= zf()  << 1;
-//   v |= idf() << 2;
-//   v |= dmf() << 3;
-//   /* brk & php instructions push the bcf flag active */
-//   /* v |= 1 << 4; */
-//   /* unused,always set */
-//   v |= 1     << 5;
-//   v |= of()  << 6;
-//   v |= nf()  << 7;
-//   // MOSDBG("[FLAGS]() %X\n",v);
-//   return v;
-// }
-
-val_t __us_not_in_flash_func mos6510::flags()
+val_t __us_not_in_flash_func(flags) mos6510::flags()
 {
   /* only brk & php instructions push the bcf flag active */
   /* bit 5 is unused and always set */
   return (_flags | (1 << 5));
 }
 
-// void __us_not_in_flash_func mos6510::flags(val_t v)
-// {
-//   cf(ISSET_BIT(v,0));
-//   zf(ISSET_BIT(v,1));
-//   idf(ISSET_BIT(v,2));
-//   dmf(ISSET_BIT(v,3));
-//   of(ISSET_BIT(v,6));
-//   nf(ISSET_BIT(v,7));
-//   // MOSDBG("[FLAGS](v) %X\n",v);
-// }
-
-void __us_not_in_flash_func mos6510::flags(val_t v)
+void __us_not_in_flash_func(flags) mos6510::flags(val_t v)
 {
   cf(v&0x1);
   zf(v&0x2);
@@ -1251,7 +1223,7 @@ void __us_not_in_flash_func mos6510::flags(val_t v)
 /**
  * @brief PusH Processor flags
  */
-void __us_not_in_flash_func mos6510::php()
+void __us_not_in_flash_func(php) mos6510::php()
 {
   push(flags()|0x10);  /* brk & php instructions push the bcf flag active */
   // push(flags());  /* brk & php instructions push the bcf flag active */
@@ -1261,7 +1233,7 @@ void __us_not_in_flash_func mos6510::php()
 /**
  * @brief PuLl Processor flags
  */
-void __us_not_in_flash_func mos6510::plp()
+void __us_not_in_flash_func(plp) mos6510::plp()
 {
   flags(pop());
   tick(4);
@@ -1274,7 +1246,7 @@ void __us_not_in_flash_func mos6510::plp()
  * to the stack but the address to the last byte of its own
  * instruction.
  */
-void __us_not_in_flash_func mos6510::jsr()
+void __us_not_in_flash_func(jsr) mos6510::jsr()
 {
   addr_t addr = addr_abs();
   push(((pc()-1) >> 8) & 0xff);
@@ -1286,7 +1258,7 @@ void __us_not_in_flash_func mos6510::jsr()
 /**
  * @brief JuMP
  */
-void __us_not_in_flash_func mos6510::jmp()
+void __us_not_in_flash_func(jmp) mos6510::jmp()
 {
   addr_t addr = addr_abs();
   pc(addr);
@@ -1296,7 +1268,7 @@ void __us_not_in_flash_func mos6510::jmp()
 /**
  * @brief JuMP (indirect)
  */
-void __us_not_in_flash_func mos6510::jmp_ind()
+void __us_not_in_flash_func(jmp_ind) mos6510::jmp_ind()
 {
   addr_t t = load_word(pc_);
   addr_t abs_ = addr_abs(); /* pc += 2 */
@@ -1311,7 +1283,7 @@ void __us_not_in_flash_func mos6510::jmp_ind()
 /**
  * @brief ReTurn from SubRoutine
  */
-void __us_not_in_flash_func mos6510::rts()
+void __us_not_in_flash_func(rts) mos6510::rts()
 {
   // addr_t addr = (pop() + (pop() << 8)) + 1;
   // pc(addr);
@@ -1326,7 +1298,7 @@ void __us_not_in_flash_func mos6510::rts()
 /**
  * @brief CoMPare
  */
-void __us_not_in_flash_func mos6510::cmp(val_t v, cycle_t cycles)
+void __us_not_in_flash_func(cmp) mos6510::cmp(val_t v, cycle_t cycles)
 {
   addr_t t;
   t = a() - v;
@@ -1341,7 +1313,7 @@ void __us_not_in_flash_func mos6510::cmp(val_t v, cycle_t cycles)
 /**
  * @brief CoMPare X
  */
-void __us_not_in_flash_func mos6510::cpx(val_t v, cycle_t cycles)
+void __us_not_in_flash_func(cpx) mos6510::cpx(val_t v, cycle_t cycles)
 {
   addr_t t;
   t = x() - v;
@@ -1355,7 +1327,7 @@ void __us_not_in_flash_func mos6510::cpx(val_t v, cycle_t cycles)
 /**
  * @brief CoMPare Y
  */
-void __us_not_in_flash_func mos6510::cpy(val_t v, cycle_t cycles)
+void __us_not_in_flash_func(cpy) mos6510::cpy(val_t v, cycle_t cycles)
 {
   addr_t t;
   t = y() - v;
@@ -1369,7 +1341,7 @@ void __us_not_in_flash_func mos6510::cpy(val_t v, cycle_t cycles)
 /**
  * @brief Branch if Not Equal
  */
-void __us_not_in_flash_func mos6510::bne()
+void __us_not_in_flash_func(bne) mos6510::bne()
 {
   addr_t addr = (int8_t) fetch_op() + pc();
   // if(!zf()) {
@@ -1384,7 +1356,7 @@ void __us_not_in_flash_func mos6510::bne()
 /**
  * @brief Branch if Equal
  */
-void __us_not_in_flash_func mos6510::beq()
+void __us_not_in_flash_func(beq) mos6510::beq()
 {
   addr_t addr = (int8_t) fetch_op();
   curr_page = addr&0xff00;
@@ -1401,7 +1373,7 @@ void __us_not_in_flash_func mos6510::beq()
 /**
  * @brief Branch if Carry is Set
  */
-void __us_not_in_flash_func mos6510::bcs()
+void __us_not_in_flash_func(bcs) mos6510::bcs()
 {
   addr_t addr = (int8_t) fetch_op();
   curr_page = addr&0xff00;
@@ -1418,7 +1390,7 @@ void __us_not_in_flash_func mos6510::bcs()
 /**
  * @brief Branch if Carry is Clear
  */
-void __us_not_in_flash_func mos6510::bcc()
+void __us_not_in_flash_func(bcc) mos6510::bcc()
 {
   addr_t addr = (int8_t) fetch_op();
   curr_page = addr&0xff00;
@@ -1435,7 +1407,7 @@ void __us_not_in_flash_func mos6510::bcc()
 /**
  * @brief,Branch if PLus
  */
-void __us_not_in_flash_func mos6510::bpl()
+void __us_not_in_flash_func(bpl) mos6510::bpl()
 {
   addr_t addr = (int8_t) fetch_op();
   curr_page = addr&0xff00;
@@ -1452,7 +1424,7 @@ void __us_not_in_flash_func mos6510::bpl()
 /**
  * @brief Branch if MInus
  */
-void __us_not_in_flash_func mos6510::bmi()
+void __us_not_in_flash_func(bmi) mos6510::bmi()
 {
   addr_t addr = (int8_t) fetch_op();
   curr_page = addr&0xff00;
@@ -1469,7 +1441,7 @@ void __us_not_in_flash_func mos6510::bmi()
 /**
  * @brief Branch if oVerflow Clear
  */
-void __us_not_in_flash_func mos6510::bvc()
+void __us_not_in_flash_func(bvc) mos6510::bvc()
 {
   addr_t addr = (int8_t) fetch_op();
   curr_page = addr&0xff00;
@@ -1486,7 +1458,7 @@ void __us_not_in_flash_func mos6510::bvc()
 /**
  * @brief Branch if oVerflow Set
  */
-void __us_not_in_flash_func mos6510::bvs()
+void __us_not_in_flash_func(bvs) mos6510::bvs()
 {
   addr_t addr = (int8_t) fetch_op();
   curr_page = addr&0xff00;
@@ -1507,7 +1479,7 @@ void __us_not_in_flash_func mos6510::bvs()
  *
  * @param insn
  */
-void __us_not_in_flash_func mos6510::jam(val_t insn)
+void __us_not_in_flash_func(jam) mos6510::jam(val_t insn)
 {
   (void)insn;
   // if (1) return;
@@ -1531,13 +1503,13 @@ void __us_not_in_flash_func mos6510::jam(val_t insn)
  * @param cycles_a
  * @param cycles_b
  */
-void __us_not_in_flash_func mos6510::slo(addr_t addr, cycle_t cycles_a,cycle_t cycles_b)
+void __us_not_in_flash_func(slo) mos6510::slo(addr_t addr, cycle_t cycles_a,cycle_t cycles_b)
 {
   asl_mem(addr,cycles_a);
   ora(load_byte(addr),cycles_b);
 }
 
-void __us_not_in_flash_func mos6510::lxa(val_t v, cycle_t cycles)
+void __us_not_in_flash_func(lxa) mos6510::lxa(val_t v, cycle_t cycles)
 {
   val_t t = ((a() | 0xEE) & v);
   x(t);
@@ -1547,7 +1519,7 @@ void __us_not_in_flash_func mos6510::lxa(val_t v, cycle_t cycles)
   tick(cycles);
 }
 
-void __us_not_in_flash_func mos6510::anc(val_t v)
+void __us_not_in_flash_func(anc) mos6510::anc(val_t v)
 {
   _and(v,2);
   if(nf()) {
@@ -1557,7 +1529,7 @@ void __us_not_in_flash_func mos6510::anc(val_t v)
   }
 }
 
-void __us_not_in_flash_func mos6510::las(val_t v)
+void __us_not_in_flash_func(las) mos6510::las(val_t v)
 { /* 4 + 1 cycles if page boundry is crossed */
   val_t t = (v & sp());
   a(t);
@@ -1569,13 +1541,13 @@ void __us_not_in_flash_func mos6510::las(val_t v)
   if(pb_crossed) tick(1);
 }
 
-void __us_not_in_flash_func mos6510::lax(val_t v, cycle_t cycles)
+void __us_not_in_flash_func(lax) mos6510::lax(val_t v, cycle_t cycles)
 {
   lda(v,cycles);
   tax();
 }
 
-void __us_not_in_flash_func mos6510::sax(addr_t addr, cycle_t cycles)
+void __us_not_in_flash_func(sax) mos6510::sax(addr_t addr, cycle_t cycles)
 {
   val_t _a = a();
   val_t _x = x();
@@ -1584,7 +1556,7 @@ void __us_not_in_flash_func mos6510::sax(addr_t addr, cycle_t cycles)
   tick(cycles);
 }
 
-void __us_not_in_flash_func mos6510::shy(addr_t addr, cycle_t cycles)
+void __us_not_in_flash_func(shy) mos6510::shy(addr_t addr, cycle_t cycles)
 {
   val_t t = ((addr >> 8) + 1);
   val_t y_ = y();
@@ -1592,7 +1564,7 @@ void __us_not_in_flash_func mos6510::shy(addr_t addr, cycle_t cycles)
   tick(cycles);
 }
 
-void __us_not_in_flash_func mos6510::shx(addr_t addr, cycle_t cycles)
+void __us_not_in_flash_func(shx) mos6510::shx(addr_t addr, cycle_t cycles)
 {
   val_t t = ((addr >> 8) + 1);
   val_t x_ = x();
@@ -1600,7 +1572,7 @@ void __us_not_in_flash_func mos6510::shx(addr_t addr, cycle_t cycles)
   tick(cycles);
 }
 
-void __us_not_in_flash_func mos6510::sha(addr_t addr, cycle_t cycles)
+void __us_not_in_flash_func(sha) mos6510::sha(addr_t addr, cycle_t cycles)
 {
   val_t t = ((addr >> 8) + 1);
   val_t a_ = a();
@@ -1609,21 +1581,21 @@ void __us_not_in_flash_func mos6510::sha(addr_t addr, cycle_t cycles)
   tick(cycles);
 }
 
-void __us_not_in_flash_func mos6510::sre(addr_t addr, cycle_t cycles_a,cycle_t cycles_b)
+void __us_not_in_flash_func(sre) mos6510::sre(addr_t addr, cycle_t cycles_a,cycle_t cycles_b)
 {
   addr_t t = addr;
   lsr_mem(t,cycles_a);
   eor(load_byte(t),cycles_b);
 }
 
-void __us_not_in_flash_func mos6510::rla(addr_t addr, cycle_t cycles_a,cycle_t cycles_b)
+void __us_not_in_flash_func(rla) mos6510::rla(addr_t addr, cycle_t cycles_a,cycle_t cycles_b)
 {
   addr_t t = addr;
   rol_mem(t,cycles_a);
   _and(load_byte(t),cycles_b);
 }
 
-void __us_not_in_flash_func mos6510::rla_(addr_t addr, cycle_t cycles_a,cycle_t cycles_b)
+void __us_not_in_flash_func(rla_) mos6510::rla_(addr_t addr, cycle_t cycles_a,cycle_t cycles_b)
 {
   // addr_t t = addr;
   // rol_mem(t,cycles_a);
@@ -1652,21 +1624,21 @@ void __us_not_in_flash_func mos6510::rla_(addr_t addr, cycle_t cycles_a,cycle_t 
   tick(cycles_b);
 }
 
-void __us_not_in_flash_func mos6510::rra(addr_t addr, cycle_t cycles_a,cycle_t cycles_b)
+void __us_not_in_flash_func(rra) mos6510::rra(addr_t addr, cycle_t cycles_a,cycle_t cycles_b)
 {
   addr_t t = addr;
   ror_mem(t,cycles_a);
   adc(load_byte(t),cycles_b);
 }
 
-void __us_not_in_flash_func mos6510::dcp(addr_t addr, cycle_t cycles_a,cycle_t cycles_b)
+void __us_not_in_flash_func(dcp) mos6510::dcp(addr_t addr, cycle_t cycles_a,cycle_t cycles_b)
 {
   addr_t t = addr;
   dec(t,cycles_a);
   cmp(load_byte(t),cycles_b);
 }
 
-void __us_not_in_flash_func mos6510::tas(addr_t addr, cycle_t cycles)
+void __us_not_in_flash_func(tas) mos6510::tas(addr_t addr, cycle_t cycles)
 {
   /* and accu, x and (highbyte + 1) of address */
   val_t v = (((a() & x()) & ((addr >> 8) + 1)));
@@ -1684,7 +1656,7 @@ void __us_not_in_flash_func mos6510::tas(addr_t addr, cycle_t cycles)
   tick(cycles);
 }
 
-void __us_not_in_flash_func mos6510::sbx(val_t v, cycle_t cycles)
+void __us_not_in_flash_func(sbx) mos6510::sbx(val_t v, cycle_t cycles)
 {
   val_t a_ = a();
   val_t x_ = x();
@@ -1698,14 +1670,14 @@ void __us_not_in_flash_func mos6510::sbx(val_t v, cycle_t cycles)
   tick(cycles);
 }
 
-void __us_not_in_flash_func mos6510::isc(addr_t addr, cycle_t cycles)
+void __us_not_in_flash_func(isc) mos6510::isc(addr_t addr, cycle_t cycles)
 {
   inc(addr,cycles-=2);
   val_t v = load_byte(addr);
   sbc(v,cycles);
 }
 
-void __us_not_in_flash_func mos6510::arr()
+void __us_not_in_flash_func(arr) mos6510::arr()
 { /* Fixed code with courtesy of Vice 6510core.c */
   unsigned int tmp = (a() & (fetch_op()));
   if(dmf()) {
@@ -1743,7 +1715,7 @@ void __us_not_in_flash_func mos6510::arr()
   tick(2);
 }
 
-void __us_not_in_flash_func mos6510::xaa(val_t v)
+void __us_not_in_flash_func(xaa) mos6510::xaa(val_t v)
 {
   val_t t = ((a() | ANE_MAGIC) & x() & ((val_t)(v)));
   a(t);
@@ -1757,7 +1729,7 @@ void __us_not_in_flash_func mos6510::xaa(val_t v)
 /**
  * @brief No OPeration
  */
-void __us_not_in_flash_func mos6510::nop(cycle_t cycles)
+void __us_not_in_flash_func(nop) mos6510::nop(cycle_t cycles)
 {
   if(pb_crossed)cycles+=1;
   tick(cycles);
@@ -1798,7 +1770,7 @@ void mos6510::tick_backup(cycle_t v)
   } while (v != 0);
 }
 
-void __us_not_in_flash_func mos6510::tick(cycle_t v)
+void __us_not_in_flash_func(tick) mos6510::tick(cycle_t v)
 {
   do {
     cycles_++;
@@ -1822,7 +1794,7 @@ void mos6510::tickle_me(cycle_t v)
 /**
  * @brief ReTurn from Interrupt
  */
-void __us_not_in_flash_func mos6510::rti()
+void __us_not_in_flash_func(rti) mos6510::rti()
 {
   flags(pop());
   pc(pop() + (pop() << 8));
@@ -1881,7 +1853,7 @@ void mos6510::process_interrupts(void)
 /**
  * @brief BReaKpoint
  */
-void __us_not_in_flash_func mos6510::brk()
+void __us_not_in_flash_func(brk) mos6510::brk()
 { /* ISSUE: BRK BUG DOES NOT WORK YET */
   bcf(true);
   push(((pc()+1) >> 8) & 0xff);
@@ -1917,7 +1889,7 @@ void __us_not_in_flash_func mos6510::brk()
  * @brief Interrupt ReQuest
  * @deprecated
  */
-void __us_not_in_flash_func mos6510::irq(uint_least8_t source)
+void __us_not_in_flash_func(irq) mos6510::irq(uint_least8_t source)
 {
   if(!idf())
   {
@@ -1942,7 +1914,7 @@ void __us_not_in_flash_func mos6510::irq(uint_least8_t source)
  * @brief Non Maskable Interrupt
  * @deprecated
  */
-void __us_not_in_flash_func mos6510::nmi(uint_least8_t source)
+void __us_not_in_flash_func(nmi) mos6510::nmi(uint_least8_t source)
 {
   if (loginstructions) {dump_regs_irq(1, source); }
   else { (void)source; }

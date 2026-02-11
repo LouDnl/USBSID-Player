@@ -1772,6 +1772,8 @@ void mos6510::tick_backup(cycle_t v)
 
 void __us_not_in_flash_func(tick) mos6510::tick(cycle_t v)
 {
+  bool v_iszero = (v == 0 ? true : false);
+  if (v_iszero) return;
   do {
     cycles_++;
     v--;

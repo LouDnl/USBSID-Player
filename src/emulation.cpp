@@ -382,8 +382,10 @@ void emu_init(void)
 {
   MOSDBG("[C64] Init\n");
 
+#if 0 /* Disabled, it annoys flip sockets */
   /* Reset state to ensure clean start when embedding */
   reset_player_state();
+#endif
 
   MMU = new mmu();
   Cpu = new mos6510(emu_read_byte, emu_write_byte);

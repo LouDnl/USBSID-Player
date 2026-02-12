@@ -105,12 +105,12 @@ ntsc	lda #$95
 timer	sta $dc04
 	stx $dc05
 
-	; Maximum volume
-	lda #$0f
-	sta $d418
+	; Maximum volume ; JMP address for next and previous tune
+	lda #$0f  ; $89 $8a $8b
+	sta $d418 ; $8b $8c $8d
 
 	; Get song number
-	ldy playnum
+	ldy playnum ; $8e
 	dey
 	cpy playmax
 	bcc songset

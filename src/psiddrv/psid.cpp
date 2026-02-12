@@ -171,10 +171,7 @@ int psid_load_file(uint8_t * binary_, size_t binsize_, int subtune)
   psid->version = psid_extract_word(&ptr);
 
   if (psid->version < 1 || psid->version > 4) {
-    MOSDBG("[PSID] Unknown PSID version number: %d.\n", (int)psid->version);
-    goto fail;
-  }
-  MOSDBG("[PSID] PSID version number: %d.\n", (int)psid->version);
+  MOSLOG("[PSID] PSID version number: %d.\n", (int)psid->version);
 
   length = (unsigned int)((psid->version == 1 ? PSID_V1_DATA_OFFSET : PSID_V2_DATA_OFFSET) - 6);
 #if DESKTOP
@@ -382,7 +379,7 @@ void psid_init_tune(int install_driver_hook)
   reloc_addr_ext = reloc_addr = psid->start_page << 8;
   max_songs = psid->songs;
 
-  MOSDBG("[PSID] Driver=$%04X, Image=$%04X-$%04X, Init=$%04X, Play=$%04X\n",
+  MOSLOG("[PSID] Driver=$%04X, Image=$%04X-$%04X, Init=$%04X, Play=$%04X\n",
     reloc_addr, psid->load_addr,
     (unsigned int)(psid->load_addr + psid->data_size - 1),
     psid->init_addr, psid->play_addr);
@@ -399,13 +396,13 @@ void psid_init_tune(int install_driver_hook)
   if (start_song == 0) {
     start_song = psid->start_song;
   } else if (start_song < 1 || start_song > psid->songs) {
-    MOSDBG("[PSID] Tune out of range.\n");
+    MOSLOG("[PSID] Tune out of range.\n");
     start_song = psid->start_song;
   }
 
   /* Check for PlaySID specific file. */
   if (psid->flags & 0x02 && !psid->is_rsid) {
-    MOSDBG("[PSID] Image is PlaySID specific - trying anyway.\n");
+    MOSLOG("[PSID] Image is PlaySID specific - trying anyway.\n");
   }
 
   /* Check tune speed. */
@@ -424,18 +421,19 @@ void psid_init_tune(int install_driver_hook)
 
   sync = (is_pal ? MACHINE_SYNC_PAL : MACHINE_SYNC_NTSC); /* Added by LouD */
 
-  MOSDBG("[PSID]    Title: %s\n", (char *) psid->name);
-  MOSDBG("[PSID]   Author: %s\n", (char *) psid->author);
-  MOSDBG("[PSID] Released: %s\n", (char *) psid->copyright);
-  MOSDBG("[PSID] Using %s sync\n", sync == MACHINE_SYNC_PAL ? "PAL" : "NTSC");
-  MOSDBG("[PSID] SID model: %s\n", csidflag[(psid->flags >> 4) & 3]);
-  MOSDBG("[PSID] Using %s interrupt\n", irq_str);
-  MOSDBG("[PSID] Playing tune %d out of %d (default=%d)\n", start_song, psid->songs, psid->start_song);
+  /* Always log tune info */
+  MOSLOG("[PSID]    Title: %s\n", (char *) psid->name);
+  MOSLOG("[PSID]   Author: %s\n", (char *) psid->author);
+  MOSLOG("[PSID] Released: %s\n", (char *) psid->copyright);
+  MOSLOG("[PSID] Using %s sync\n", sync == MACHINE_SYNC_PAL ? "PAL" : "NTSC");
+  MOSLOG("[PSID] SID model: %s\n", csidflag[(psid->flags >> 4) & 3]);
+  MOSLOG("[PSID] Using %s interrupt\n", irq_str);
+  MOSLOG("[PSID] Playing tune %d out of %d (default=%d)\n", start_song, psid->songs, psid->start_song);
 
   /* Store parameters for PSID player. */
   if (install_driver_hook) {
     /* Skip JMP. */
-    addr = reloc_addr + 3 + 9;
+    addr = reloc_addr + 3 + 9; /* 12(0x0c) */
 
     /* CBM80 reset vector. */
     addr += psid_set_cbm80((uint16_t)(reloc_addr + 9), addr);
@@ -540,7 +538,7 @@ void psid_init_driver(void)
   reloc_addr_ext = reloc_addr = psid->start_page << 8;
   max_songs = psid->songs;
   psid_size = sizeof(psid_driver);
-  MOSDBG("[PSID] PSID free pages: $%04x-$%04x\n",
+  MOSLOG("[PSID] PSID free pages: $%04x-$%04x\n",
     reloc_addr, (reloc_addr + (psid->max_pages << 8)) - 1U);
 
   if (!reloc65((char **)&psid_reloc, &psid_size, reloc_addr)) {
@@ -572,7 +570,7 @@ void psid_init_driver(void)
   addr = reloc_addr + 3 + 9 + 9;
 
   /* Store parameters for PSID player. */
-  emu_dma_write_ram(addr++, (uint8_t)(0));
+  emu_dma_write_ram(addr++, (uint8_t)(0)); /* reloc_addr + 21(0x15) */
   emu_dma_write_ram(addr++, (uint8_t)(psid->songs));
   emu_dma_write_ram(addr++, (uint8_t)(psid->load_addr & 0xff));
   emu_dma_write_ram(addr++, (uint8_t)(psid->load_addr >> 8));

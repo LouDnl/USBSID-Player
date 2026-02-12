@@ -158,7 +158,6 @@ void start_vsid_player(bool is_pal, bool loop)
   uint_least8_t ntsc_lo = 0x42;
   uint_least8_t ntsc_hi = 0x95;
 
-
   emu_write_byte(0xd011, 0x1b); /* VIC set raster IRQ hi to 0x100 */
   emu_write_byte(0xd012, 0x37); /* VIC set raster IRQ lo to 0x37 */
   emu_write_byte(0xd01a, 0x00); /* VIC disable raster IRQ */

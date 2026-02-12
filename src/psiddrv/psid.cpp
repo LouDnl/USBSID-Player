@@ -227,7 +227,7 @@ int psid_load_file(uint8_t * binary_, size_t binsize_, int subtune)
 #if DESKTOP
     if (fread(ptr, 1, 2, f) != 2) {
 #elif EMBEDDED
-  if (MEM_fread(ptr, 1, 2, &binary_) != 2) {
+    if (MEM_fread(ptr, 1, 2, &binary_) != 2) {
 #endif
       MOSDBG("[PSID] Error reading PSID load address.\n");
       goto fail;

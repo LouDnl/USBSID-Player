@@ -171,6 +171,9 @@ int psid_load_file(uint8_t * binary_, size_t binsize_, int subtune)
   psid->version = psid_extract_word(&ptr);
 
   if (psid->version < 1 || psid->version > 4) {
+    MOSDBG("[PSID] Unknown PSID version number: %d.\n", (int)psid->version);
+    goto fail;
+  }
   MOSLOG("[PSID] PSID version number: %d.\n", (int)psid->version);
 
   length = (unsigned int)((psid->version == 1 ? PSID_V1_DATA_OFFSET : PSID_V2_DATA_OFFSET) - 6);

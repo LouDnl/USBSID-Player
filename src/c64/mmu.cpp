@@ -53,7 +53,7 @@
 uint8_t *RAM;
 #if EMBEDDED
 #include <pico.h>
-extern uint8_t __not_in_flash("c64_memory") c64memory[];
+extern uint8_t c64memory[];
 #endif
 
 

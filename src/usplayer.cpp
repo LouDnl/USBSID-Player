@@ -91,7 +91,7 @@ extern void psid_init_tune(int install_driver_hook);
 extern void psid_init_driver(void);
 extern void psid_shutdown(void);
 extern void start_vsid_player(bool is_pal, bool loop);
-extern bool is_pal;
+extern volatile bool is_pal;
 char * filename;
 bool from_stdin = false;
 bool force_microsidplayer = false;
@@ -558,6 +558,7 @@ extern "C" bool stop_sidplayer(void)
 
 extern "C" void next_subtune(void)
 {
+  MOSDBG("[USPLAYER] next_subtune\n");
   emu_next_subtune();
 
   return;
@@ -565,13 +566,11 @@ extern "C" void next_subtune(void)
 
 extern "C" void previous_subtune(void)
 {
+  MOSDBG("[USPLAYER] previous_subtune\n");
   emu_previous_subtune();
 
   return;
 }
-
-extern "C" int load_sidtune_fromflash(int sidflashid, char tuneno){ return 0; };
-extern "C" void reset_sidplayer(void){};
 
 
 #endif

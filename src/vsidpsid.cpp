@@ -91,7 +91,7 @@ extern uint16_t return_reloc_addr(void);
 extern uint16_t return_max_songs(void);
 
 /* VSID PSID variables */
-extern int numsids, sid2loc, sid3loc, start_song;
+extern volatile int numsids, sid2loc, sid3loc, start_song;
 
 
 /**
@@ -125,6 +125,9 @@ void start_vsid_player(bool is_pal, bool loop)
   SID->sidtwo   = sid2loc;
   SID->sidthree = sid3loc;
   SID->sidfour  = 0xd000;  /* No 4x SID in psiddrv yet :-( */
+
+  /* MOSDBG("[DEBUG] After assignment: SID->sidcount=%d\n", SID->sidcount); */
+  /* MOSDBG("[DEBUG] vsidpsid.cpp numsids @ %p = %d\n", &numsids, numsids); */
 
   bool pal_system = ((emu_read_byte(0x02a6) == 0) ? false : true);
 

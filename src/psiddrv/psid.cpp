@@ -57,11 +57,20 @@ extern uint8_t emu_dma_read_ram(uint16_t address);
 extern void emu_dma_write_ram(uint16_t address, uint8_t data);
 extern "C" int reloc65(char** buf, int* fsize, int addr);
 
-bool is_pal = true;
-int numsids = 1;
-int sid2loc = 0xd000, sid3loc = 0xd000;
+volatile bool is_pal = true;
+volatile int numsids = 1;
+volatile int sid2loc = 0xd000, sid3loc = 0xd000;
 static uint16_t reloc_addr_ext;
 static uint16_t max_songs;
+
+/* Optimilization workaround */
+void psid_init_defaults(void) {
+  numsids = 1;
+  is_pal = true;
+  sid2loc = 0xd000;
+  sid3loc = 0xd000;
+  return;
+}
 
 typedef struct psid_s {
   /* PSID data */
@@ -454,6 +463,7 @@ void psid_init_tune(int install_driver_hook)
 
 void psid_init_driver(void)
 {
+  psid_init_defaults();
   // uint8_t psid_driver[] = {
 #include <psiddrv.h>
   // };

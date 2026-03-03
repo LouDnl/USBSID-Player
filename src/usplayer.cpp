@@ -29,20 +29,21 @@
  *
  */
 
-#include <cstring>
-#include <bitset>
+#if DESKTOP
 #include <sstream>
+#include <iostream>
+#include <chrono>
+#include <thread>
+#include <algorithm>
+#include <bitset>
+#include <iomanip>
+#include <ios>
+#include <string>
+#include <cctype>    // Required for ::tolower
+#endif
+#include <cstring>
 #include <cstdint>
 #include <functional>
-#include <iomanip>
-#include <iostream>
-#include <sstream>
-#include <ios>
-#include <chrono>
-#include <string>
-#include <thread>
-#include <algorithm> // Required for std::transform
-#include <cctype>    // Required for ::tolower
 
 #include <sys/time.h>
 #include <signal.h>

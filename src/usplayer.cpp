@@ -493,7 +493,7 @@ int main(int argc, char **argv)
 }
 
 #elif EMBEDDED
-extern "C" void load_prg(uint8_t * binary_, size_t binsize_, bool loop)
+void load_prg(uint8_t * binary_, size_t binsize_, bool loop)
 {
   MOSDBG("[USPLAYER] load_prg, size: %u\n", binsize_);
   stop = false; /* Always init to false on sidtune load */
@@ -508,7 +508,7 @@ extern "C" void load_prg(uint8_t * binary_, size_t binsize_, bool loop)
   return;
 }
 
-extern "C" void load_sidtune(uint8_t * sidfile, int sidfilesize, char subt)
+void load_sidtune(uint8_t * sidfile, int sidfilesize, char subt)
 {
   MOSDBG("[USPLAYER] load_sidtune, size: %u\n", sidfilesize);
   stop = false; /* Always init to false on sidtune load */
@@ -520,7 +520,7 @@ extern "C" void load_sidtune(uint8_t * sidfile, int sidfilesize, char subt)
   return;
 }
 
-extern "C" void init_sidplayer(void)
+void init_sidplayer(void)
 {
   MOSDBG("[USPLAYER] psid_init_driver\n");
   psid_init_driver();
@@ -529,7 +529,7 @@ extern "C" void init_sidplayer(void)
   return;
 }
 
-extern "C" void start_sidplayer(bool loop)
+void start_sidplayer(bool loop)
 {
   psid_shutdown();
   MOSDBG("[USPLAYER] start_vsid_player\n");
@@ -544,13 +544,13 @@ extern "C" void start_sidplayer(bool loop)
   return;
 }
 
-extern "C" void loop_sidplayer(void)
+void loop_sidplayer(void)
 {
   emulate_c64_single();
   return;
 }
 
-extern "C" bool stop_sidplayer(void)
+bool stop_sidplayer(void)
 {
   MOSDBG("[USPLAYER] stop_sidplayer\n");
   stop = true;
@@ -560,7 +560,7 @@ extern "C" bool stop_sidplayer(void)
   return stop;
 }
 
-extern "C" void next_subtune(void)
+void next_subtune(void)
 {
   MOSDBG("[USPLAYER] next_subtune\n");
   emu_next_subtune();
@@ -568,7 +568,7 @@ extern "C" void next_subtune(void)
   return;
 }
 
-extern "C" void previous_subtune(void)
+void previous_subtune(void)
 {
   MOSDBG("[USPLAYER] previous_subtune\n");
   emu_previous_subtune();

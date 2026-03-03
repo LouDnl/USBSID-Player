@@ -9,7 +9,7 @@
  * Parts if this emulator are based on other great emulators and players
  * like Vice, SidplayFp, Websid, SidBerry and emudore/adorable
  *
- * embedded.cpp
+ * usplayer.cpp
  * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *

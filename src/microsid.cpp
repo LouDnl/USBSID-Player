@@ -111,7 +111,9 @@ static const char *clockspeed[5] = {"Unknown", "PAL", "NTSC", "PAL and NTSC", "D
 /* SID file variables applied to C64 */
 SidFile *sidfile_;
 uint8_t songno = -1;
+#if DESKTOP
 string ms_filename = "";
+#endif
 int clock_speed,
   raster_lines,
   frame_cycles,
@@ -348,6 +350,7 @@ void load_microsid_player(uint_fast8_t song_number)
 
 }
 
+#if DESKTOP
 /**
  * @brief Print parsed SID information
  * @note MicroSID player function
@@ -400,6 +403,7 @@ void print_sid_info(void)
 
   return;
 }
+#endif
 
 /**
  * @brief Parse info from a loaded SID file
@@ -469,14 +473,18 @@ bool process_sid_file(uint8_t * binary_, size_t binsize_)
     }
 #endif
     parse_sid_info();
+#if DESKTOP
     print_sid_info();
+#endif
   } else {
     MOSDBG("No SID file supplied, exiting!\n");
     goto FAIL;
   }
 
   if (songno < 0 or songno >= sidfile_->GetNumOfSongs()) {
+#if DESKTOP
     cout << "Warning: Invalid Sub-Song Number. Default Sub-Song will be chosen." << endl;
+#endif
     songno = sidfile_->GetFirstSong();
   }
 

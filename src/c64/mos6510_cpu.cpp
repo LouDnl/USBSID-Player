@@ -439,7 +439,9 @@ void __us_not_in_flash_func(execute) mos6510::execute(uint8_t opcode)
   if (handler) { /* Check if the std::function has a target */
     handler();
   } else { /* Handle unknown opcode (e.g., log an error or throw a custom exception) */
+#if DESKTOP
     std::cerr << "Error: Unimplemented opcode " << (int)opcode << std::endl;
+#endif
   }
   return;
 }
@@ -1967,6 +1969,7 @@ void mos6510::dump_flags(val_t flags)
 
 void mos6510::dump_regs()
 {
+#if DESKTOP
   std::stringstream sflags;
   if(nf())  sflags << "NF ";
   if(of())  sflags << "OF ";
@@ -2011,7 +2014,7 @@ void mos6510::dump_regs()
     (flags()&SR_ZERO)>>1,
     (flags()&SR_CARRY),
     sflags.str().c_str());
-
+#endif
 }
 
 static unsigned long log_num = 0;

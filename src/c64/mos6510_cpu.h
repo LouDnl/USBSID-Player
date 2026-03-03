@@ -35,9 +35,11 @@
 
 #include <cstdint>
 #include <functional>
+#if DESKTOP
 #include <iostream>
 #include <ios>
 #include <sstream>
+#endif
 
 #include <types.h>
 #include <constants.h>

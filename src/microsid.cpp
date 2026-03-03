@@ -29,15 +29,18 @@
  *
  */
 
-#include <bitset>
+#if DESKTOP
 #include <sstream>
-#include <cstdint>
-#include <functional>
-#include <iomanip>
 #include <iostream>
-#include <ios>
 #include <chrono>
 #include <thread>
+#include <algorithm>
+#include <bitset>
+#include <iomanip>
+#include <ios>
+#endif
+#include <cstdint>
+#include <functional>
 
 #include <sys/time.h>
 #if DESKTOP

@@ -58,6 +58,10 @@
 #endif /* _WIN32 */
 #endif /* DESKTOP */
 
+#if EMBEDDED
+#include <usplayer.h>
+#endif
+
 #include <c64util.h>
 #include <wrappers.h>
 

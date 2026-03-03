@@ -1,4 +1,3 @@
-
 /*
  * timer.cpp - Adaption for USBSID-player
  *
@@ -48,6 +47,7 @@
    overflow handling.
 */
 
+#include <c64util.h>
 #include <timer.h>
 
 #include <unistd.h>
@@ -153,7 +153,7 @@ tick_t tick_now_after(tick_t previous_tick)
  * @note The RP2040 timer is 64-bit; it will not overflow for 584,000 years.
  * @note On RP2350, this reads from the shared hardware timer block.
  */
-tick_t __not_in_flash_func(tick_now)(void) {
+tick_t __us_not_in_flash_func(tick_now) tick_now(void) {
     return time_us_64();
 }
 

@@ -101,10 +101,10 @@ void getinfo_USBSID(int clockspeed)
     MOSDBG("[WARNING] Tune no.sids %d is higher then USBSID-Pico no.sids %d\n", sidcount, usbsid->USBSID_GetNumSIDs());
   }
 
-  uint8_t socket_config[10];
+  uint8_t socket_config[SOCKET_BUFFER_SIZE];
   usbsid->USBSID_GetSocketConfig(socket_config);
   MOSDBG("[USBSID] SOCKET CONFIG: ");
-  for (int i = 0; i < 10; i++) {
+  for (int i = 0; i < SOCKET_BUFFER_SIZE; i++) {
     MOSDBG("%02X ", socket_config[i]);
   }
   MOSDBG("\n");

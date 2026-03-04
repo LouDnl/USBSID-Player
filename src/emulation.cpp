@@ -204,7 +204,8 @@ void hardwaresid_deinit(void)
  */
 void log_logs(void)
 { /* LOL :-) */
-  MOSDBG("[ARGS] %d%d%d%d%d%d%d%d\n",
+  MOSDBG("FTWO:%d ARGS:%d%d%d%d%d%d%d%d\n",
+    forcesockettwo,
     log_sidrw,
     log_cia1rw,
     log_cia2rw,

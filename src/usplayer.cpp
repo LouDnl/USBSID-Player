@@ -577,5 +577,13 @@ void previous_subtune(void)
   return;
 }
 
+void force_socktwo(void)
+{
+  MOSDBG("[USPLAYER] force_socktwo\n");
+  forcesockettwo = true;
+
+  return;
+}
+
 
 #endif

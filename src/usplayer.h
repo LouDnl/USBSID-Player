@@ -47,6 +47,7 @@ extern void loop_sidplayer(void);
 extern bool stop_sidplayer(void);
 extern void next_subtune(void);
 extern void previous_subtune(void);
+extern void force_socktwo(void);
 
 
 #ifdef __cplusplus

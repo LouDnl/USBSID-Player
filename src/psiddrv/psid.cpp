@@ -47,6 +47,17 @@
 #endif
 #include <c64util.h>
 
+/* WEB build: headers above are expanded with the DESKTOP toolchain (posix
+ * logging, no pico). For the file-loading code below we want the EMBEDDED
+ * in-memory (pointer) path, so remap the macros for this TU only, after the
+ * includes. This avoids sprinkling `|| WEB` across every fread/MEM_fread gate. */
+#if WEB
+#undef DESKTOP
+#define DESKTOP 0
+#undef EMBEDDED
+#define EMBEDDED 1
+#endif
+
 /* Sync factors (changed to positive 2016-11-07, BW)  */
 #define MACHINE_SYNC_PAL     1
 #define MACHINE_SYNC_NTSC    2

@@ -61,7 +61,10 @@ class mos6581_8580
     uint8_t sockonesidtwo = 0;
     uint8_t socktwosidone = 0;
     uint8_t socktwosidtwo = 0;
+    uint8_t f_addr = 0;
+    bool realreads = false;
     bool forcesockettwo = false;
+    bool forceaddress = false;
 
     bool log_sidrw = false;
 
@@ -91,6 +94,9 @@ class mos6581_8580
     unsigned int sid_delay(void);
     uint8_t read_sid(uint16_t addr);
     void write_sid(uint16_t addr, uint8_t data);
+
+    void mute_sid(bool enable);
+    void mute_voice(int voice, bool enable);
 
     void print_settings(void);
 };

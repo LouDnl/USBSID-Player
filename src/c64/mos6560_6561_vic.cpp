@@ -457,7 +457,7 @@ void __us_not_in_flash_func(vsync_do_end_of_line) mos6560_6561::vsync_do_end_of_
   /* how many host ticks since last sync. */
   tick_delta = tick_now - last_sync_tick;
   /* is it time to consider keyboard, joystick ? */
-  if (tick_delta >= tick_between_sync) {
+  if (tick_delta >= tick_between_sync && !ffwd) {
     /*
      * Compare the emulated time vs host time.
      *

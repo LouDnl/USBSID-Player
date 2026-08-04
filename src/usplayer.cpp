@@ -75,6 +75,7 @@ extern void emu_init(void);
 extern void emu_deinit(void);
 extern void emu_next_subtune(void);
 extern void emu_previous_subtune(void);
+extern void emu_ffwd(bool enable);
 extern void emu_pause_playing(bool pause);
 extern void emulate_c64_single(void);
 extern void hardwaresid_init(void);
@@ -113,8 +114,11 @@ extern volatile bool playing;
 extern volatile bool vsidpsid;
 #endif
 extern uint8_t songno;
+extern uint8_t f_addr;
 extern bool
+  realreads,
   forcesockettwo,
+  forceaddress,
   is_rsid,
   havefile,
   prgfile;
@@ -129,13 +133,16 @@ extern bool
   log_cia2rw,
   log_vicrw,
   log_vicrrw,
-  log_pla;
+  log_pla,
+  log_memstate;
 
 #if DESKTOP
 /* Local variables */
 string fname;
+#if !WEB
 pthread_t usplayer_ptid;
 static pthread_mutex_t usplayer_mutex;
+#endif /* !WEB */
 #endif
 
 void init(void)
@@ -163,6 +170,7 @@ void inthand(int signum)
 
 void run_player(void);
 
+#if !WEB
 /**
  * @brief Emulation thread for DESKTOP
  *
@@ -187,6 +195,7 @@ void* Emulation_Thread(void* arg)
   pthread_exit(NULL);
   return NULL;
 }
+#endif /* !WEB */
 
 void run_player(void)
 {
@@ -286,6 +295,7 @@ void wait_for_input(void)
   char pressed_key_char = 0;
   bool skip_capture = false;
   bool paused = false;
+  bool ffwd = false;
 
 #if !defined(_WIN32)
   /* Set terminal to non-canonical non-blocking mode once at start */
@@ -326,11 +336,15 @@ void wait_for_input(void)
           }
         }
 #endif
-        if(pressed_key_char=='\n' || pressed_key_char=='\r') {
+        if(pressed_key_char=='\n' || pressed_key_char=='\r' || pressed_key_char=='q') {
           std::cout << "\rKEY_STOP       \n" << std::flush;
           emu_pause_playing(false);
           stop=true;
           skip_capture=true;
+        } else if (pressed_key_char=='d') {
+          ffwd = !ffwd;
+          std::cout << "\rKEY_FFWD       " << (int)ffwd << std::flush;
+          emu_ffwd(ffwd);
         } else if (pressed_key_char=='p') {
           paused = !paused;
           std::cout << "\rKEY_PAUSE       " << (int)paused << std::flush;
@@ -390,6 +404,13 @@ void process_arguments(int argc, char **argv)
         prgfile = true; havefile = true;
       }
     }
+    else if (!strcmp(argv[param_count], "-rr")) { /* Allow real reads */
+      realreads = true;
+    }
+    else if (!strcmp(argv[param_count], "-fa")) { /* Force tunes to socket two */
+      forceaddress = true;
+      f_addr = strtol(argv[param_count+1], NULL, 16);
+    }
     else if (!strcmp(argv[param_count], "-f")) { /* Force tunes to socket two */
       forcesockettwo = true;
     }
@@ -433,6 +454,9 @@ void process_arguments(int argc, char **argv)
     }
     else if (!strcmp(argv[param_count], "-t")) { /* disable threading */
       threaded = false;
+    }
+    else if (!strcmp(argv[param_count], "-lmem")) { /* log memory state */
+      log_memstate = true;
     }
   }
   MOSDBG("[USPLAYER ARGS] FILE:%d PRG:%d FORCEMICROSID:%d FORCESOCK2:%d SONGO:%d CPU:%d L:%d%d%d%d%d%d%d%d%d\n",
@@ -478,6 +502,11 @@ int main(int argc, char **argv)
     log_sidrw
   );
 
+#if WEB
+  /* Web build: playback is driven from JS (see P3). main() is a no-op entry so
+   * the Emscripten module can instantiate; control funcs are called from JS. */
+  (void)threaded;
+#else
   if (threaded) {
     int error;
     error = pthread_create(&usplayer_ptid, NULL, &Emulation_Thread, NULL);
@@ -490,6 +519,7 @@ int main(int argc, char **argv)
   } else {
     run_player();
   }
+#endif /* WEB */
   exit(1);
 }
 

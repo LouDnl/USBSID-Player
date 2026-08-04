@@ -72,7 +72,7 @@ extern void emulate_c64(void);
 extern void start_c64_test(void);
 extern void emu_write_byte(uint16_t addr, uint8_t data);
 extern uint8_t emu_dma_read_ram(uint16_t address);
-extern uint8_t emu_dma_write_ram(uint16_t address, uint8_t data);
+extern void emu_dma_write_ram(uint16_t address, uint8_t data); /* must match emulation.cpp (was uint8_t: signature mismatch traps under wasm) */
 
 /* External emulator variables */
 extern mos6510 *Cpu;
@@ -88,6 +88,15 @@ extern bool
   log_vicrrw;
 
 using namespace std;
+
+/* WEB build: use the EMBEDDED in-memory (pointer) run_prg path. Includes above
+ * are already expanded under the DESKTOP toolchain, so remap for this TU only. */
+#if WEB
+#undef DESKTOP
+#define DESKTOP 0
+#undef EMBEDDED
+#define EMBEDDED 1
+#endif
 
 
 #if DESKTOP

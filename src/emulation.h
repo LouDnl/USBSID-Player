@@ -58,6 +58,7 @@ mmu *MMU;
 /* Initialize variables */
 int pcbversion = -1;
 int fmoplsidno = -1;
+uint8_t  f_addr = 0;
 uint16_t sidone = 0;
 uint16_t sidtwo = 0;
 uint16_t sidthree = 0;
@@ -65,7 +66,9 @@ uint16_t sidfour = 0;
 int sidssockone = 0, sidssocktwo = 0;
 int sockonesidone = 0, sockonesidtwo = 0;
 int socktwosidone = 0, socktwosidtwo = 0;
+bool realreads = false;
 bool forcesockettwo = false; /* force play on socket two */
+bool forceaddress = false; /* force play on address $xx */
 int sidcount = 1;
 int sidno = 0;
 
@@ -96,6 +99,7 @@ bool log_vicrrw = false;
 bool log_cia1rw = false;
 bool log_cia2rw = false;
 bool log_sidrw = false;
+bool log_memstate = false;
 
 
 #endif /* _US_EMULATION_H */

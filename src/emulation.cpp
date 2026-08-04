@@ -287,6 +287,15 @@ void emu_previous_subtune(void)
   return;
 }
 
+void emu_ffwd(bool enable)
+{
+  MOSDBG("[EMU] Fast Forward: %s\n",
+    (enable ? "Active" : "Inactive")
+  );
+  Vic->ffwd = enable;
+  return;
+}
+
 /**
  * @brief Wrapper around MMU->dma_read_ram()
  *
@@ -375,6 +384,7 @@ void reset_player_state(void)
     sidfour = 0;
 
     /* Reset socket flags */
+    realreads = false;
     forcesockettwo = false;
 }
 
@@ -430,6 +440,10 @@ void emu_deinit(void)
 {
   MOSDBG("[C64] Deinit\n");
   stop = true; /* Make sure we're stopped if not already */
+
+  /* Idempotent: a second deinit (e.g. double stop) would dereference already
+   * deleted, NULLed objects and trap (vtable / table index out of bounds). */
+  if (Cpu == NULL) return;
 
   /* Required or the player will not restart when embedding */
   Pla->reset();
@@ -516,6 +530,15 @@ void emulate_c64_single(void)
   return;
 }
 
+void logmemstate(void)
+{
+  for (uint8_t m = 0; m <= 0x18 ; m++) {
+    printf("%02x", emu_dma_read_ram((0xd400+m)));
+  }
+  printf("\n");
+  return;
+}
+
 void emulate_c64(void)
 {
   log_logs();
@@ -533,6 +556,9 @@ void emulate_c64(void)
       Cia2->dump_timers();
       Vic->dump_timers();
       MOSDBG("\n");
+    }
+    if __unlikely (log_memstate) {
+      logmemstate();
     }
 #endif
   }

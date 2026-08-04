@@ -40,6 +40,12 @@
 #include <c64util.h>
 #include <constants.h>
 
+#if USE_RESIDFP
+#include <residfp.h>
+#include <residfp_defs.h>
+reSIDfp::residfp* fpSID;
+#endif
+
 #if DESKTOP
 #include <USBSID.h>
 extern USBSID_NS::USBSID_Class* usbsid;
@@ -56,7 +62,12 @@ extern "C" void cycled_write_operation(uint8_t address, uint8_t data, uint16_t c
 mos6581_8580::mos6581_8580()
 {
   MOSDBG("[SID] Init\n");
-
+#if USE_RESIDFP
+  fpSID = new reSIDfp::residfp();
+  fpSID->setChipModel(reSIDfp::CSG8580);
+  fpSID->setSamplingParameters(985248, reSIDfp::NONE, 0);
+  MOSDBG("[FPSID] Init\n");
+#endif
   srand(time(NULL));
   return;
 }
@@ -110,7 +121,13 @@ bool __us_not_in_flash_func(custom_sidaddr_check) mos6581_8580::custom_sidaddr_c
 
 uint8_t __us_not_in_flash_func(sidaddr_translation) mos6581_8580::sidaddr_translation(uint16_t addr)
 {
-  uint8_t sock2add = (forcesockettwo ? (sidssockone == 1 ? 0x20 : sidssockone == 2 ? 0x40 : 0x0) : 0x0);
+  uint8_t sock2add = 0;
+  if (forceaddress) {
+    sock2add = f_addr;
+  } else {
+    sock2add = (forcesockettwo ? (sidssockone == 1 ? 0x20 : sidssockone == 2 ? 0x40 : 0x0) : 0x0);
+  }
+
   if (addr == 0xDF40 || addr == 0xDF50) {
     if (fmoplsidno >= 1 && fmoplsidno <=4) {
       sidno = fmoplsidno;
@@ -231,7 +248,20 @@ uint8_t __us_not_in_flash_func(read_sid) mos6581_8580::read_sid(uint16_t addr)
 #if EMBEDDED
   // else cycled_read_operation(phyaddr,cycles);
   /* No cycles when embedding, not needed */
-  else cycled_read_operation(phyaddr,0);
+  else data = cycled_read_operation(phyaddr,0);
+#elif DESKTOP
+#if USE_RESIDFP
+  // printf("[R1]$%02x:%02x\n",(addr & 0xFF),fpSID->peek((addr & 0xFF)));
+  data = fpSID->read((uint8_t)(addr & 0xFF));
+  // printf("[R2]$%02x:%02x\n",(addr & 0xFF),fpSID->peek((addr & 0xFF)));
+  fpSID->clockDigital(cycles);
+  // printf("[R3]$%02x:%02x\n",(addr & 0xFF),fpSID->peek((addr & 0xFF)));
+  // printf("[RF]$%02x:%02x\n",(addr & 0xFF),data);
+#else
+  else if (usbsid && realreads) {
+    data = usbsid->USBSID_Read(phyaddr);
+  }
+#endif
 #endif
   if (log_sidrw) {
     MOSDBG("[R SID%d] $%04x $%02x:%02x [C]%5u\n",
@@ -258,6 +288,11 @@ void __us_not_in_flash_func(write_sid) mos6581_8580::write_sid(uint16_t addr, ui
     // usbsid->USBSID_WaitForCycle(cycles);
     usbsid->USBSID_WriteRingCycled(phyaddr, data, cycles);
   }
+#if USE_RESIDFP
+  fpSID->write((uint8_t)(addr & 0xFF), data);
+  fpSID->clockDigital(cycles);
+  // printf("[W]$%02x:%02x\n",(addr & 0xFF),fpSID->peek((addr & 0xFF)));
+#endif
 #elif EMBEDDED
   if (phyaddr != 0xFE) {
     // cycled_write_operation(phyaddr, data, cycles);
@@ -301,3 +336,8 @@ void mos6581_8580::print_settings(void)
 
   return;
 }
+
+void mute_sid(bool enable)
+{}
+void mute_voice(int voice, bool enable)
+{}

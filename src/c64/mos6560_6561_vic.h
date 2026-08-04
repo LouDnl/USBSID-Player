@@ -158,6 +158,7 @@ class mos6560_6561
     int timer_speed = 0; /* Percentage */
     bool sync_reset = true;
     bool metrics_reset = false;
+    bool ffwd = false;
 
     /* Number of clock cycles per seconds on the real machine. */
     long cycles_per_sec;

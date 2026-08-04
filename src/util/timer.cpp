@@ -80,7 +80,7 @@ tick_t tick_per_second(void)
  *        functions
  */
 
- #if DESKTOP
+#if DESKTOP
 /**
  * @brief return the current system ticks in nanoseconds
  */

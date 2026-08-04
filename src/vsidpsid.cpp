@@ -77,12 +77,14 @@ extern volatile bool paused;
 #include <USBSID.h>
 extern USBSID_NS::USBSID_Class* usbsid;
 #endif
+extern uint8_t f_addr;
 extern uint16_t sidone, sidtwo, sidthree, sidfour;
 extern int pcbversion, fmoplsidno;
 extern int sidssockone, sidssocktwo;
 extern int sockonesidone, sockonesidtwo;
 extern int socktwosidone, socktwosidtwo;
-extern bool forcesockettwo;
+extern bool forcesockettwo, forceaddress;
+extern bool realreads;
 extern int sidcount;
 extern int sidno;
 
@@ -116,6 +118,9 @@ void start_vsid_player(bool is_pal, bool loop)
     SID->socktwosidone = socktwosidone;
     SID->socktwosidtwo = socktwosidtwo;
     SID->forcesockettwo = forcesockettwo;
+    SID->forceaddress = forceaddress;
+    SID->f_addr = f_addr;
+    SID->realreads = realreads;
   }
 
   /* mos6581_8580 */

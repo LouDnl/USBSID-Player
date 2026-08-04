@@ -32,6 +32,9 @@ cmake_minimum_required(VERSION 3.17)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 
+### CMake stuff for ZED
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 ### Project magic sprinkles
 set(PROJECT_NAME usbsid)
 set(EXECUTABLE ${PROJECT_NAME} CACHE STRING "EXECUTABLE")
@@ -42,11 +45,32 @@ set(DESKTOP 1 CACHE STRING "DESKTOP")
 set(EMBEDDED 0 CACHE STRING "EMBEDDED")
 # enable or disable the (re)build of psiddrv.h
 set(BUILDPSIDDRV 0 CACHE STRING "BUILDPSIDDRV")
+# enable or disable residfp for desktop only!
+set(USE_RESIDFP 0 CACHE STRING "USE_RESIDFP")
 # enable or disable radare2 debugging support
 set(RADARE2 1 CACHE STRING "RADARE2")
+# enable or disable web (Emscripten/WASM) build.
+# WEB is a sub-variant of DESKTOP: it reuses the portable DESKTOP code paths
+# (posix sleep, stdout logging, malloc'd RAM) but swaps the libusb USBSID driver
+# for a JS-side transport (see src/web/). Enabling WEB forces DESKTOP=1.
+set(WEB 0 CACHE STRING "WEB")
+
+if(${WEB} EQUAL 1)
+  set(DESKTOP 1)
+  set(EMBEDDED 0)
+  set(RADARE2 0)
+endif()
 
 if(${DESKTOP} EQUAL 1 AND ${EMBEDDED} EQUAL 1)
   message(FATAL_ERROR "DESKTOP and EMBEDDED are mutually exclusive! Exiting...")
+endif()
+
+if(${EMBEDDED} EQUAL 1 AND ${USE_RESIDFP} EQUAL 1)
+  message(FATAL_ERROR "USE_RESIDFP cannot be used with EMBEDDED! Exiting...")
+endif()
+
+if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 1 AND ${USE_RESIDFP} EQUAL 1)
+  message(FATAL_ERROR "USE_RESIDFP cannot be used with WEB! Exiting...")
 endif()
 
 if(${DESKTOP} EQUAL 0 AND ${EMBEDDED} EQUAL 0)
@@ -54,6 +78,16 @@ if(${DESKTOP} EQUAL 0 AND ${EMBEDDED} EQUAL 0)
 endif()
 
 ### Compiler flags and options
+if (WEB)
+  ### Lean set for the Emscripten/clang wasm backend. -save-temps / -fverbose-asm
+  ### break the wasm backend (it reassembles the .s), and -Wno-maybe-uninitialized
+  ### is a gcc-only flag. -O2 keeps SID timing sane (player needs high opt).
+  set(COMPILE_OPTS PRIVATE
+    -O2
+    -Wno-format
+    -Wno-unused-function
+  )
+else (WEB)
 set(COMPILE_OPTS PRIVATE
   -g3
   -Og
@@ -67,13 +101,17 @@ set(COMPILE_OPTS PRIVATE
   -save-temps
   -fverbose-asm
 )
+endif (WEB)
 
-if (DESKTOP)
-
-endif (DESKTOP)
 set(COMPILE_OPTS ${COMPILE_OPTS}
   -DDESKTOP=${DESKTOP}
+  -DUSE_RESIDFP=${USE_RESIDFP}
   )
+if (WEB)
+  set(COMPILE_OPTS ${COMPILE_OPTS}
+  -DWEB=${WEB}
+  )
+endif (WEB)
 if (EMBEDDED)
   set(COMPILE_OPTS ${COMPILE_OPTS}
   -DEMBEDDED=${EMBEDDED}
@@ -84,7 +122,46 @@ endif (EMBEDDED)
 # Run the project command
 project(${PROJECT_NAME} C CXX ASM)
 
-if (DESKTOP)
+# EMSCRIPTEN is defined by the Emscripten toolchain during project(), so this
+# guard must live after project().
+if(${WEB} EQUAL 1 AND NOT EMSCRIPTEN)
+  message(FATAL_ERROR "WEB=1 requires the Emscripten toolchain. Configure with 'emcmake cmake ...'. Exiting...")
+endif()
+
+if (${DESKTOP} EQUAL 1 AND ${USE_RESIDFP} EQUAL 1 AND ${WEB} EQUAL 0)
+  # The autotools build produces libtool objects under lib/libresidfp/src/.libs/.
+  # Link the whole archive: the residfp.o wrapper alone is missing SID,
+  # WaveformGenerator, EnvelopeGenerator, State, resamplers, etc.
+  set(RESIDFP_LIB ${CMAKE_CURRENT_SOURCE_DIR}/lib/libresidfp/src/.libs/libresidfp.a)
+
+  add_custom_command(
+    OUTPUT ${RESIDFP_LIB}
+    COMMAND $(MAKE) all
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/lib/libresidfp/
+  )
+
+  add_custom_target(
+    BUILDRESID ALL
+    DEPENDS ${RESIDFP_LIB}
+  )
+
+  # add_custom_target(BUILDRESID ALL
+  #   COMMAND $(MAKE) all
+  #   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/lib/libresidfp/
+  # )
+
+  # add_library(RESIDFP STATIC IMPORTED)
+  # set_target_properties(RESIDFP
+  #   IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/lib/libresidfp/src/residfp/libresidfp_la-residfp.o # Make sure to use absolute path here
+  #   INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/lib/libresidfp/src/residfp/
+  #   INTERFACE_COMPILE_DEFINITIONS "USING_RESIDFP;RESIDFP_STATIC"
+  # )
+  # add_dependencies(RESIDFP BUILDRESID) # So that anyone linking against RESIDFP causes BUILDRESID to build first
+
+  # target_link_libraries(${EXECUTABLE} PRIVATE RESIDFP)
+endif()
+
+if (DESKTOP AND NOT WEB)
   find_package(PkgConfig REQUIRED)
   pkg_check_modules(libusb REQUIRED IMPORTED_TARGET libusb-1.0)
 
@@ -108,7 +185,7 @@ if (DESKTOP)
     # PkgConfig::libusb is already in TARGET_LL
   endif ()
 
-endif (DESKTOP)
+endif (DESKTOP AND NOT WEB)
 
 ### Source files to compile
 set(SOURCEFILES
@@ -142,15 +219,27 @@ set(TARGET_INCLUDE_DIRS PRIVATE
   ${CMAKE_CURRENT_LIST_DIR}/src/psiddrv
 )
 
-if (DESKTOP)
+if (DESKTOP AND NOT WEB)
+  if (USE_RESIDFP)
+  #   set(SOURCEFILES
+  #     ${SOURCEFILES}
+  #     ${CMAKE_CURRENT_LIST_DIR}/lib/libresidfp
+  #   )
+    set(TARGET_INCLUDE_DIRS
+      ${TARGET_INCLUDE_DIRS}
+      ${CMAKE_CURRENT_LIST_DIR}/lib/libresidfp/src/residfp/
+    )
+    # list(APPEND TARGET_LL ${CMAKE_CURRENT_SOURCE_DIR}/lib/libresidfp/src/residfp/libresidfp_la-residfp.o)
+    # target_link_libraries(APPEND TARGET_LL ${CMAKE_CURRENT_SOURCE_DIR}/lib/libresidfp/src/residfp/libresidfp_la-residfp.o)
+  endif (USE_RESIDFP)
   set(TARGET_INCLUDE_DIRS ${TARGET_INCLUDE_DIRS}
     # ${WIN32_INC}
     /usr/local/lib
     /usr/local/include
     /usr/lib
     /usr/include
-)
-endif (DESKTOP)
+  )
+endif (DESKTOP AND NOT WEB)
 
 ## Workaround for github actions failing
 ## Needs download and compilation of XA for this part to work
@@ -170,7 +259,7 @@ if (BUILDPSIDDRV)
   endif ()
 endif (BUILDPSIDDRV)
 
-if (DESKTOP)
+if (DESKTOP AND NOT WEB)
   set(SOURCEFILES
     ${SOURCEFILES}
     ${CMAKE_CURRENT_LIST_DIR}/lib/driver/src/USBSID.cpp
@@ -182,10 +271,29 @@ if (DESKTOP)
     ${CMAKE_CURRENT_LIST_DIR}/lib/driver/src
     # ${CMAKE_CURRENT_LIST_DIR}/lib/midi
   )
-endif (DESKTOP)
+endif (DESKTOP AND NOT WEB)
+
+if (WEB)
+  ### Web build: JS-side transport replaces the libusb driver.
+  ### src/web/stub provides an API-compatible USBSID.h (no libusb).
+  set(SOURCEFILES
+    ${SOURCEFILES}
+    ${CMAKE_CURRENT_LIST_DIR}/src/web/web_backend.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/web/web_player.cpp
+    )
+  set(TARGET_INCLUDE_DIRS
+    ${TARGET_INCLUDE_DIRS}
+    ${CMAKE_CURRENT_LIST_DIR}/src/web/stub
+  )
+endif (WEB)
 
 ### Compile time
 add_executable(${EXECUTABLE} ${SOURCEFILES})
+
+if (${DESKTOP} EQUAL 1 AND ${USE_RESIDFP} EQUAL 1 AND ${WEB} EQUAL 0)
+  add_dependencies(${EXECUTABLE} BUILDRESID)
+  target_link_libraries(${EXECUTABLE} ${RESIDFP_LIB})
+endif()
 
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
 target_compile_definitions(${EXECUTABLE} PRIVATE UNIX_COMPILE)
@@ -203,6 +311,22 @@ target_link_libraries(${EXECUTABLE} ${TARGET_LL})
 target_sources(${EXECUTABLE} PUBLIC ${SOURCEFILES})
 target_compile_options(${EXECUTABLE} ${COMPILE_OPTS})
 
+if (WEB)
+  ### Emscripten output + exports. main() is not auto-run (INVOKE_RUN=0);
+  ### JS drives playback via the exported control functions (P3).
+  set_target_properties(${EXECUTABLE} PROPERTIES SUFFIX ".js")
+  target_link_options(${EXECUTABLE} PRIVATE
+    "-sMODULARIZE=1"
+    "-sEXPORT_NAME=USBSIDPlayer"
+    "-sENVIRONMENT=web,worker,node"
+    "-sALLOW_MEMORY_GROWTH=1"
+    "-sINVOKE_RUN=0"
+    "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','HEAPU8']"
+    "-sEXPORTED_FUNCTIONS=['_main','_malloc','_free','_usp_alloc','_usp_free','_usp_load_sidtune','_usp_load_prg','_usp_init_sidplayer','_usp_start','_usp_step','_usp_step_instr','_usp_refresh_hz','_usp_is_pal','_usp_stop','_usp_next_subtune','_usp_prev_subtune','_usp_pause','_usp_is_playing','_usp_force_socket_two','_usbsid_web_ring_ptr','_usbsid_web_ring_entries','_usbsid_web_ring_head','_usbsid_web_ring_tail','_usbsid_web_ring_set_tail','_usbsid_web_flush_count','_usbsid_web_drop_count','_usbsid_web_write_count','_usbsid_web_get_clockrate']"
+  )
+endif (WEB)
+
+if (NOT WEB)
 ### Copy build output to main directory
 add_custom_command(TARGET
   ${EXECUTABLE}
@@ -213,3 +337,4 @@ add_custom_command(TARGET
   ${EXECUTABLE}
   POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E rm $<TARGET_FILE:${EXECUTABLE}>)
+endif (NOT WEB)

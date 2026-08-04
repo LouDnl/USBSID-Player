@@ -66,7 +66,7 @@ extern void getinfo_USBSID(int clockspeed);
 extern uint8_t emu_read_byte(uint16_t addr);
 extern void emu_write_byte(uint16_t addr, uint8_t data);
 extern uint8_t emu_dma_read_ram(uint16_t address);
-extern uint8_t emu_dma_write_ram(uint16_t address, uint8_t data);
+extern void emu_dma_write_ram(uint16_t address, uint8_t data); /* must match emulation.cpp (was uint8_t: signature mismatch traps under wasm) */
 extern void cycle_callback(mos6510* cpu);
 extern void emulate_c64_upto(uint_least16_t pc);
 extern void emulate_until_opcode(uint_least8_t opcode);

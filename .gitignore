@@ -33,6 +33,8 @@
 !src/psid
 !src/psiddrv
 !src/util
+!src/web
+!src/web/stub
 !lib
 !lib/driver
 !web

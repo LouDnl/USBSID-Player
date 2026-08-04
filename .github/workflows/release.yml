@@ -64,6 +64,7 @@ jobs:
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-pkg-config
             mingw-w64-x86_64-ninja
+            zip
 
       - name: Configure and build ${{ matrix.buildname }}
         run: |
@@ -100,11 +101,14 @@ jobs:
 
           ls -l stage
           cd stage
+          # A zip for Windows, a tarball elsewhere. `zip` is installed with the
+          # toolchain above: the MINGW64 shell ships with neither it nor 7z.
           if [ "${{ matrix.os }}" = "windows-2022" ]; then
-            7z a "../usbsid-${{ matrix.asset }}.zip" ./*
+            zip -r "../usbsid-${{ matrix.asset }}.zip" .
           else
             tar -czf "../usbsid-${{ matrix.asset }}.tar.gz" ./*
           fi
+          ls -l ../usbsid-${{ matrix.asset }}.*
 
       - name: Upload ${{ matrix.asset }}
         uses: actions/upload-artifact@v4

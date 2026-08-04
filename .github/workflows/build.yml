@@ -8,8 +8,10 @@ on:
   push:
     paths:
       - "CMakeLists.txt"
+      - "cmake/**"
       - "src/**"
       - "lib/**"
+      - "tests/**"
       - ".github/workflows/build.yml"
   # Allows you to run this workflow manually from the Actions tab when needed
   workflow_dispatch:
@@ -88,7 +90,7 @@ jobs:
       - name: Configure and build ${{ matrix.buildname }}
         run: |
           pushd repo
-          cmake -S . -B build -DEXECUTABLE=${{ matrix.buildname }} && cmake --build build -j$(nproc)
+          cmake -S . -B build -DDESKTOP=1 -DEMBEDDED=0 -DWEB=0 -DBUILD_TESTS=1 -DPROFILE=0 -DSTRICT=1 -DEXECUTABLE=${{ matrix.buildname }} && cmake --build build -j$(nproc)
           ls -lhai
           popd
 

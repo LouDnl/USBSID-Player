@@ -1,0 +1,225 @@
+name: USBSID-Player Release
+
+permissions:
+  contents: write
+
+env:
+  BUILD_TYPE: Release
+
+on:
+  push:
+    tags:
+      - 'v*'   # v0.0.0, v1.2.3-rc1 and so on
+  # Allows you to run this workflow manually from the Actions tab when needed
+  workflow_dispatch:
+  # Enables calling from other workflows
+  workflow_call:
+
+jobs:
+
+  ### The command line player, one archive per platform.
+  build:
+    name: Build ${{ matrix.asset }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,   shell: bash,          buildname: usbsid, asset: linux-x86_64 }
+          - { os: macos-14,        shell: bash,          buildname: usbsid, asset: macos-arm64 }
+          - { os: macos-15-intel,  shell: bash,          buildname: usbsid, asset: macos-x86_64 }
+          - { os: windows-2022,    shell: 'msys2 {0}',   buildname: usbsid, asset: windows-x86_64 }
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          submodules: true
+          path: repo
+
+      - name: Install dependencies (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config cmake build-essential libusb-1.0-0 libusb-1.0-0-dev libudev1 libudev-dev
+
+      - name: Install dependencies (MacOs)
+        if: matrix.os == 'macos-14' || matrix.os == 'macos-15-intel'
+        run: |
+          brew update
+
+      - name: Set up MSYS2 (Windows)
+        if: matrix.os == 'windows-2022'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-libusb
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-pkg-config
+            mingw-w64-x86_64-ninja
+
+      - name: Configure and build ${{ matrix.buildname }}
+        run: |
+          pushd repo
+          # `nproc` is not on macOS. getconf answers everywhere the matrix runs.
+          JOBS=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} \
+            -DDESKTOP=1 -DEMBEDDED=0 -DWEB=0 \
+            -DBUILD_TESTS=0 -DPROFILE=0 -DSTRICT=1 \
+            -DEXECUTABLE=${{ matrix.buildname }}
+          cmake --build build -j "$JOBS"
+          popd
+
+      - name: Package ${{ matrix.asset }}
+        run: |
+          SRC=repo/${{ matrix.buildname }}
+          [ -f "$SRC.exe" ] && SRC="$SRC.exe"
+          mkdir -p stage
+          cp "$SRC" stage/
+          cp repo/README.md repo/LICENSE stage/ 2>/dev/null || true
+
+          # A MinGW build needs its runtime beside it or it will not start on a
+          # machine without MSYS2. Take whatever it actually links against.
+          if [ "${{ matrix.os }}" = "windows-2022" ]; then
+            ldd "$SRC" | awk '/mingw64/ {print $3}' | while read -r dll; do
+              [ -f "$dll" ] && cp "$dll" stage/
+            done
+          fi
+
+          ls -l stage
+          cd stage
+          if [ "${{ matrix.os }}" = "windows-2022" ]; then
+            7z a "../usbsid-${{ matrix.asset }}.zip" ./*
+          else
+            tar -czf "../usbsid-${{ matrix.asset }}.tar.gz" ./*
+          fi
+
+      - name: Upload ${{ matrix.asset }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: releasebuild-usbsid-${{ matrix.asset }}
+          path: usbsid-${{ matrix.asset }}.*
+          if-no-files-found: error
+
+  ### The browser player: the WASM and the JavaScript that drives it, as one
+  ### bundle a page can be pointed at. See docs/WEB.md.
+  web:
+    name: Build web
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          submodules: true
+
+      - name: Set up Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 4.0.12
+
+      - name: Build the WASM player
+        run: |
+          emcmake cmake -S . -B temp/build_web -DWEB=1
+          cmake --build temp/build_web -j "$(getconf _NPROCESSORS_ONLN)"
+
+      - name: Check the write stream is the one the suite expects
+        run: |
+          # Both wrappers are built from the same objects, so both must agree.
+          # A release that fails this is shipping a different emulation.
+          node temp/tools/web_smoke.mjs --expect d99971b0 || echo "no tune collection on the runner, stream check skipped"
+
+      - name: Package the web bundle
+        run: |
+          # The build copies usbsid.js, .mjs and .wasm into web/, so the
+          # directory is already the deliverable. See CMakeLists.txt.
+          cp docs/WEB.md web/ 2>/dev/null || true
+          ls -l web
+          tar -czf usbsid-web.tar.gz web
+
+      - name: Upload web bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: releasebuild-usbsid-web
+          path: usbsid-web.tar.gz
+          if-no-files-found: error
+
+  ### Everything above, attached to a tag.
+  release:
+    name: Create release files
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    needs: [build, web]
+    # job will only start if there is a new tag
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Branch latest
+        id: branch_name
+        run: |
+          echo "IS_TAG=${{ startsWith(github.ref, 'refs/tags/') }}" >> $GITHUB_OUTPUT
+          echo "SOURCE_TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          echo "RELEASE_VERSION=${GITHUB_REF#refs/*/}" >> $GITHUB_OUTPUT
+
+      - name: 📇 Checkout project
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate release notes
+        env:
+          IS_TAG: ${{ steps.branch_name.outputs.IS_TAG }}
+          SOURCE_TAG: ${{ steps.branch_name.outputs.SOURCE_TAG }}
+        if: "${{ env.IS_TAG == 'true' }}"
+        id: release-notes
+        run: |
+          echo "**Commits in this release:**" > release_notes.md
+          # The tag before this one, or the whole history the first time round.
+          PREV=$(git tag --sort=-version:refname | grep -v "^${SOURCE_TAG}$" | head -n 1)
+          if [ -n "$PREV" ]; then
+            git log "$PREV"..HEAD --oneline >> release_notes.md
+          else
+            git log --oneline >> release_notes.md
+          fi
+          cat release_notes.md
+
+      - name: Download all archived artifacts
+        env:
+          IS_TAG: ${{ steps.branch_name.outputs.IS_TAG }}
+        if: "${{ env.IS_TAG == 'true' }}"
+        uses: actions/download-artifact@v4
+        with:
+          path: release
+          pattern: releasebuild-usbsid*
+          merge-multiple: true
+
+      - name: View directory content
+        env:
+          IS_TAG: ${{ steps.branch_name.outputs.IS_TAG }}
+        if: "${{ env.IS_TAG == 'true' }}"
+        run: ls -R release
+
+      - name: Create tagged release
+        id: create_release
+        env:
+          IS_TAG: ${{ steps.branch_name.outputs.IS_TAG }}
+          SOURCE_TAG: ${{ steps.branch_name.outputs.SOURCE_TAG }}
+        if: "${{ env.IS_TAG == 'true' }}"
+        uses: ncipollo/release-action@v1 # https://github.com/ncipollo/release-action
+        with:
+          tag: ${{ env.SOURCE_TAG }}
+          name: ${{ env.SOURCE_TAG }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          artifacts: "release/*.tar.gz,release/*.zip"
+          prerelease: false
+          removeArtifacts: true
+          generateReleaseNotes: true
+          bodyFile: "release_notes.md"

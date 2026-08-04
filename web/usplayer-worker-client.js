@@ -42,11 +42,13 @@ const USBSID_PID = 0x4011;
 export class USBSIDPlayerWorker {
   /**
    * @param {object} opts
-   *   opts.wasmUrl    URL of usbsid.mjs, resolved from the worker
+   *   opts.wasmUrl    URL of usbsid.mjs, resolved from the worker. The
+   *                   default assumes it sits beside the worker, which is
+   *                   where the WEB build puts it.
    *   opts.workerUrl  URL of usplayer-worker.js (default: next to this file)
    */
   constructor(opts = {}) {
-    this._wasmUrl = opts.wasmUrl || '../temp/build_web/usbsid.mjs';
+    this._wasmUrl = opts.wasmUrl || './usbsid.mjs';
     this._workerUrl = opts.workerUrl ||
       new URL('./usplayer-worker.js', import.meta.url);
     this._worker = null;

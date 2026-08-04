@@ -245,6 +245,34 @@ if(${WEB} EQUAL 1)
   set_target_properties(${EXECUTABLE}_esm PROPERTIES
     OUTPUT_NAME "${EXECUTABLE}" SUFFIX ".mjs")
   target_link_options(${EXECUTABLE}_esm PRIVATE ${US_WEB_LINK_OPTS} "-sEXPORT_ES6=1")
+
+  ### The two targets emit the *same* ${EXECUTABLE}.wasm beside their wrapper,
+  ### so linking them at once is two writers on one file. A parallel
+  ### incremental rebuild caught it: the wasm came out eight bytes long, an
+  ### empty module, while everything still linked and reported success.
+  ### Ordering them costs nothing, the link takes seconds, and the bytes are
+  ### the same either way, which is what `web_smoke.mjs --esm` checks.
+  add_dependencies(${EXECUTABLE}_esm ${EXECUTABLE})
+
+  ### Put the artefacts next to the page that loads them.
+  ###
+  ### web/ is then self contained: it can be served, zipped or copied to
+  ### another site's directory without dragging a build tree behind it, and
+  ### demo.html and bench.html load `./usbsid.js` rather than reaching up into
+  ### a build directory that may or may not be where they last looked.
+  ### The three copied files are generated, so .gitignore drops them.
+  set(US_WEB_OUT ${CMAKE_CURRENT_LIST_DIR}/web)
+  add_custom_command(TARGET ${EXECUTABLE} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${US_WEB_OUT}
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      $<TARGET_FILE:${EXECUTABLE}> ${US_WEB_OUT}/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      $<TARGET_FILE_DIR:${EXECUTABLE}>/${EXECUTABLE}.wasm ${US_WEB_OUT}/
+    COMMENT "Copying ${EXECUTABLE}.js and ${EXECUTABLE}.wasm into web/")
+  add_custom_command(TARGET ${EXECUTABLE}_esm POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      $<TARGET_FILE:${EXECUTABLE}_esm> ${US_WEB_OUT}/
+    COMMENT "Copying ${EXECUTABLE}.mjs into web/")
 endif()
 
 ### Tests

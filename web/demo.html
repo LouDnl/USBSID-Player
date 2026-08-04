@@ -65,7 +65,7 @@
 <div id="status">idle</div>
 
 <!-- The Emscripten factory, which defines the global USBSIDPlayer(). -->
-<script src="../temp/build_web/usbsid.js"></script>
+<script src="./usbsid.js"></script>
 <script type="module">
 import { USBSIDPlayerWeb, NullTransport } from './usplayer-web.js';
 import { USBSIDPlayerWorker } from './usplayer-worker-client.js';
@@ -75,7 +75,9 @@ import { ASIDMIDITransport } from './asid-midi.js';
 /* Where the build put the wasm. The repo builds into temp/, which keeps every
  * artefact inside the project directory; a deployment can put the two files
  * wherever it likes as long as these two paths agree. */
-const WASM_DIR = '../temp/build_web/';
+/* The WEB build copies usbsid.js, .mjs and .wasm in here, so the
+ * directory is self contained. See CMakeLists.txt. */
+const WASM_DIR = './';
 
 const $ = (id) => document.getElementById(id);
 const log = (m) => { $('status').textContent = m; };

@@ -39,3 +39,10 @@
 !roms
 !tests
 !web
+
+# Generated into web/ by the WEB build, see CMakeLists.txt.
+# The rules above un-ignore *.js and *.wasm, which would otherwise pull the
+# build's own output into the repository.
+web/usbsid.js
+web/usbsid.mjs
+web/usbsid.wasm

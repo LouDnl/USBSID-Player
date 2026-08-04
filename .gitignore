@@ -11,12 +11,9 @@
 !usplayer.code-workspace
 !psiddrv.a65
 !Makefile
-!src/roms/6502_functional_test.h
-!src/roms/basic.901226-01.h
-!src/roms/characters.901225-01.h
-!src/roms/kernal.901227-03.h
 
 # File types to un-ignore
+!*.cmake
 !*.cpp
 !*.c
 !*.h
@@ -24,17 +21,21 @@
 !*.js
 !*.wasm
 !*.html
+!*.bin
 
 # Directories to un-ignore
 !.github
 !.github/workflows
+!assets
+!assets/cia6526_example
+!assets/cia6526_example/**
+!assets/tests
+!assets/tests/**
+!cmake
 !src
-!src/c64
-!src/psid
-!src/psiddrv
-!src/util
-!src/web
-!src/web/stub
+!src/**
 !lib
 !lib/driver
+!roms
+!tests
 !web

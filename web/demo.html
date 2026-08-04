@@ -3,34 +3,35 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>USBSID-Player Web Demo</title>
+<title>USBSID-Player web demo</title>
 <style>
   :root { color-scheme: light dark; }
-  body { font-family: system-ui, sans-serif; max-width: 42rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+  body { font-family: system-ui, sans-serif; max-width: 44rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
   h1 { font-size: 1.3rem; }
   .row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin: .6rem 0; }
   button, select { padding: .4rem .6rem; }
-  #status { font-family: ui-monospace, monospace; white-space: pre-wrap; padding: .6rem; border: 1px solid gray; border-radius: .3rem; min-height: 3.5rem; }
+  #status { font-family: ui-monospace, monospace; white-space: pre-wrap; padding: .6rem; border: 1px solid gray; border-radius: .3rem; min-height: 4.5rem; }
   .muted { opacity: .7; font-size: .85rem; }
 </style>
 </head>
 <body>
-<h1>USBSID-Player Web Demo</h1>
+<h1>USBSID-Player web demo</h1>
 <p class="muted">
-  Loads the WASM player, steps the C64 emulation once per (wall-clock) frame,
-  and streams the SID register writes to a USBSID-Pico over WebUSB or ASID
-  (Web MIDI). Requires a Chromium-based browser and a secure context
-  (https or localhost). Supports .sid and .prg/.p00 files.
+  The C64 emulation runs in WebAssembly and the SID register writes go out to a
+  physical USBSID-Pico, over WebUSB with the cycle gaps intact or over ASID and
+  Web MIDI as a snapshot per frame. Needs a Chromium based browser and a secure
+  context: https, or localhost. Takes .sid, .prg and .p00.
 </p>
 
 <div class="row">
   <label>transport
     <select id="ttype">
-      <option value="webusb">WebUSB (cycle-exact)</option>
+      <option value="webusb">WebUSB (cycle exact)</option>
       <option value="asid">ASID (Web MIDI)</option>
     </select>
   </label>
   <button id="connect">Connect device</button>
+  <label><input type="checkbox" id="worker" checked> worker</label>
   <span id="dev" class="muted">not connected</span>
 </div>
 <div class="row" id="midiRow" style="display:none">
@@ -46,12 +47,13 @@
   <button id="prev" disabled>&laquo; Prev</button>
   <button id="next" disabled>Next &raquo;</button>
   <button id="pause" disabled>Pause</button>
-  <button id="ffwd" disabled>Fast-forward</button>
+  <button id="ffwd" disabled>Fast forward</button>
+  <button id="runstop" disabled>RUN/STOP</button>
 </div>
 <div class="row">
   <label>device clock
     <select id="clock">
-      <option value="-1">auto (match tune)</option>
+      <option value="-1">auto (match the tune)</option>
       <option value="1">PAL</option>
       <option value="2">NTSC</option>
       <option value="3">DREAN</option>
@@ -62,23 +64,31 @@
 </div>
 <div id="status">idle</div>
 
-<!-- Emscripten factory: defines global USBSIDPlayer(). -->
-<script src="../build_web/usbsid.js"></script>
+<!-- The Emscripten factory, which defines the global USBSIDPlayer(). -->
+<script src="../temp/build_web/usbsid.js"></script>
 <script type="module">
 import { USBSIDPlayerWeb, NullTransport } from './usplayer-web.js';
+import { USBSIDPlayerWorker } from './usplayer-worker-client.js';
 import { USBSIDWebUSBTransport } from './usbsid-webusb.js';
 import { ASIDMIDITransport } from './asid-midi.js';
+
+/* Where the build put the wasm. The repo builds into temp/, which keeps every
+ * artefact inside the project directory; a deployment can put the two files
+ * wherever it likes as long as these two paths agree. */
+const WASM_DIR = '../temp/build_web/';
 
 const $ = (id) => document.getElementById(id);
 const log = (m) => { $('status').textContent = m; };
 
-let M, player, transport = null, fileBytes = null, fileName = '', paused = false, ffwd = false;
+let M, player, transport = null, fileBytes = null, fileName = '';
+let paused = false, ffwd = false, statusTimer = 0;
+let connected = false, inWorker = false;
 
 (async () => {
   // eslint-disable-next-line no-undef
-  M = await USBSIDPlayer({ locateFile: (p) => '../build_web/' + p });
+  M = await USBSIDPlayer({ locateFile: (p) => WASM_DIR + p });
   player = new USBSIDPlayerWeb(M, new NullTransport());
-  log('WASM ready. Pick a transport, connect a device, and choose a file.');
+  log('WASM ready. Pick a transport, connect a device, choose a file.');
 })();
 
 $('ttype').onchange = () => {
@@ -90,72 +100,109 @@ $('connect').onclick = async () => {
     if ($('ttype').value === 'asid') {
       transport = new ASIDMIDITransport();
       await transport.connect();
-      // populate output list
       const sel = $('midiout'); sel.innerHTML = '';
       for (const o of transport.outputs()) {
         const opt = document.createElement('option');
         opt.value = o.id; opt.textContent = o.name;
-        if (transport._out && o.id === transport._out.id) opt.selected = true;
         sel.appendChild(opt);
       }
       $('midiRow').style.display = 'flex';
+    } else if ($('worker').checked && USBSIDPlayerWorker.available()) {
+      /* The emulation and the USB writes both move off this thread. Nothing
+       * in the playback path is left on a thread the browser throttles when
+       * the tab goes to the back, which is what made switching tabs audible. */
+      player = new USBSIDPlayerWorker({ wasmUrl: WASM_DIR + 'usbsid.mjs' });
+      await player.connect();
+      inWorker = true;
+      transport = null;
+      $('dev').textContent = 'USBSID-Pico (worker)';
     } else {
       transport = new USBSIDWebUSBTransport();
       await transport.connect();
     }
-    player.transport = transport;
-    $('dev').textContent = transport.productName || 'device';
-    log('connected via ' + $('ttype').value);
+    if (!inWorker) {
+      player.transport = transport;
+      $('dev').textContent = transport.productName || 'device';
+    }
+    connected = true;
+    log('connected over ' + $('ttype').value + (inWorker ? ', in a worker' : ''));
     maybeEnable();
   } catch (e) { log('connect failed: ' + e); }
 };
 
-$('midiout').onchange = () => { if (transport && transport.selectOutput) transport.selectOutput($('midiout').value); };
+$('midiout').onchange = () => {
+  if (transport && transport.selectOutput) transport.selectOutput($('midiout').value);
+};
 
 $('file').onchange = async (ev) => {
   const f = ev.target.files[0];
   if (!f) return;
   fileName = f.name.toLowerCase();
   fileBytes = new Uint8Array(await f.arrayBuffer());
-  log(`loaded ${f.name} (${fileBytes.length} bytes)`);
+  log(`${f.name}, ${fileBytes.length} bytes`);
   maybeEnable();
 };
 
 function maybeEnable() {
-  $('play').disabled = !(fileBytes && transport && transport.isOpen);
+  $('play').disabled = !(fileBytes && connected);
 }
 
-$('play').onclick = () => {
+function showStatus(prefix) {
+  const i = player.info();
+  const who = i.name ? `${i.name}${i.author ? ' - ' + i.author : ''}` : '(no title)';
+  log(`${prefix}\n${who}\n` +
+      `song ${i.song}/${i.songs}, ${player.refreshHz().toFixed(3)} frames/s, ` +
+      `${player.frames()} frames, ${player.sidWrites()} writes, ` +
+      `${player.droppedWrites()} dropped`);
+}
+
+$('play').onclick = async () => {
   const isPrg = fileName.endsWith('.prg') || fileName.endsWith('.p00');
+  let ok;
   if (isPrg) {
-    player.loadPRG(fileBytes);
+    log('booting a C64 and typing RUN, this takes a moment...');
+    ok = await player.loadPRG(fileBytes);
   } else {
     const sub = parseInt($('subtune').value, 10) || 0;
-    if (!player.loadSID(fileBytes, sub)) {
-      // Not a SID header: fall back to PRG.
-      player.loadPRG(fileBytes);
-    }
+    ok = await player.loadSID(fileBytes, sub);
+    if (!ok) ok = await player.loadPRG(fileBytes);   // not a SID header after all
   }
+  if (!ok) { log('that file is neither a SID nor a program'); return; }
+
   const clk = parseInt($('clock').value, 10);
-  if (clk >= 0) player.setClock(clk);
-  player.start();
-  ['stop','prev','next','pause','ffwd'].forEach((id) => $(id).disabled = false);
+  if (clk >= 0) await player.setClock(clk);
+  await player.start();
+
+  ['stop','prev','next','pause','ffwd','runstop'].forEach((id) => $(id).disabled = false);
   $('play').disabled = true;
-  log((isPrg ? 'playing PRG' : 'playing SID') + '... dropped=' + player.droppedWrites());
+  showStatus('playing');
+  statusTimer = setInterval(() => showStatus('playing'), 500);
 };
 
-$('stop').onclick = () => {
-  player.stop();
-  ['stop','prev','next','pause','ffwd'].forEach((id) => $(id).disabled = true);
+$('stop').onclick = async () => {
+  clearInterval(statusTimer); statusTimer = 0;
+  await player.stop();
+  ['stop','prev','next','pause','ffwd','runstop'].forEach((id) => $(id).disabled = true);
   $('play').disabled = false;
-  ffwd = false; $('ffwd').textContent = 'Fast-forward';
+  paused = false; $('pause').textContent = 'Pause';
+  ffwd = false; $('ffwd').textContent = 'Fast forward';
   log('stopped');
 };
 $('prev').onclick  = () => player.prevSubtune();
 $('next').onclick  = () => player.nextSubtune();
-$('pause').onclick = () => { paused = !paused; player.pause(paused); $('pause').textContent = paused ? 'Resume' : 'Pause'; };
-$('ffwd').onclick  = () => { ffwd = !ffwd; player.fastForward(ffwd); $('ffwd').textContent = ffwd ? 'Normal speed' : 'Fast-forward'; };
-$('clock').onchange = () => { const c = parseInt($('clock').value, 10); if (c >= 0 && player.isPlaying() && player.setClock) player.setClock(c); };
+$('pause').onclick = () => {
+  paused = !paused; player.pause(paused);
+  $('pause').textContent = paused ? 'Resume' : 'Pause';
+};
+$('ffwd').onclick  = () => {
+  ffwd = !ffwd; player.fastForward(ffwd);
+  $('ffwd').textContent = ffwd ? 'Normal speed' : 'Fast forward';
+};
+$('runstop').onclick = () => player.runStop();
+$('clock').onchange = () => {
+  const c = parseInt($('clock').value, 10);
+  if (c >= 0 && player.isPlaying()) player.setClock(c);
+};
 </script>
 </body>
 </html>

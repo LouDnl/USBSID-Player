@@ -1,34 +1,55 @@
 /*
- * USBSID-Player web backend - ASID (Web MIDI) transport.
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
+ * line playback, for embedding on RP2350 (Pico2), and in a browser.
  *
  * web/asid-midi.js
+ * The other transport: ASID over Web MIDI.
  *
- * A transport for USBSIDPlayerWeb that drives a USBSID-Pico (or any ASID host)
- * over Web MIDI using the ASID SysEx protocol
- * (https://github.com/thomasj/asid-protocol).
+ * Carried over from player-repo/web/asid-midi.js, which ports the register
+ * packing in player-repo/lib/midi/asid.cpp. Drives a USBSID-Pico, or any other
+ * ASID host, over the protocol at https://github.com/thomasj/asid-protocol.
  *
- * Unlike the WebUSB cycled path, ASID is NOT cycle-exact per write: it sends a
- * once-per-frame SNAPSHOT of the SID registers that changed during that frame.
- * This maps onto the transport interface as:
- *   writeCycled(reg,val,cycles) -> accumulate reg change (cycles ignored*)
- *   flush()                     -> emit one 0x4E SysEx for the frame
- * (*the ASID 0x30 write-order/timing extension is not implemented here; standard
- *  per-frame playback derives timing from the ~50/60 Hz flush cadence.)
+ * ASID is not cycle exact and cannot be: it sends one snapshot per frame of
+ * the registers that changed, so the timing it conveys is the flush cadence,
+ * about fifty per second. On the transport interface that is:
  *
- * Register accumulation mirrors repo/src/... and player-repo/lib/midi/asid.cpp,
- * including the gate-register shadowing (0x04/0x0b/0x12 -> 0x19/0x1a/0x1b) that
- * preserves note retriggers happening twice within one frame.
+ *   writeCycled(reg, val, cycles)  accumulate the change, ignore the gap
+ *   flush()                        emit one 0x4E SysEx for the frame
  *
- * SysEx frames: F0 2D <cmd> <payload> F7   (manufacturer 0x2D)
- *   0x4C start   0x4D stop   0x4E SID1 data (0x50/0x51/0x52 = SID2/3/4)
+ * The gap is genuinely dropped rather than approximated. ASID's 0x30 timing
+ * extension would carry it and is not implemented here; a digi tune wants the
+ * WebUSB transport instead, where the cycles survive.
  *
+ * What is kept from the C implementation is the gate register shadowing: a
+ * voice retriggered twice inside one frame would otherwise arrive as one note,
+ * so the second write goes to a shadow register (0x19, 0x1a, 0x1b) that the
+ * protocol carries alongside the first.
+ *
+ * SysEx: F0 2D <cmd> <payload> F7, manufacturer 0x2D.
+ *   0x4C start, 0x4D stop, 0x4E SID one, 0x50/0x51/0x52 SIDs two to four.
+ *
+ * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
- * Copyright (c) 2026 LouD - GPLv2 (see repo LICENSE).
+ *
+ * Copyright (c) 2026 LouD
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, version 2.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+ * General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-/* ASID register order: index = ASID bit position, value = SID register addr. */
+/* ASID register order: the index is the bit position, the value is the SID
+ * register it stands for. */
 const REGMAP = [0,1,2,3,5,6,7,8,9,10,12,13,14,15,16,17,19,20,21,22,23,24,4,11,18,25,26,27];
-const SID_CMD = [0x4E, 0x50, 0x51, 0x52];   /* per-SID data command */
+const SID_CMD = [0x4E, 0x50, 0x51, 0x52];
 const ASID_MFR = 0x2D;
 const ASID_START = 0x4C;
 const ASID_STOP  = 0x4D;
@@ -39,7 +60,7 @@ function makeChip() {
 
 export class ASIDMIDITransport {
   /**
-   * @param {object} opts { nosids?:number, deviceNameHint?:string }
+   * @param {object} opts { nosids?: number, deviceNameHint?: string }
    */
   constructor(opts = {}) {
     this.nosids = opts.nosids || 1;
@@ -48,31 +69,28 @@ export class ASIDMIDITransport {
     this._out = null;
     this._open = false;
     this._chips = [makeChip(), makeChip(), makeChip(), makeChip()];
-    /* Optional tap: called with (reg, val) for every write, so a host can
-     * mirror the SID register state in a UI. Set by the adapter. */
     this.onWrite = null;
   }
 
   get isOpen() { return this._open; }
   get productName() { return this._out ? (this._out.name || 'MIDI') : ''; }
 
-  /** List available MIDI outputs [{id,name}]. Requires connect() first. */
+  /** The MIDI outputs available, [{ id, name }]. Needs connect() first. */
   outputs() {
     if (!this._access) return [];
     return [...this._access.outputs.values()].map((o) => ({ id: o.id, name: o.name }));
   }
 
   /**
-   * Request Web MIDI (with SysEx) and pick an output. If outputId is omitted,
-   * pick the first whose name matches the hint, else the first available.
+   * Ask for Web MIDI with SysEx and pick an output: the one requested, else
+   * the first whose name looks like a USBSID-Pico, else whatever is first.
+   * Never throws over a stale id.
    */
   async connect(outputId = null) {
     this._access = await navigator.requestMIDIAccess({ sysex: true });
     const outs = [...this._access.outputs.values()];
     if (outs.length === 0) throw new Error('no MIDI outputs');
     const byHint = outs.find((o) => (o.name || '').toLowerCase().includes(this._hint));
-    // Prefer the requested id, then a name-hint match, then the first output.
-    // Never throw just because a stale/foreign id was passed.
     this._out = (outputId && outs.find((o) => o.id === outputId)) || byHint || outs[0];
     this._open = true;
     return true;
@@ -85,8 +103,7 @@ export class ASIDMIDITransport {
     return false;
   }
 
-  /** Pick an output by its display name. Used when a host wants to follow a
-   * shared UI selection without exposing our internal port ids. */
+  /** Pick an output by display name, for following a list a host owns. */
   selectOutputByName(name) {
     if (!this._access || !name) return false;
     const o = [...this._access.outputs.values()].find((x) => (x.name || '') === name);
@@ -101,19 +118,16 @@ export class ASIDMIDITransport {
     this._access = null;
   }
 
-  /* ---- Transport interface -------------------------------------------- */
+  /* ---- the transport interface ----------------------------------------- */
 
-  /** Enter ASID play mode (called by the player when playback starts). */
   playbackStart() { this._basic(ASID_START); }
-
-  /** Leave ASID play mode / silence. */
   playbackStop() { this._basic(ASID_STOP); this._clearAll(); }
 
-  /** Accumulate a register change into the current frame snapshot. */
+  /** Fold one register change into this frame's snapshot. */
   writeCycled(reg, val, _cycles) {
     if (!this._open) return;
     if (this.onWrite) this.onWrite(reg, val);
-    const sid = (reg >> 5) & 0x03;          // 0x00-0x1f=SID0, 0x20-0x3f=SID1...
+    const sid = (reg >> 5) & 0x03;    // $00-$1f chip one, $20-$3f chip two...
     const r = reg & 0x1f;
     const data = val & 0xFF;
     const c = this._chips[sid];
@@ -122,8 +136,9 @@ export class ASIDMIDITransport {
       c.modified[r] = 1;
       return;
     }
-    // Register already written this frame: shadow the gate regs so a retrigger
-    // within one frame is not lost; flush filter/vol double-writes immediately.
+    /* Written twice this frame. The gate registers go to their shadows so a
+     * retrigger is not lost; filter and volume are flushed at once, because
+     * their order within the frame is audible. */
     switch (r) {
       case 0x04:
         if (c.modified[0x19] !== 0) c.reg[0x04] = c.reg[0x19];
@@ -138,11 +153,11 @@ export class ASIDMIDITransport {
         this.flush();
         c.reg[r] = data; c.modified[r] = 1; break;
       default:
-        c.reg[r] = data;   // latest value wins for the rest
+        c.reg[r] = data;   // for the rest the last value of the frame wins
     }
   }
 
-  /** Emit one 0x4E snapshot SysEx per SID, then clear the frame. */
+  /** Emit one snapshot per SID and start the next frame. */
   flush() {
     if (!this._open) return;
     for (let sid = 0; sid < this.nosids; sid++) {
@@ -153,7 +168,7 @@ export class ASIDMIDITransport {
         if (c.modified[j] !== 0) mask |= (1 << i);
         if (c.reg[j] > 0x7f)     msb  |= (1 << i);
       }
-      if (mask === 0) continue;   // nothing changed for this SID this frame
+      if (mask === 0) continue;   // nothing changed for this chip
       const msg = [0xF0, ASID_MFR, SID_CMD[sid],
         mask & 0x7f, (mask >> 7) & 0x7f, (mask >> 14) & 0x7f, (mask >> 21) & 0x7f,
         msb & 0x7f, (msb >> 7) & 0x7f, (msb >> 14) & 0x7f, (msb >> 21) & 0x7f];
@@ -167,11 +182,11 @@ export class ASIDMIDITransport {
     }
   }
 
-  /** Silence on stop (player calls resetSID): leave ASID mode. */
+  /** The player asking for silence: leaving ASID mode is what does it. */
   resetSID() { this.playbackStop(); }
   reset()    { this._clearAll(); }
 
-  /* ---- internals ------------------------------------------------------ */
+  /* ---- internals -------------------------------------------------------- */
 
   _clearAll() { for (const c of this._chips) c.modified.fill(0); }
 

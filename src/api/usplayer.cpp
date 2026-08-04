@@ -1,0 +1,423 @@
+/*
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
+ * line playback and for embedding on RP2350 (Pico2).
+ *
+ * usplayer.cpp
+ * The C API the firmware calls, on top of Machine and Player.
+ *
+ * Everything here is statically allocated. There is no heap on the device
+ * worth the name, the machine is needed for the whole life of the firmware
+ * anyway, and a static object is one less thing that can fail at three in the
+ * morning halfway through a tune.
+ *
+ * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * File author: LouD
+ *
+ * Copyright (c) 2026 LouD
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, version 2.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+ * General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ *
+ */
+
+#include "usplayer.h"
+
+#include "keyboard.h"
+#include "machine.h"
+#include "player.h"
+#include "types.h"
+
+/* Which backend the writes go to is the one thing that differs per target.
+ * Everything below is written against the pair of them, so the names and the
+ * call order are the same whether this is the firmware or a browser tab. */
+#if defined(WEB) && WEB
+#include "sid_web.h"
+#else
+#include "sid_embedded.h"
+#endif
+
+using namespace usbsid;
+
+/* The firmware's clock switch. Weak, so this links without it. The index is
+ * into the firmware's own table: { DEFAULT, PAL, NTSC, DREAN, NTSC2 }. */
+extern "C" {
+  void apply_clockrate(int n_clock, bool suspend_sids) __attribute__((weak));
+}
+
+namespace {
+
+/* A SID file is at most a 64 KB payload plus its header. Copying it is not a
+ * luxury: usbsid.c frees the buffer it handed us before init_sidplayer() is
+ * called, and the payload has to survive until the driver is installed and,
+ * for a subtune restart, well past that. */
+constexpr size_t kMaxTuneBytes = 0x10000 + 0x100;
+
+/* Declaration order is construction order, and the player needs the machine */
+Machine g_machine;
+#if defined(WEB) && WEB
+/* The exports in src/host/web_api.cpp drain the same ring the player fills,
+ * and they cannot see this file's statics, so both go through web_backend(). */
+WebSidBackend & g_backend = web_backend();
+#else
+EmbeddedSidBackend g_backend;
+#endif
+Player g_player(g_machine);
+
+data_t g_tune_bytes[kMaxTuneBytes];
+size_t g_tune_size = 0;
+
+bool g_initialised = false;   /* the backend has been attached */
+bool g_prepared = false;      /* init_sidplayer() has run and succeeded */
+bool g_is_prg = false;
+bool g_clock_follows_tune = true;
+uint16_t g_song = 0;          /* 1 based, 0 means the file's default */
+
+void attach_once(void)
+{
+  if (g_initialised) return;
+  g_machine.set_sid_backend(g_backend);
+  g_initialised = true;
+}
+
+/**
+ * @brief Ask the board for the clock the tune was written for.
+ *
+ * The firmware indexes its clock table rather than taking a frequency, and
+ * the table is the one in sid_defs.h. Anything not in it is left alone: a
+ * wrong clock is worse than the current one.
+ */
+void apply_tune_clock(void)
+{
+  static const uint32_t kRates[] = { 1000000, 985248, 1022727, 1023440, 1022730 };
+  const uint32_t want = vic_timing(g_machine.video_model()).clock_hz;
+
+  /* The backend needs the rate whether or not the board is allowed to follow
+   * it: it is what turns a cycle gap into microseconds to wait out. */
+  g_backend.set_clock_hz(want);
+
+  if (!g_clock_follows_tune || apply_clockrate == nullptr) return;
+
+  for (int i = 0; i < static_cast<int>(sizeof(kRates) / sizeof(kRates[0])); i++) {
+    if (kRates[i] == want) { apply_clockrate(i, true); return; }
+  }
+}
+
+} /* namespace */
+
+/* ------------------------------------------------------------------------ *
+ * loading
+ * ------------------------------------------------------------------------ */
+
+void load_sidtune(uint8_t * sidfile, int sidfilesize, char subt)
+{
+  attach_once();
+
+  g_prepared = false;
+  g_is_prg = false;
+  g_tune_size = 0;
+
+  if (sidfile == nullptr || sidfilesize <= 0) return;
+
+  size_t len = static_cast<size_t>(sidfilesize);
+  if (len > kMaxTuneBytes) len = kMaxTuneBytes;
+  for (size_t i = 0; i < len; i++) g_tune_bytes[i] = sidfile[i];
+  g_tune_size = len;
+
+  /* The firmware counts subtunes from zero and uses zero for "the tune's own
+   * default", which is how the old player read it too. */
+  const int sub = static_cast<int>(static_cast<unsigned char>(subt));
+  g_song = (sub == 0) ? 0 : static_cast<uint16_t>(sub + 1);
+
+  if (!g_player.load_sid(g_tune_bytes, g_tune_size, g_song)) {
+    g_tune_size = 0;
+    return;
+  }
+
+  apply_tune_clock();
+}
+
+/**
+ * @brief Load a program and start it.
+ *
+ * Unlike a tune, a program has no separate init step in this API: the firmware
+ * calls this and then goes straight to loop_sidplayer(). So the boot, the
+ * load and the RUN all happen here, which makes this the slow call. The `loop`
+ * argument is what the old player restarted a finished program with; nothing
+ * here decides that a program has finished, so it is accepted and ignored.
+ */
+void load_prg(uint8_t * binary_, size_t binsize_, bool loop)
+{
+  (void)loop;
+  attach_once();
+
+  g_prepared = false;
+  g_is_prg = true;
+  g_tune_size = 0;
+
+  if (binary_ == nullptr || binsize_ < 3) return;
+
+  size_t len = binsize_;
+  if (len > kMaxTuneBytes) len = kMaxTuneBytes;
+  for (size_t i = 0; i < len; i++) g_tune_bytes[i] = binary_[i];
+  g_tune_size = len;
+
+  if (!g_player.load_prg(g_tune_bytes, g_tune_size)) {
+    g_tune_size = 0;
+    return;
+  }
+
+  g_backend.reset_hardware();
+  /* The same clock a tune gets. This used to tell the backend the rate and
+   * stop there, so the board kept whatever clock the last tune left it on and
+   * a program ran at the wrong speed, on hardware, for as long as it played. */
+  apply_tune_clock();
+
+  /* Booting the machine and loading the program is not part of the program's
+   * timeline. Pacing it would sit out every gap in it in real time, which for
+   * a PRG is nearly three seconds of waiting for work that takes two. */
+  g_backend.set_pacing(false);
+  g_prepared = g_player.init_prg();
+  /* A program has no separate start call, so the pacer starts here instead */
+  g_backend.set_pacing(true);
+}
+
+/* ------------------------------------------------------------------------ *
+ * playing
+ * ------------------------------------------------------------------------ */
+
+void init_sidplayer(void)
+{
+  attach_once();
+
+  /* A program was already booted, loaded and started by load_prg(), because
+   * that is the order the firmware calls things in. Nothing to do. */
+  if (g_is_prg) return;
+
+  g_prepared = false;
+  if (g_tune_size == 0) return;
+
+  g_backend.reset_hardware();
+  g_backend.set_pacing(false); /* see load_prg: setup is not playback */
+  g_prepared = g_player.init_tune(g_song);
+  g_backend.set_pacing(true);
+}
+
+void start_sidplayer(bool loop)
+{
+  (void)loop; /* the firmware drives the loop itself, one frame per call */
+  if (!g_prepared) return;
+  /* The pacer measures the tune's timeline from its first access. Start it
+   * here, so the setup that init_sidplayer() just ran is not part of it. */
+  g_backend.set_pacing(true);
+  g_player.start();
+}
+
+void loop_sidplayer(void)
+{
+  /* One frame per call. The firmware's core 1 loop checks its own flags
+   * between calls, so this has to return promptly and cannot be the whole of
+   * playback. A frame always ends: the VIC keeps counting whatever the CPU
+   * does, so even a tune that has jammed comes back from here. */
+  g_player.run_frame();
+}
+
+bool stop_sidplayer(void)
+{
+  g_player.stop();
+  g_backend.reset_hardware();
+  g_prepared = false;
+  return true;
+}
+
+void next_subtune(void)
+{
+  g_player.next_subtune();
+}
+
+void previous_subtune(void)
+{
+  g_player.previous_subtune();
+}
+
+void force_socktwo(void)
+{
+  attach_once();
+  g_machine.sid().config().force_socket_two = true;
+}
+
+/* ------------------------------------------------------------------------ *
+ * control
+ * ------------------------------------------------------------------------ */
+
+void emu_pause_playing(bool pause)
+{
+  g_player.pause(pause);
+}
+
+void emu_ffwd(bool enable)
+{
+  /* Nothing to do yet: on the device the SID writes themselves are the pacing,
+   * so "as fast as possible" is what already happens. It becomes real when the
+   * pacer arrives for the embedded build. */
+  (void)enable;
+}
+
+uint8_t emu_dma_read_ram(uint16_t address)
+{
+  return g_machine.ram().dma_read(address);
+}
+
+void emu_dma_write_ram(uint16_t address, uint8_t data)
+{
+  g_machine.ram().dma_write(address, data);
+}
+
+uint8_t emu_read_byte(uint16_t address)
+{
+  return g_machine.mmu().read(address);
+}
+
+void emu_write_byte(uint16_t address, uint8_t data)
+{
+  g_machine.mmu().write(address, data);
+}
+
+/* ------------------------------------------------------------------------ *
+ * the keyboard
+ * ------------------------------------------------------------------------ */
+
+bool usplayer_type(const char * text)
+{
+  attach_once();
+  return g_player.type(text);
+}
+
+bool usplayer_key_runstop(void)
+{
+  attach_once();
+  return g_player.run_stop();
+}
+
+void usplayer_key_set(uint8_t row, uint8_t col, bool pressed)
+{
+  attach_once();
+  g_machine.keyboard().set(KeyPos{ row, col, false }, pressed);
+}
+
+void usplayer_keys_clear(void)
+{
+  attach_once();
+  g_machine.keyboard().reset();
+}
+
+bool usplayer_typing(void)
+{
+  return g_player.typing();
+}
+
+/* ------------------------------------------------------------------------ *
+ * configuration and state
+ * ------------------------------------------------------------------------ */
+
+void usplayer_set_sid_config(uint8_t numsids, uint8_t sids_socket_one,
+                             uint8_t sids_socket_two, int8_t fmopl_sid)
+{
+  attach_once();
+  SidConfig & cfg = g_machine.sid().config();
+  cfg.sids_socket_one = sids_socket_one;
+  cfg.sids_socket_two = sids_socket_two;
+  cfg.fmopl_sid = fmopl_sid;
+
+  /* `numsids` is not applied. How many chips the player emulates is the
+   * tune's business and nothing else's: it decides which addresses the
+   * emulation decodes, and every one of them ends up as a register write on
+   * the same bus whatever the board is carrying. Clamping it to the board's
+   * count only threw away the second chip's writes of a two SID tune. */
+  (void)numsids;
+}
+
+void usplayer_set_clock_follows_tune(bool enable)
+{
+  g_clock_follows_tune = enable;
+}
+
+bool usplayer_playing(void) { return g_player.playing(); }
+bool usplayer_paused(void) { return g_player.paused(); }
+bool usplayer_loaded(void) { return g_tune_size != 0; }
+bool usplayer_is_prg(void) { return g_is_prg; }
+
+uint32_t usplayer_clock_hz(void)
+{
+  return vic_timing(g_machine.video_model()).clock_hz;
+}
+
+bool usplayer_is_pal(void)
+{
+  const VideoModel model = g_machine.video_model();
+  return model == VideoModel::Pal6569 || model == VideoModel::PalN6572;
+}
+
+/**
+ * @brief Frames per second of the video model the tune asked for.
+ *
+ * PAL is 50.125, not 50: a frame is 19656 cycles of a 985248 Hz clock. A host
+ * pacing playback against its own clock has to use this rather than a round
+ * number, or it drifts by a frame every eight seconds.
+ */
+double usplayer_refresh_hz(void)
+{
+  const VideoModel model = g_machine.video_model();
+  return static_cast<double>(vic_timing(model).clock_hz) /
+         static_cast<double>(vic_cycles_per_frame(model));
+}
+
+uint16_t usplayer_song(void) { return g_player.song(); }
+uint16_t usplayer_songs(void) { return g_player.songs(); }
+uint32_t usplayer_frames(void) { return g_player.frames_played(); }
+uint16_t usplayer_driver_address(void) { return g_player.driver_address(); }
+const char * usplayer_tune_name(void) { return g_player.tune().name; }
+const char * usplayer_tune_author(void) { return g_player.tune().author; }
+const char * usplayer_tune_released(void) { return g_player.tune().released; }
+uint32_t usplayer_sid_writes(void) { return g_machine.sid().writes(); }
+uint64_t usplayer_cycles_waited(void) { return g_backend.cycles_waited(); }
+uint64_t usplayer_cycles_paced(void) { return g_backend.cycles_paced(); }
+
+uint32_t usplayer_benchmark(uint32_t cycles)
+{
+  attach_once();
+
+  if (time_us_64 == nullptr || cycles == 0) return 0;
+
+  /* Nothing should reach the SIDs while this runs, and whatever was playing
+   * should find its backend where it left it. */
+  static NullSidBackend measuring;
+  SidBackend & previous = g_machine.sid().backend();
+  g_machine.set_sid_backend(measuring);
+
+  const uint64_t started = time_us_64();
+  g_machine.run(cycles);
+  const uint64_t elapsed = time_us_64() - started;
+
+  g_machine.set_sid_backend(previous);
+  g_machine.sid().resync();
+
+  if (elapsed == 0) return 0;
+  /* cycles per microsecond is cycles per second in thousands */
+  return static_cast<uint32_t>((static_cast<uint64_t>(cycles) * 1000ull) /
+                               elapsed);
+}
+
+uint32_t usplayer_static_footprint(void)
+{
+  return static_cast<uint32_t>(sizeof(g_machine) + sizeof(g_player) +
+                               sizeof(g_backend) + sizeof(g_tune_bytes));
+}

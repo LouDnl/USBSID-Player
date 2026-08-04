@@ -80,8 +80,12 @@ jobs:
 
       - name: Package ${{ matrix.asset }}
         run: |
-          SRC=repo/${{ matrix.buildname }}
-          [ -f "$SRC.exe" ] && SRC="$SRC.exe"
+          # cmake -B build puts the binary in build/, not beside the sources.
+          SRC=repo/build/${{ matrix.buildname }}
+          if [ -f "$SRC.exe" ]; then SRC="$SRC.exe"; fi
+          if [ ! -f "$SRC" ]; then
+            echo "no binary at $SRC"; ls -R repo/build | head -40; exit 1
+          fi
           mkdir -p stage
           cp "$SRC" stage/
           cp repo/README.md repo/LICENSE stage/ 2>/dev/null || true

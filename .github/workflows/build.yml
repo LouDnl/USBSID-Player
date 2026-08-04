@@ -90,13 +90,27 @@ jobs:
       - name: Configure and build ${{ matrix.buildname }}
         run: |
           pushd repo
-          cmake -S . -B build -DDESKTOP=1 -DEMBEDDED=0 -DWEB=0 -DBUILD_TESTS=1 -DPROFILE=0 -DSTRICT=1 -DEXECUTABLE=${{ matrix.buildname }} && cmake --build build -j$(nproc)
-          ls -lhai
+          # The suite links the embedded backend, whose firmware hooks are weak
+          # symbols. An undefined weak resolves to null on ELF; Mach-O refuses
+          # to link one and PE/COFF collides with the tests' own definitions.
+          # So the tests are built where that works and the player everywhere.
+          # See TODO 12.
+          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then TESTS=1; else TESTS=0; fi
+          JOBS=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
+          cmake -S . -B build -DDESKTOP=1 -DEMBEDDED=0 -DWEB=0 \
+            -DBUILD_TESTS=$TESTS -DPROFILE=0 -DSTRICT=1 \
+            -DEXECUTABLE=${{ matrix.buildname }}
+          cmake --build build -j "$JOBS"
+          ls -lh build/${{ matrix.buildname }}* || true
           popd
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.buildname }}-${{ matrix.os }}
-          path: repo/${{ matrix.buildname }}*
-          if-no-files-found: ignore
+          # Exactly the player. A `${{ matrix.buildname }}*` glob also picks up
+          # usbsid-test wherever the suite is built.
+          path: |
+            repo/build/${{ matrix.buildname }}
+            repo/build/${{ matrix.buildname }}.exe
+          if-no-files-found: error

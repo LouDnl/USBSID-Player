@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>USBSID-Player Web Demo</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, sans-serif; max-width: 42rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+  h1 { font-size: 1.3rem; }
+  .row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin: .6rem 0; }
+  button, select { padding: .4rem .6rem; }
+  #status { font-family: ui-monospace, monospace; white-space: pre-wrap; padding: .6rem; border: 1px solid gray; border-radius: .3rem; min-height: 3.5rem; }
+  .muted { opacity: .7; font-size: .85rem; }
+</style>
+</head>
+<body>
+<h1>USBSID-Player Web Demo</h1>
+<p class="muted">
+  Loads the WASM player, steps the C64 emulation once per (wall-clock) frame,
+  and streams the SID register writes to a USBSID-Pico over WebUSB or ASID
+  (Web MIDI). Requires a Chromium-based browser and a secure context
+  (https or localhost). Supports .sid and .prg/.p00 files.
+</p>
+
+<div class="row">
+  <label>transport
+    <select id="ttype">
+      <option value="webusb">WebUSB (cycle-exact)</option>
+      <option value="asid">ASID (Web MIDI)</option>
+    </select>
+  </label>
+  <button id="connect">Connect device</button>
+  <span id="dev" class="muted">not connected</span>
+</div>
+<div class="row" id="midiRow" style="display:none">
+  <label>MIDI output <select id="midiout"></select></label>
+</div>
+<div class="row">
+  <input type="file" id="file" accept=".sid,.prg,.p00" />
+  <label>subtune <input type="number" id="subtune" value="0" min="0" style="width:4rem" /></label>
+</div>
+<div class="row">
+  <button id="play" disabled>Play</button>
+  <button id="stop" disabled>Stop</button>
+  <button id="prev" disabled>&laquo; Prev</button>
+  <button id="next" disabled>Next &raquo;</button>
+  <button id="pause" disabled>Pause</button>
+  <button id="ffwd" disabled>Fast-forward</button>
+</div>
+<div class="row">
+  <label>device clock
+    <select id="clock">
+      <option value="-1">auto (match tune)</option>
+      <option value="1">PAL</option>
+      <option value="2">NTSC</option>
+      <option value="3">DREAN</option>
+      <option value="0">default</option>
+    </select>
+  </label>
+  <span class="muted">(WebUSB only)</span>
+</div>
+<div id="status">idle</div>
+
+<!-- Emscripten factory: defines global USBSIDPlayer(). -->
+<script src="../build_web/usbsid.js"></script>
+<script type="module">
+import { USBSIDPlayerWeb, NullTransport } from './usplayer-web.js';
+import { USBSIDWebUSBTransport } from './usbsid-webusb.js';
+import { ASIDMIDITransport } from './asid-midi.js';
+
+const $ = (id) => document.getElementById(id);
+const log = (m) => { $('status').textContent = m; };
+
+let M, player, transport = null, fileBytes = null, fileName = '', paused = false, ffwd = false;
+
+(async () => {
+  // eslint-disable-next-line no-undef
+  M = await USBSIDPlayer({ locateFile: (p) => '../build_web/' + p });
+  player = new USBSIDPlayerWeb(M, new NullTransport());
+  log('WASM ready. Pick a transport, connect a device, and choose a file.');
+})();
+
+$('ttype').onchange = () => {
+  $('midiRow').style.display = ($('ttype').value === 'asid') ? 'flex' : 'none';
+};
+
+$('connect').onclick = async () => {
+  try {
+    if ($('ttype').value === 'asid') {
+      transport = new ASIDMIDITransport();
+      await transport.connect();
+      // populate output list
+      const sel = $('midiout'); sel.innerHTML = '';
+      for (const o of transport.outputs()) {
+        const opt = document.createElement('option');
+        opt.value = o.id; opt.textContent = o.name;
+        if (transport._out && o.id === transport._out.id) opt.selected = true;
+        sel.appendChild(opt);
+      }
+      $('midiRow').style.display = 'flex';
+    } else {
+      transport = new USBSIDWebUSBTransport();
+      await transport.connect();
+    }
+    player.transport = transport;
+    $('dev').textContent = transport.productName || 'device';
+    log('connected via ' + $('ttype').value);
+    maybeEnable();
+  } catch (e) { log('connect failed: ' + e); }
+};
+
+$('midiout').onchange = () => { if (transport && transport.selectOutput) transport.selectOutput($('midiout').value); };
+
+$('file').onchange = async (ev) => {
+  const f = ev.target.files[0];
+  if (!f) return;
+  fileName = f.name.toLowerCase();
+  fileBytes = new Uint8Array(await f.arrayBuffer());
+  log(`loaded ${f.name} (${fileBytes.length} bytes)`);
+  maybeEnable();
+};
+
+function maybeEnable() {
+  $('play').disabled = !(fileBytes && transport && transport.isOpen);
+}
+
+$('play').onclick = () => {
+  const isPrg = fileName.endsWith('.prg') || fileName.endsWith('.p00');
+  if (isPrg) {
+    player.loadPRG(fileBytes);
+  } else {
+    const sub = parseInt($('subtune').value, 10) || 0;
+    if (!player.loadSID(fileBytes, sub)) {
+      // Not a SID header: fall back to PRG.
+      player.loadPRG(fileBytes);
+    }
+  }
+  const clk = parseInt($('clock').value, 10);
+  if (clk >= 0) player.setClock(clk);
+  player.start();
+  ['stop','prev','next','pause','ffwd'].forEach((id) => $(id).disabled = false);
+  $('play').disabled = true;
+  log((isPrg ? 'playing PRG' : 'playing SID') + '... dropped=' + player.droppedWrites());
+};
+
+$('stop').onclick = () => {
+  player.stop();
+  ['stop','prev','next','pause','ffwd'].forEach((id) => $(id).disabled = true);
+  $('play').disabled = false;
+  ffwd = false; $('ffwd').textContent = 'Fast-forward';
+  log('stopped');
+};
+$('prev').onclick  = () => player.prevSubtune();
+$('next').onclick  = () => player.nextSubtune();
+$('pause').onclick = () => { paused = !paused; player.pause(paused); $('pause').textContent = paused ? 'Resume' : 'Pause'; };
+$('ffwd').onclick  = () => { ffwd = !ffwd; player.fastForward(ffwd); $('ffwd').textContent = ffwd ? 'Normal speed' : 'Fast-forward'; };
+$('clock').onchange = () => { const c = parseInt($('clock').value, 10); if (c >= 0 && player.isPlaying() && player.setClock) player.setClock(c); };
+</script>
+</body>
+</html>

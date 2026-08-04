@@ -21,6 +21,9 @@
 !*.c
 !*.h
 !*.yml
+!*.js
+!*.wasm
+!*.html
 
 # Directories to un-ignore
 !.github
@@ -32,3 +35,4 @@
 !src/util
 !lib
 !lib/driver
+!web

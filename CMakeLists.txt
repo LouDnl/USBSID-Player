@@ -179,14 +179,35 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
     list(APPEND US_LINK_LIBS PkgConfig::udev)
   endif()
 
+  ### Where the driver's sources are depends on how lib/driver got there.
+  ###
+  ### It is a submodule of USBSID-Pico-driver, and that repository keeps its
+  ### sources in src/ with java/, webusb/ and the rest beside it. So a real
+  ### submodule checkout, which is what CI does, gives lib/driver/src/. A
+  ### working copy that has the four files dropped in flat, which is what this
+  ### tree had and why it built here and not on a runner, gives lib/driver/.
+  ### Take whichever is actually present rather than assuming.
+  set(US_DRIVER_ROOT ${CMAKE_CURRENT_LIST_DIR}/lib/driver)
+  if(EXISTS ${US_DRIVER_ROOT}/src/USBSID.cpp)
+    set(US_DRIVER_DIR ${US_DRIVER_ROOT}/src)
+  elseif(EXISTS ${US_DRIVER_ROOT}/USBSID.cpp)
+    set(US_DRIVER_DIR ${US_DRIVER_ROOT})
+  else()
+    message(FATAL_ERROR
+      "No USBSID driver under ${US_DRIVER_ROOT}.\n"
+      "  Looked for src/USBSID.cpp and USBSID.cpp.\n"
+      "  The submodule is probably not checked out: run\n"
+      "    git submodule update --init --recursive")
+  endif()
+  message(STATUS "USBSID driver sources: ${US_DRIVER_DIR}")
+
   add_executable(${EXECUTABLE}
     ${CMAKE_CURRENT_LIST_DIR}/src/host/main_cli.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sid/sid_usbsid.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/lib/driver/USBSID.cpp
+    ${US_DRIVER_DIR}/USBSID.cpp
   )
   target_link_libraries(${EXECUTABLE} PRIVATE usbsidcore ${US_LINK_LIBS})
-  target_include_directories(${EXECUTABLE} PRIVATE
-    ${CMAKE_CURRENT_LIST_DIR}/lib/driver)
+  target_include_directories(${EXECUTABLE} PRIVATE ${US_DRIVER_DIR})
   ### the driver is third party and predates these warning settings
   target_compile_options(${EXECUTABLE} PRIVATE -Wall -fno-rtti)
   target_compile_definitions(${EXECUTABLE} PRIVATE UNIX_COMPILE)

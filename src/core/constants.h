@@ -5,7 +5,7 @@
  * constants.h
  * C64 memory map, fixed vectors and keyboard matrix bits.
  * Address map and PSID64 keyboard bits are carried over from
- * player-repo/src/util/constants.h so both players agree.
+ * old player ~ src/util/constants.h so both players agree.
  *
  * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD

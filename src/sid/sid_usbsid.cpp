@@ -4,7 +4,7 @@
  *
  * sid_usbsid.cpp
  *
- * The call sequence follows player-repo/src/emulation.cpp, which is what the
+ * The call sequence follows old player ~ src/emulation.cpp, which is what the
  * firmware and the current player both use: initialise with buffering and
  * cycled writes, reset the chips, then feed cycled writes and flush at the
  * end of every frame.

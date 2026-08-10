@@ -78,7 +78,7 @@ class Ram
     }
 
     /* Direct access for loaders and for the SID register mirror. Same thing
-     * as read()/write(), named after the player-repo dma_ helpers so the
+     * as read()/write(), named after the old player dma_ helpers so the
      * loader code reads the same way. */
     US_ALWAYS_INLINE data_t dma_read(addr_t addr) const { return ram_[addr]; }
     US_ALWAYS_INLINE void dma_write(addr_t addr, data_t value) { ram_[addr] = value; }

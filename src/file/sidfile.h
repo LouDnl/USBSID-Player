@@ -6,7 +6,7 @@
  * PSID and RSID file parsing, versions 1 to 4.
  *
  * Header layout per the HVSC SID file format documentation, and matching
- * player-repo/src/psid so both players read the same tunes the same way.
+ * old player ~ src/psid so both players read the same tunes the same way.
  *
  * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD

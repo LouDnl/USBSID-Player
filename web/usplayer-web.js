@@ -83,6 +83,7 @@ export class USBSIDPlayerWeb {
     this._speed = 1;         // fast forward multiplier
     this._paused = false;
     this.resetStats();
+    this._boardConfig = null;
 
     const M = module;
     /* control */
@@ -99,6 +100,8 @@ export class USBSIDPlayerWeb {
     this._pause          = M.cwrap('usp_pause', null, ['number']);
     this._runStop        = M.cwrap('usp_key_runstop', 'number', []);
     this._forceSocketTwo = M.cwrap('usp_force_socket_two', null, []);
+    this._setSidConfig   = M.cwrap('usp_set_sid_config', null,
+                                   ['number', 'number', 'number', 'number']);
     /* state */
     this._isPlaying   = M.cwrap('usp_is_playing', 'number', []);
     this._isPrg       = M.cwrap('usp_is_prg', 'number', []);
@@ -429,6 +432,44 @@ export class USBSIDPlayerWeb {
   fastForward(on, mult = 4) { this.setSpeed(on ? mult : 1); }
 
   setClock(rateId) { if (this.transport.setClock) this.transport.setClock(rateId); }
+
+  /**
+   * Tell the emulation what the board is carrying.
+   *
+   * `fmopl` is which chip answers $df40/$df50, one based, -1 for none. Without
+   * it those writes reach nothing and an FM/OPL tune plays its SID voices and
+   * none of its OPL. `numsids` is accepted and ignored, as everywhere else:
+   * how many chips the emulation decodes is the tune's business.
+   */
+  setSidConfig(numsids, socketOne, socketTwo, fmopl) {
+    this._setSidConfig(numsids | 0, socketOne | 0, socketTwo | 0,
+                       (fmopl === undefined || fmopl === null) ? -1 : (fmopl | 0));
+    this._boardConfig = { sidsSocketOne: socketOne | 0,
+                          sidsSocketTwo: socketTwo | 0,
+                          fmoplSid: (fmopl === undefined) ? -1 : (fmopl | 0) };
+  }
+
+  /**
+   * Read the board's own configuration and apply it.
+   *
+   * This is what the command line player does at connect, and the browser had
+   * no equivalent, which is why FM/OPL tunes did not work in it. Call it once
+   * after the transport is open and before loading anything: the tune's init
+   * writes go out under whatever is set at that moment.
+   *
+   * Returns what was applied, or null when the transport cannot say, in which
+   * case the emulation keeps its defaults and the caller can set them by hand.
+   */
+  async applyBoardConfig() {
+    if (!this.transport.readBoardConfig) return null;
+    const cfg = await this.transport.readBoardConfig();
+    if (!cfg) return null;
+    this.setSidConfig(0, cfg.sidsSocketOne, cfg.sidsSocketTwo, cfg.fmoplSid);
+    return cfg;
+  }
+
+  /** The last configuration applied, for a page that wants to show it. */
+  boardConfig() { return this._boardConfig || null; }
   nextSubtune() { this._nextSubtune(); }
   prevSubtune() { this._prevSubtune(); }
   /** RUN/STOP on the keyboard matrix, which is how a program is interrupted. */

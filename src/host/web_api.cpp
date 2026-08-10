@@ -150,6 +150,29 @@ void usp_prev_subtune(void) { previous_subtune(); }
 void usp_pause(int pause) { emu_pause_playing(pause != 0); }
 void usp_force_socket_two(void) { force_socktwo(); }
 
+/**
+ * @brief Tell the player what the board is carrying.
+ *
+ * The command line player reads this off the device at connect and hands it
+ * over the same way (see main_cli.cpp). The page has to do it explicitly
+ * because a browser has no equivalent of "the driver already asked": the
+ * transport reads the socket config over WebUSB and passes it in here.
+ *
+ * Without it `$df40`/`$df50` reach nothing, so an FM/OPL tune plays its SID
+ * voices and none of its OPL, which is the symptom this exists to fix.
+ *
+ * `numsids` is accepted and ignored, as it is everywhere else: how many chips
+ * the emulation decodes is the tune's business. `fmopl` is 1 based, -1 for a
+ * board that has no FM/OPL.
+ */
+void usp_set_sid_config(int numsids, int socket_one, int socket_two, int fmopl)
+{
+  usplayer_set_sid_config(static_cast<uint8_t>(numsids),
+                          static_cast<uint8_t>(socket_one),
+                          static_cast<uint8_t>(socket_two),
+                          static_cast<int8_t>(fmopl));
+}
+
 /** @brief RUN/STOP on the keyboard matrix, which is how a program is stopped. */
 int usp_key_runstop(void) { return usplayer_key_runstop() ? 1 : 0; }
 /** @brief Type a line at the prompt. Takes a few frames per character. */

@@ -6,7 +6,7 @@
  * GENERATED from the images in roms by temp/tools/bin2array.py. Do not edit by hand.
  *
  * The images are the stock Commodore 64 ROMs, byte identical to the ones in
- * player-repo/roms:
+ * old player ~ roms:
  *   basic.901226-01.bin          57af4ae21d4b705c2991d98ed5c1f7b8
  *   kernal.901227-03.bin         39065497630802346bce17963f13c092
  *   characters.901225-01.bin     12a4202f5331d45af846af6c58fba946

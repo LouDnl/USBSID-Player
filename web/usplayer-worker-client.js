@@ -53,6 +53,7 @@ export class USBSIDPlayerWorker {
       new URL('./usplayer-worker.js', import.meta.url);
     this._worker = null;
     this._audio = null;
+    this._board = null;
     this._seq = 1;
     this._pending = new Map();
     this._state = {
@@ -115,8 +116,9 @@ export class USBSIDPlayerWorker {
     this._worker = new Worker(this._workerUrl, { type: 'module' });
     this._worker.onmessage = (e) => this._onMessage(e);
 
-    const { opened } = await this._call('init', { wasmUrl: this._wasmUrl });
+    const { opened, board } = await this._call('init', { wasmUrl: this._wasmUrl });
     if (!opened) throw new Error('the worker could not open the board');
+    this._board = board || null;
     return true;
   }
 
@@ -194,6 +196,15 @@ export class USBSIDPlayerWorker {
   forceSocketTwo() { return this._call('forceSocketTwo'); }
   setClock(rateId) { return this._call('setClock', { rateId }); }
   resetStats() { return this._call('resetStats'); }
+  setSidConfig(numsids, one, two, fmopl) {
+    return this._call('setSidConfig', { numsids, one, two, fmopl });
+  }
+  async applyBoardConfig() {
+    const r = await this._call('applyBoardConfig');
+    if (r && r.board) this._board = r.board;
+    return this._board || null;
+  }
+  boardConfig() { return this._board || null; }
   stats() { return this._state.stats || null; }
 
   /* The page reads these from the last snapshot rather than across the thread,

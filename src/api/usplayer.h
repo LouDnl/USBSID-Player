@@ -5,7 +5,7 @@
  * usplayer.h
  * The C API the firmware calls.
  *
- * The first block is a drop-in replacement for player-repo/src/usplayer.h:
+ * The first block is a drop-in replacement for old player ~ src/usplayer.h:
  * same names, same signatures, same call order, so USBSID-Pico's usbsid.c and
  * config.c need no changes beyond which directory they include from. The
  * second block is the handful of control functions the firmware would

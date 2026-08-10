@@ -74,7 +74,7 @@ bool sidfile_parse(const data_t * bytes, size_t len, SidFile & out)
   out.version = be16(bytes + 0x04);
   /* Versions 1 to 4 are the documented ones. The four SID community also
    * ships an extended header, 130 bytes long, that carries a fourth chip
-   * address; player-repo lists those offsets as SIDFILEPLUS. It is accepted
+   * address; old player lists those offsets as SIDFILEPLUS. It is accepted
    * here rather than rejected, because the tunes exist and play. */
   const bool plus = (out.version > 4) && (len >= 0x82) && (be16(bytes + 0x06) >= 0x82);
   if (!plus && (out.version < 1 || out.version > 4)) return false;

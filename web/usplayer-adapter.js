@@ -252,6 +252,19 @@ export class USPlayerAdapter {
        * if it did. So the values are kept here and only the ones that actually
        * changed are pushed, twenty times a second, which is faster than the eye
        * and a thousandth of the work. */
+      /* What the board is carrying. The app hands us its own connected
+       * device, so the read goes through that rather than opening a second
+       * conversation with the same board. Without this $df40/$df50 reach
+       * nothing and an FM/OPL tune plays no OPL. */
+      try {
+        const board = await this._player.applyBoardConfig();
+        if (board) {
+          this._log(`board: socket one ${board.sidsSocketOne} SID(s), ` +
+                    `socket two ${board.sidsSocketTwo}, FM/OPL on ` +
+                    (board.fmoplSid > 0 ? `SID ${board.fmoplSid}` : 'nothing'));
+        }
+      } catch (e) { this._log('could not read the board config: ' + e); }
+
       this._transport.onWrite = (reg, val) => {
         const i = reg & 0x7f;
         if (this._shadow[i] === val) return;

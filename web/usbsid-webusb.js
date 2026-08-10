@@ -63,6 +63,11 @@ const RESET_SID = 14;
 const CONFIG    = 18;                 /* the sub type carrying config commands */
 const CFG_CMD   = (CMD | CONFIG);     /* 0xD2 */
 const SET_CLOCK = 0x50;
+/* Config reads. The 12 byte socket buffer's layout is the driver's: byte 2 is
+ * socket one, byte 5 socket two, high nibble 1 for present and low nibble 1
+ * for a socket carrying two chips. See USBSID_GetSocketNumSIDS(). */
+const READ_SOCKETCFG = 0x37;
+const READ_FMOPLSID  = 0x3A;
 /** Clock ids, the same order the firmware's own table uses. */
 export const CLOCK = { DEFAULT: 0, PAL: 1, NTSC: 2, DREAN: 3, NTSC2: 4 };
 
@@ -147,6 +152,14 @@ const COALESCE = 8;
 const FULL_PACKETS = false;
 
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Chips per socket, out of the board's 12 byte socket buffer. */
+function parseSocketConfig(b) {
+  const chips = (byte) =>
+    (((byte & 0xf0) >> 4) === 1) ? (((byte & 0x0f) === 1) ? 2 : 1) : 0;
+  return { one: b.length > 2 ? chips(b[2]) : 0,
+           two: b.length > 5 ? chips(b[5]) : 0 };
+}
 
 export class USBSIDWebUSBTransport {
   /**
@@ -347,6 +360,72 @@ export class USBSIDWebUSBTransport {
     if (!this._open) return;
     this._flushBatch();
     this._send(new Uint8Array([CFG_CMD, SET_CLOCK, rateId & 0xFF, 0, 0, 0]));
+  }
+
+  /**
+   * Ask the board a config question and read the answer.
+   *
+   * transferIn asks for a whole packet, not the byte or twelve actually
+   * wanted: Chrome's WebUSB on Linux does not reliably complete a bulk IN
+   * shorter than wMaxPacketSize, which the config tool's own driver ran into
+   * and documents. Returns null when there is nothing to ask, which includes
+   * a shared device, whose owner does its own reads.
+   */
+  async _configRead(sub) {
+    if (!this._open || this._extDev || !this._dev) return null;
+    this._flushBatch();
+    try {
+      await this._dev.transferOut(this._epOut,
+        new Uint8Array([CFG_CMD, sub, 0, 0, 0, 0]));
+      const r = await this._dev.transferIn(this._epIn, MAX_PACKET);
+      if (!r || !r.data || r.data.byteLength === 0) return null;
+      return new Uint8Array(r.data.buffer, r.data.byteOffset, r.data.byteLength);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /**
+   * What the board is carrying: chips per socket, and which one answers the
+   * FM/OPL addresses.
+   *
+   * The command line player reads exactly this at connect and hands it to the
+   * emulation, which is how `$df40`/`$df50` reach a chip at all. Without it an
+   * FM/OPL tune plays its SID voices and none of its OPL.
+   *
+   * A shared device is asked through its own driver rather than behind its
+   * back, since that is the object the host app is already talking to.
+   */
+  async readBoardConfig() {
+    if (this._extDev) {
+      /* Through the host's own driver. It has readFMOplSID() but no socket
+       * read of its own, so the socket buffer goes through its generic
+       * configCmdRead(), which answers with an array of packets. */
+      const d = this._extDev;
+      try {
+        let parsed = null;
+        if (typeof d.configCmdRead === 'function') {
+          const packets = await d.configCmdRead(READ_SOCKETCFG, 0, 0, 0, 0, MAX_PACKET);
+          if (packets && packets.length) parsed = parseSocketConfig(packets[0]);
+        }
+        const fm = (typeof d.readFMOplSID === 'function') ? await d.readFMOplSID() : 0;
+        return {
+          sidsSocketOne: parsed ? parsed.one : 0,
+          sidsSocketTwo: parsed ? parsed.two : 0,
+          fmoplSid: fm || -1,
+        };
+      } catch (_) { return null; }
+    }
+
+    const cfg = await this._configRead(READ_SOCKETCFG);
+    if (!cfg) return null;
+    const parsed = parseSocketConfig(cfg);
+    const fm = await this._configRead(READ_FMOPLSID);
+    return {
+      sidsSocketOne: parsed.one,
+      sidsSocketTwo: parsed.two,
+      fmoplSid: (fm && fm.length) ? (fm[0] || -1) : -1,
+    };
   }
 
   _flushPacket() {

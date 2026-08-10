@@ -5,7 +5,7 @@
  * psiddrv_install.cpp
  *
  * The layout of the parameter block after the driver, and the order the
- * fields go in, follow player-repo/src/psiddrv/psid.cpp exactly. The driver
+ * fields go in, follow old player ~ src/psiddrv/psid.cpp exactly. The driver
  * reads them from fixed offsets, so this is not a place to be creative.
  *
  * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
@@ -59,7 +59,7 @@ constexpr uint16_t kCbm80Size = 9;
  * the driver stamp a cartridge header over the first nine bytes of any tune
  * loaded at $8000, which is exactly as fatal as it sounds.
  *
- * Follows player-repo/src/psiddrv/psid.cpp psid_set_cbm80().
+ * Follows old player ~ src/psiddrv/psid.cpp psid_set_cbm80().
  *
  * @param vec   where the signature's cold start vector points
  * @param addr  the driver's backup field, reloc_addr + 12
@@ -96,7 +96,7 @@ bool psiddrv_install(Ram & ram, const SidFile & tune, uint16_t song,
    * blinks a cursor there, so a tune that leaves the KERNAL interrupt running
    * eats its own player. `rsid/Thats_All_Folks.sid` did exactly that: it ran
    * for 33 frames, the driver was overwritten underneath it, and the CPU
-   * walked out of the wreckage into BASIC ROM. player-repo puts the driver
+   * walked out of the wreckage into BASIC ROM. old player puts the driver
    * after the image, and plays it.
    *
    * Straight after the image, not "anywhere free". Relocating *high*, towards
@@ -123,7 +123,7 @@ bool psiddrv_install(Ram & ram, const SidFile & tune, uint16_t song,
 
     /* The larger gap, which is what "free pages" means and what the reference
      * player picks. `rsid/Thats_All_Folks.sid` loads $1000-$3129 and gets $32,
-     * the same page player-repo logs; `psid/Tour_De_Force.sid` loads
+     * the same page old player logs; `psid/Tour_De_Force.sid` loads
      * $0a00-$9eed, leaving one page above and six below, and gets $04. Taking
      * the page above the image unconditionally puts that one at $9f00, hard
      * against BASIC ROM, and it goes silent. */

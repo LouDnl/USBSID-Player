@@ -227,6 +227,7 @@ if(${WEB} EQUAL 1)
     _usp_init_sidplayer _usp_start _usp_step _usp_stop
     _usp_next_subtune _usp_prev_subtune _usp_pause
     _usp_force_socket_two _usp_key_runstop _usp_type
+    _usp_set_sid_config
     _usp_is_playing _usp_is_paused _usp_is_prg _usp_is_pal
     _usp_clock_id _usp_clock_hz _usp_refresh_hz
     _usp_song _usp_songs _usp_frames _usp_sid_writes

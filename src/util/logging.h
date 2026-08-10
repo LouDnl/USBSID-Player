@@ -5,7 +5,7 @@
  * logging.h
  * Watching what the machine does, one access at a time.
  *
- * The same set of switches player-repo has, and the same command line names
+ * The same set of switches old player has, and the same command line names
  * for them, because the two are going to be compared against each other for a
  * while yet and a diff of two differently shaped logs is no use to anybody.
  *
@@ -51,7 +51,7 @@ namespace usbsid {
 /**
  * @brief What to print while the machine runs.
  *
- * The names match player-repo's variables, and the command line switches that
+ * The names match old players's variables, and the command line switches that
  * set them match its arguments.
  */
 struct LogFlags {

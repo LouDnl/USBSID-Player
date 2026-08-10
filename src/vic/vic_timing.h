@@ -50,7 +50,7 @@ struct VicTiming {
 };
 
 /* Cycles and lines are the chip's, the clock rates are the ones USBSID-Pico
- * accepts (see player-repo: DEFAULT, PAL, NTSC, DREAN, NTSC2). */
+ * accepts (see old player: DEFAULT, PAL, NTSC, DREAN, NTSC2). */
 constexpr VicTiming kVicTiming[static_cast<uint8_t>(VideoModel::Count)] = {
   { 63, 312,  985248, "PAL 6569"         },
   { 65, 263, 1022727, "NTSC 6567R8"      },

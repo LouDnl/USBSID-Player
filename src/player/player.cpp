@@ -294,7 +294,7 @@ bool Player::init_tune(uint16_t song)
   }
 
   /* Put the machine into the state the driver expects before entering it.
-   * This is the sequence player-repo/src/vsidpsid.cpp performs before its
+   * This is the sequence old player ~ src/vsidpsid.cpp performs before its
    * CPU reset: raster interrupt off, CIA1 stopped and then set to the tune's
    * frame rate with its timer A interrupt armed, CIA2 silent, and the usual
    * bank configuration. Without it the KERNAL's own interrupt keeps running,
@@ -307,7 +307,7 @@ bool Player::init_tune(uint16_t song)
    * The install put a cartridge signature at $8000 pointing at the driver's
    * entry, so the KERNAL's reset routine finds it before it initialises
    * anything and jumps straight there. That is what the signature is for, and
-   * it is how player-repo enters the driver too.
+   * it is how old player enters the driver too.
    *
    * Jumping to the entry point directly instead looks equivalent and is not:
    * a reset arrives with interrupts disabled, and the driver relies on that.
@@ -369,7 +369,7 @@ void Player::pause(bool paused)
  * "load another song" entry. That keeps the machine and the tune's own data
  * in place, which reinitialising from scratch would throw away.
  *
- * Taken from player-repo/src/vsidpsid.cpp next_prev_tune(). It does not work
+ * Taken from old player ~ src/vsidpsid.cpp next_prev_tune(). It does not work
  * for every tune, and that is a property of the driver rather than of this
  * code.
  */

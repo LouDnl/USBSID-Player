@@ -127,7 +127,17 @@ $('connect').onclick = async () => {
       $('dev').textContent = transport.productName || 'device';
     }
     connected = true;
-    log('connected over ' + $('ttype').value + (inWorker ? ', in a worker' : ''));
+    /* What the board is carrying, which is what makes $df40/$df50 reach a
+     * chip. The command line player does this at connect; so does this now. */
+    let board = null;
+    try { board = await player.applyBoardConfig(); } catch (_) {}
+    const boardText = board
+      ? `, socket one ${board.sidsSocketOne} SID(s), socket two ` +
+        `${board.sidsSocketTwo}, FM/OPL on ` +
+        (board.fmoplSid > 0 ? `SID ${board.fmoplSid}` : 'nothing')
+      : '';
+    log('connected over ' + $('ttype').value +
+        (inWorker ? ', in a worker' : '') + boardText);
     maybeEnable();
   } catch (e) { log('connect failed: ' + e); }
 };

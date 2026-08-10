@@ -68,7 +68,7 @@ void usage(const char * argv0)
     "  -fa XX            force everything to physical base $XX (hex)\n"
     "      --overhead N  cycles one hardware access costs (default 1)\n"
     "\n"
-    "  logging, to stdout, same switches as player-repo:\n"
+    "  logging, to stdout, same switches as old player:\n"
     "  -srw              SID reads and writes\n"
     "  -c1rw / -c2rw     CIA1 / CIA2 reads and writes\n"
     "  -vrw / -vrrw      VIC register writes / reads\n"
@@ -246,6 +246,9 @@ int main(int argc, char ** argv)
   sid_config.force_address = force_address;
   sid_config.forced_address = forced_address;
   sid_config.access_overhead = static_cast<uint8_t>(overhead);
+  sid_config.sids_socket_one = usb.sids_socket_one();
+  sid_config.sids_socket_two = usb.sids_socket_two();
+  sid_config.fmopl_sid = usb.fmopl_sid();
 
   Player player(machine);
   if (is_sid) {

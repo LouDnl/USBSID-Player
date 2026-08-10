@@ -100,7 +100,10 @@ const handlers = {
     transport = new USBSIDWebUSBTransport();
     const opened = await transport.connectGranted();
     player = new USBSIDPlayerWeb(M, transport);
-    return { opened };
+    /* The worker owns the board here, so it is the only one that can ask what
+     * is in it. Done at init, before any tune loads. */
+    const board = opened ? await player.applyBoardConfig() : null;
+    return { opened, board };
   },
 
   /** The audio thread's end of the clock. */
@@ -131,6 +134,12 @@ const handlers = {
   runStop() { return { ok: player.runStop() }; },
   forceSocketTwo() { player.forceSocketTwo(); return { ok: true }; },
   setClock({ rateId }) { player.setClock(rateId); return { ok: true }; },
+  setSidConfig({ numsids, one, two, fmopl }) {
+    player.setSidConfig(numsids || 0, one || 0, two || 0,
+                        (fmopl === undefined) ? -1 : fmopl);
+    return { ok: true, board: player.boardConfig() };
+  },
+  async applyBoardConfig() { return { board: await player.applyBoardConfig() }; },
   state() { return snapshot(); },
   resetStats() { player.resetStats(); return { ok: true }; },
 };

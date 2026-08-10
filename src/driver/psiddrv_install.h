@@ -6,7 +6,7 @@
  * Installing the PSID/RSID driver into the machine's memory.
  *
  * The driver itself (psiddrv.a65, assembled to psiddrv.o65 and turned into
- * psiddrv.h) and the o65 relocator (reloc65.c) come from player-repo, which
+ * psiddrv.h) and the o65 relocator (reloc65.c) come from old player, which
  * took them from VICE. They are known good and were not worth rewriting; what
  * is written here is the install sequence around them.
  *
@@ -44,7 +44,7 @@ namespace usbsid {
  * also where a machine autostarting from the cartridge vector would land. */
 constexpr addr_t kPsidDrvEntryOffset = 9;
 
-/* The rest of the layout, verified against player-repo/src/vsidpsid.cpp:
+/* The rest of the layout, verified against old player ~ src/vsidpsid.cpp:
  *   +0..8    workspace
  *   +9..11   entry jump          (its next_prev_tune calls this jmp_addr)
  *   +12..20  the CBM80 block the driver copies to $8000  (bck_addr)

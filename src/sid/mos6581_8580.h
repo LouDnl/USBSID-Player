@@ -8,7 +8,7 @@
  *
  * The address translation (one to four SIDs, socket forcing, the FM/OPL
  * address, forced addresses) is carried over from
- * player-repo/src/c64/mos6581_8580_sid.cpp, which is known good and was not
+ * old player ~ src/c64/mos6581_8580_sid.cpp, which is known good and was not
  * worth redesigning.
  *
  * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)

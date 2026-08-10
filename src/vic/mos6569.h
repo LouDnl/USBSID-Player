@@ -122,6 +122,9 @@ class Mos6569 final : public ClockedDevice, public IoDevice
 
     /* register state, for tests and for the player */
     data_t peek(uint8_t reg) const US_RAM_ATTR;
+
+    /** @brief The raster counter as $d011/$d012 shows it. See the definition. */
+    uint16_t visible_raster(void) const US_RAM_ATTR;
     data_t irq_flags(void) const { return irq_flags_; }
     data_t irq_enable(void) const { return irq_enable_; }
     bool sprite_dma(uint8_t n) const { return sprite_dma_[n & 7]; }

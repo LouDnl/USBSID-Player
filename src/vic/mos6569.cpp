@@ -415,15 +415,46 @@ void Mos6569::tick(void)
  * registers
  * ------------------------------------------------------------------------ */
 
+/**
+ * @brief The raster counter as a read of $d011/$d012 sees it.
+ *
+ * Every line's increment happens in the line's first cycle, with one
+ * exception: the wrap from the last line of the frame to line 0 is a cycle
+ * later than that. So for the width of one cycle a program reading the raster
+ * at the top of the frame is still shown the last line, and only then zero.
+ *
+ * This is the same fact that puts the raster IRQ for line 0 in cycle 2 while
+ * every other line's is in cycle 1 (see `tick()`): one counter, one late
+ * transition, two visible consequences. The internal `raster_` is left
+ * alone, because the badline test, the sprite windows and the display window
+ * all key off the line the chip is actually drawing.
+ *
+ * Acid800 `cpu_timing` is what this is measurable with. Its `_waitVCount`
+ * polls $d011 every seven cycles for the frame to wrap, so where the sync
+ * lands decides which line each of the sixteen counted loops ends on. Its
+ * assert 13 counts 2533 cycles from the sync to its own read of $d012, which
+ * under NTSC is 38 lines and 63 cycles: two cycles of tolerance out of sixty
+ * five, and without this rule the sync lands inside them and the assert reads
+ * a line early. The same count under PAL is 40 lines and 13 cycles, tolerant
+ * from cycle 1 to cycle 50, which is why PAL never showed it.
+ */
+uint16_t Mos6569::visible_raster(void) const
+{
+  if (raster_ == 0 && cycle_ == 1) {
+    return static_cast<uint16_t>(timing_->lines_per_frame - 1);
+  }
+  return raster_;
+}
+
 data_t Mos6569::peek(uint8_t reg) const
 {
   const uint8_t r = static_cast<uint8_t>(reg & 0x3f);
   switch (r) {
     case kRegControl1:
       return static_cast<data_t>((regs_[kRegControl1] & 0x7f) |
-                                 ((raster_ & 0x100) ? 0x80 : 0x00));
+                                 ((visible_raster() & 0x100) ? 0x80 : 0x00));
     case kRegRaster:
-      return static_cast<data_t>(raster_ & 0xff);
+      return static_cast<data_t>(visible_raster() & 0xff);
     case kRegIrqFlags:
       return static_cast<data_t>(
         irq_flags_ | 0x70 |

@@ -65,6 +65,19 @@ struct Profile {
   uint64_t cia_timer_a = 0, cia_timer_b = 0;
   uint64_t cia_free = 0;      /* it could be skipped */
 
+  /* Why timer B in particular said "not a moment". It is the single largest
+   * reason a CIA bound tune cannot be skipped, so knowing which of the four
+   * conditions in Timer::quiet_clocks() is the one that fires decides what a
+   * lookahead would have to handle. */
+  uint64_t cia_b_transition = 0;  /* mid transition, next(state) != state */
+  uint64_t cia_b_stage = 0;       /* a stage that changes something part way */
+  uint64_t cia_b_notphi2 = 0;     /* counting something other than phi2 */
+  uint64_t cia_b_zero = 0;        /* counter already at zero */
+  /* OR of every bit that differed between state and next(state), so the
+   * unstable bits name themselves instead of being guessed at. */
+  uint64_t cia_b_diffbits = 0;
+  uint64_t cia_b_statebits = 0;   /* OR of the states seen while refusing */
+
   void clear(void) { *this = Profile(); }
 };
 

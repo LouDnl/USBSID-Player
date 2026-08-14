@@ -155,6 +155,28 @@ class Mos6510 final : public ClockedDevice
 
     US_ALWAYS_INLINE bool flag(data_t mask) const { return (p_ & mask) != 0; }
 
+    /**
+     * @brief A "hot" reset: the registers, not the machine.
+     *
+     * A, X and Y cleared, the stack pointer back to $fd, and the flags to $30,
+     * which most importantly clears **I**. The memory, the chips and the pc are
+     * left alone, so this is not `reset()`.
+     *
+     * It exists for one caller: switching song by jumping into the driver's
+     * "load another song" entry. That jump happens from wherever the tune was,
+     * usually inside its own interrupt, and without this it inherits that
+     * interrupt's stack and its interrupt-disable. Old player ~
+     * src/c64/mos6510_cpu.cpp `hot_reset()`, which the working player calls at
+     * exactly this point; leaving it out is why a new song used to carry on from
+     * the middle of the old one instead of starting.
+     */
+    US_ALWAYS_INLINE void hot_reset(void)
+    {
+      p_ = 0x30;
+      a_ = x_ = y_ = 0;
+      sp_ = 0xfd;
+    }
+
     /* True while the next tick would fetch a new opcode, which is also the
      * only moment at which the register set is architecturally visible. */
     US_ALWAYS_INLINE bool instruction_done(void) const { return state_ == State::Fetch; }

@@ -26,7 +26,7 @@ endif
 ## Cleanup
 .PHONY: clean
 clean:
-	$(RM) *.h *.txt *.o65
+	$(RM) psiddrv.h psiddrv.o65 *.txt
 .PHONY: cleano65
 cleano65:
 	$(RM) *.o65

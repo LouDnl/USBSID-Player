@@ -110,26 +110,60 @@ bool psiddrv_install(Ram & ram, const SidFile & tune, uint16_t song,
       ? tune.load_last_addr
       : static_cast<addr_t>(tune.load_addr + tune.data_size);
 
-    /* The two gaps the image leaves. Below $04 is the zero page, the stack and
-     * the KERNAL's vectors; from $a0 up is ROM and I/O once the tune has
-     * banked them in. */
-    const uint16_t below_first = 0x04;
-    const uint16_t below_last  = static_cast<uint16_t>(tune.load_addr >> 8);
-    const uint16_t above_first = static_cast<uint16_t>((image_end >> 8) + 1);
-    const uint16_t above_last  = 0x9f;
+    /* Which pages the driver may not have, following psid64 by way of
+     * emulator-repo's Loader::find_free_page():
+     *
+     *   $00-$03  zero page, the stack, and the KERNAL's workspace and vectors
+     *   $a0-$bf  BASIC ROM
+     *   $d0-$ff  I/O and the KERNAL
+     *   the tune's own image
+     *
+     * The gap this used to miss entirely is **$c0-$cf**: four kilobytes of
+     * plain RAM between BASIC and the I/O, under no ROM at all. A tune that
+     * loads high, like `demos/Combustible_Psychic_Mushrooms.sid` at
+     * $0801-$a238, leaves nothing above $9f and was therefore given page $04,
+     * which is the screen. See TODO 1 for what that costs.
+     */
+    bool used[0x100];
+    for (unsigned i = 0; i < 0x100; i++) used[i] = false;
+    const auto mark = [&used](unsigned lo, unsigned hi) {
+      for (unsigned i = lo; i <= hi && i < 0x100; i++) used[i] = true;
+    };
+    mark(0x00, 0x03);
+    mark(0xa0, 0xbf);
+    mark(0xd0, 0xff);
+    mark(tune.load_addr >> 8, image_end >> 8);
 
-    const uint16_t below = (below_last > below_first) ? (below_last - below_first) : 0;
-    const uint16_t above = (above_last >= above_first) ? (above_last - above_first + 1) : 0;
+    /* The driver is two pages, the same as psid64's minimal one. */
+    constexpr unsigned kDriverPages = 2;
+    /* $0400-$07e7 is the default screen. The driver fits there and a tune that
+     * prints anything then writes over it, so it is the last choice rather than
+     * the first. psid64 reaches the same place from the other end: it looks for
+     * somewhere to put a screen first, and then puts the driver where the
+     * screen is not. */
+    const auto is_screen = [](unsigned page) { return page >= 0x04 && page <= 0x07; };
 
-    /* The larger gap, which is what "free pages" means and what the reference
-     * player picks. `rsid/Thats_All_Folks.sid` loads $1000-$3129 and gets $32,
-     * the same page old player logs; `psid/Tour_De_Force.sid` loads
-     * $0a00-$9eed, leaving one page above and six below, and gets $04. Taking
-     * the page above the image unconditionally puts that one at $9f00, hard
-     * against BASIC ROM, and it goes silent. */
-    if (above >= below && above > 0)      start_page = static_cast<uint8_t>(above_first);
-    else if (below > 0)                   start_page = static_cast<uint8_t>(below_first);
-    else                                  start_page = 0x04;
+    unsigned best = 0, best_len = 0;      /* largest gap clear of the screen */
+    unsigned fallback = 0;                /* largest gap, screen included */
+    unsigned fallback_len = 0;
+    unsigned run_start = 0, run = 0;
+    for (unsigned i = 0; i <= 0x100; i++) {
+      const bool free_here = (i < 0x100) && !used[i];
+      if (free_here) { if (run == 0) run_start = i; run++; continue; }
+      if (run >= kDriverPages) {
+        if (run > fallback_len) { fallback_len = run; fallback = run_start; }
+        /* Trim the screen off the front of a run rather than discarding it:
+         * a run of $04-$0f is perfectly good from $08 on. */
+        unsigned s = run_start, n = run;
+        while (n > 0 && is_screen(s)) { s++; n--; }
+        if (n >= kDriverPages && n > best_len) { best_len = n; best = s; }
+      }
+      run = 0;
+    }
+
+    if (best_len >= kDriverPages)          start_page = static_cast<uint8_t>(best);
+    else if (fallback_len >= kDriverPages) start_page = static_cast<uint8_t>(fallback);
+    else                                   start_page = 0x04;
   }
 
   const addr_t reloc_addr = static_cast<addr_t>(start_page << 8);

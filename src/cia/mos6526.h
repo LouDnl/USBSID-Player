@@ -7,7 +7,7 @@
  *
  * The timer is the state machine used by VICE (src/core/ciatimer.h, GPLv2,
  * Andre Fachat), which is a refinement of the delay pipeline in
- * assets/cia6526_example that PROJECT.md names as the reference. Both work by
+ * assets/cia6526_example, this project's reference for the chip. Both work by
  * propagating events through delay stages once per clock; the difference is
  * that the load and count stages have their own propagation rules instead of
  * sharing one shift register, which is what lets a timer reload from an

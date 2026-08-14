@@ -285,7 +285,25 @@ uint32_t Mos6526::generic_quiet(void) const
   const uint32_t a = ta_.quiet_clocks();
   if (a == 0) { US_PROF(cia_timer_a); return 0; }
   const uint32_t b = tb_.quiet_clocks();
-  if (b == 0) { US_PROF(cia_timer_b); return 0; }
+  if (b == 0) {
+    US_PROF(cia_timer_b);
+#if defined(US_PROFILE) && US_PROFILE
+    /* Which of quiet_clocks()'s four refusals it was. Diagnostic only, and in
+     * the same order the function tests them so the classification matches. */
+    const uint16_t s = tb_.state;
+    if (Timer::next(s) != s) {
+      US_PROF(cia_b_transition);
+      ::usbsid::profile.cia_b_diffbits |= (uint64_t)(Timer::next(s) ^ s);
+      ::usbsid::profile.cia_b_statebits |= (uint64_t)s;
+    }
+    else if ((s & (Timer::kStep | Timer::kCrFLoad | Timer::kLoad1 |
+                   Timer::kLoad | Timer::kOut)) != 0) { US_PROF(cia_b_stage); }
+    else if ((s & (Timer::kCrStart | Timer::kPhi2In)) !=
+             (Timer::kCrStart | Timer::kPhi2In))      { US_PROF(cia_b_notphi2); }
+    else                                        { US_PROF(cia_b_zero); }
+#endif
+    return 0;
+  }
   US_PROF(cia_free);
 
   return (a < b) ? a : b;

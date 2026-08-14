@@ -1,0 +1,114 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>USBSID-Pico: Web Serial check</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+         max-width: 60rem; margin: 2rem auto; padding: 0 1rem; }
+  h1 { font-size: 1.2rem; }
+  button { font: inherit; padding: .4rem .8rem; cursor: pointer; }
+  table { border-collapse: collapse; margin: 1rem 0; width: 100%; }
+  th, td { text-align: left; padding: .3rem .6rem; border-bottom: 1px solid #8884; }
+  pre { background: #8881; padding: .8rem; overflow-x: auto; }
+  .ok   { color: #2a7; font-weight: bold; }
+  .bad  { color: #d44; font-weight: bold; }
+  .note { color: #888; }
+</style>
+
+<h1>USBSID-Pico: does this browser see the board?</h1>
+
+<p class="note">
+  This asks the browser directly and does not load the player, so it separates
+  "the browser cannot see the board" from "the player has a bug". Run it when the
+  port picker says <em>No serial ports available</em>.
+</p>
+
+<p>
+  <button id="api">1. What does this browser support?</button>
+  <button id="granted">2. List ports already granted</button>
+  <button id="ask">3. Ask for a port (shows the picker)</button>
+</p>
+
+<div id="out"></div>
+
+<script type="module">
+import { USBSIDWebSerialTransport } from './usbsid-webserial.js';
+
+const out = document.getElementById('out');
+const say = (html) => { out.innerHTML = html + out.innerHTML; };
+const esc = (s) => String(s).replace(/[<&]/g, (c) => (c === '<' ? '&lt;' : '&amp;'));
+
+function portTable(ports) {
+  if (!ports.length) return '<p class="bad">No ports.</p>';
+  const rows = ports.map((p, i) => {
+    const info = p.getInfo ? p.getInfo() : {};
+    const vid = (info.usbVendorId  != null) ? '0x' + info.usbVendorId.toString(16)  : '(not reported)';
+    const pid = (info.usbProductId != null) ? '0x' + info.usbProductId.toString(16) : '(not reported)';
+    const mine = (info.usbVendorId === 0xcafe && info.usbProductId === 0x4011);
+    return `<tr><td>${i}</td><td>${esc(vid)}</td><td>${esc(pid)}</td>
+            <td>${mine ? '<span class="ok">looks like USBSID-Pico</span>' : ''}</td></tr>`;
+  }).join('');
+  return `<table><tr><th>#</th><th>vendor</th><th>product</th><th></th></tr>${rows}</table>`;
+}
+
+document.getElementById('api').onclick = () => {
+  const serial = !!navigator.serial;
+  const usb    = !!navigator.usb;
+  say(`<h2>Browser support</h2>
+    <table>
+      <tr><td>navigator.serial (Web Serial)</td><td>${serial
+        ? '<span class="ok">yes</span>' : '<span class="bad">no</span>'}</td></tr>
+      <tr><td>navigator.usb (WebUSB)</td><td>${usb
+        ? '<span class="ok">yes</span>' : '<span class="bad">no</span>'}</td></tr>
+      <tr><td>secure context</td><td>${window.isSecureContext
+        ? '<span class="ok">yes</span>'
+        : '<span class="bad">no, neither API will work</span>'}</td></tr>
+    </table>
+    ${serial ? '' : '<p class="bad">Web Serial needs Firefox 151 or later, ' +
+      'or Chrome/Edge 89 or later.</p>'}`);
+};
+
+document.getElementById('granted').onclick = async () => {
+  if (!navigator.serial) { say('<p class="bad">No navigator.serial.</p>'); return; }
+  const ports = await navigator.serial.getPorts();
+  say(`<h2>Ports already granted to this page</h2>${portTable(ports)}
+    ${ports.length ? '' : '<p class="note">Nothing granted yet. That is normal ' +
+      'before the first time you pick a port. Use step 3.</p>'}`);
+};
+
+document.getElementById('ask').onclick = async () => {
+  if (!navigator.serial) { say('<p class="bad">No navigator.serial.</p>'); return; }
+  let port;
+  try {
+    /* Deliberately unfiltered, which is what the player does too: a filter that
+     * matches nothing looks exactly like having no ports. */
+    port = await navigator.serial.requestPort({});
+  } catch (e) {
+    say(`<h2>Picker</h2><p class="bad">${esc(e.name)}: ${esc(e.message)}</p>
+      <p class="note">"NotFoundError" means either you cancelled, or the browser
+      offered nothing. If the list was empty, the board has no serial port on
+      this machine yet. On Linux that usually means the kernel's cdc_acm driver
+      is not bound to the board's CDC interface: check
+      <code>dmesg | grep cdc_acm</code> for a probe failure, and unplug and
+      replug the board with any other program that has it open closed first.</p>`);
+    return;
+  }
+  say(`<h2>Picked a port</h2>${portTable([port])}`);
+
+  /* Now the only question that matters: does the board answer on it? */
+  const t = new USBSIDWebSerialTransport({ port });
+  const ok = await t.connect();
+  if (ok) {
+    const cfg = await t.readBoardConfig();
+    say(`<p class="ok">The board answered.</p>
+      <pre>${esc(JSON.stringify(cfg, null, 2))}</pre>
+      <p class="note">This is what the player reads to place the SIDs and the
+      FM/OPL address. demo.html will work on this port.</p>`);
+  } else {
+    say(`<p class="bad">${esc(t.lastError || 'the port did not open')}</p>
+      <p class="note">If the board offers several serial ports, telemetry and the
+      USB UART among them, try the others: only one carries the SID bus.</p>`);
+  }
+  await t.disconnect();
+};
+</script>

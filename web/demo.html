@@ -28,6 +28,7 @@
     <select id="ttype">
       <option value="webusb">WebUSB (cycle exact)</option>
       <option value="asid">ASID (Web MIDI)</option>
+      <option value="audio">Software audio (no board)</option>
     </select>
   </label>
   <button id="connect">Connect device</button>
@@ -67,9 +68,10 @@
 <!-- The Emscripten factory, which defines the global USBSIDPlayer(). -->
 <script src="./usbsid.js"></script>
 <script type="module">
-import { USBSIDPlayerWeb, NullTransport } from './usplayer-web.js';
+import { USBSIDPlayerWeb, NullTransport, countSids, sidModel } from './usplayer-web.js';
+import { UsPlayerAudio } from './usplayer-audio.js';
 import { USBSIDPlayerWorker } from './usplayer-worker-client.js';
-import { USBSIDWebUSBTransport } from './usbsid-webusb.js';
+import { createTransport, unsupportedMessage, availableTransport, transportLabel } from './usbsid-transport.js';
 import { ASIDMIDITransport } from './asid-midi.js';
 
 /* Where the build put the wasm. The repo builds into temp/, which keeps every
@@ -78,6 +80,13 @@ import { ASIDMIDITransport } from './asid-midi.js';
 /* The WEB build copies usbsid.js, .mjs and .wasm in here, so the
  * directory is self contained. See CMakeLists.txt. */
 const WASM_DIR = './';
+
+/* Software audio: reSIDfp inside the wasm, played through an AudioWorklet, so a
+ * tune can be heard with no board at all. The transport stays a NullTransport
+ * because usp_audio_configure() swaps the emulation's backend over to the
+ * software SID: nothing reaches the write ring any more, so there is nothing for
+ * a transport to carry. */
+let audioOut = null;
 
 const $ = (id) => document.getElementById(id);
 const log = (m) => { $('status').textContent = m; };
@@ -93,12 +102,56 @@ let connected = false, inWorker = false;
   log('WASM ready. Pick a transport, connect a device, choose a file.');
 })();
 
+/* The direct transport is WebUSB in Chromium and Web Serial in Firefox, and the
+ * option has to say which rather than always claiming WebUSB. It is not cosmetic:
+ * the two take different USB interfaces, and Web Serial takes the one the command
+ * line player wants, so which is in use decides whether the CLI can hold the
+ * board at the same time.
+ *
+ * The option's *value* stays 'webusb' because it names the mode, direct to the
+ * board rather than out over MIDI, and every check below tests for 'asid'. Only
+ * the text the user reads changes. */
+(() => {
+  const kind = availableTransport();
+  const opt = $('ttype').querySelector('option[value="webusb"]');
+  if (!opt) return;
+  if (kind === null) {
+    opt.textContent = 'direct (not supported in this browser)';
+    opt.disabled = true;
+    $('ttype').value = 'asid';
+    $('dev').textContent = unsupportedMessage();
+  } else {
+    opt.textContent = transportLabel(kind, true) + ', cycle exact';
+  }
+  $('ttype').dispatchEvent(new Event('change'));
+})();
+
 $('ttype').onchange = () => {
   $('midiRow').style.display = ($('ttype').value === 'asid') ? 'flex' : 'none';
+  /* Software audio needs no device, so it needs no connect either. Enabling play
+   * the moment it is chosen, rather than making the user press a button that
+   * does nothing, which is what LouD hit. */
+  if ($('ttype').value === 'audio') {
+    if (!transport) { transport = new NullTransport(); player.transport = transport; }
+    $('connect').disabled = true;
+  } else {
+    $('connect').disabled = false;
+  }
+  maybeEnable();
 };
 
 $('connect').onclick = async () => {
   try {
+    if ($('ttype').value === 'audio') {
+      /* Nothing to connect to. The AudioContext is opened on play instead,
+       * because it needs the tune's clock and chip count, and because a context
+       * created outside a user gesture stays suspended on iOS. */
+      transport = new NullTransport();
+      player.transport = transport;
+      log('software audio: no device needed, press play');
+      maybeEnable();
+      return;
+    }
     if ($('ttype').value === 'asid') {
       transport = new ASIDMIDITransport();
       await transport.connect();
@@ -119,12 +172,23 @@ $('connect').onclick = async () => {
       transport = null;
       $('dev').textContent = 'USBSID-Pico (worker)';
     } else {
-      transport = new USBSIDWebUSBTransport();
-      await transport.connect();
+      transport = createTransport();
+      if (!transport) { $('dev').textContent = unsupportedMessage(); return; }
+      /* Web Serial can refuse a port that did not answer, and saying so beats
+       * looking connected and playing into nothing. */
+      const ok = await transport.connect();
+      if (!ok) {
+        $('dev').textContent = transport.lastError || 'could not open the board';
+        transport = null;
+        return;
+      }
     }
     if (!inWorker) {
       player.transport = transport;
-      $('dev').textContent = transport.productName || 'device';
+      /* Web Serial exposes ids at best and often nothing, so name the
+       * transport rather than showing a bare 'device'. */
+      $('dev').textContent = (transport.productName || 'USBSID-Pico') +
+                             ' over ' + transportLabel();
     }
     connected = true;
     /* What the board is carrying, which is what makes $df40/$df50 reach a
@@ -136,7 +200,8 @@ $('connect').onclick = async () => {
         `${board.sidsSocketTwo}, FM/OPL on ` +
         (board.fmoplSid > 0 ? `SID ${board.fmoplSid}` : 'nothing')
       : '';
-    log('connected over ' + $('ttype').value +
+    log('connected over ' +
+        ($('ttype').value === 'asid' ? 'ASID' : transportLabel(undefined, true)) +
         (inWorker ? ', in a worker' : '') + boardText);
     maybeEnable();
   } catch (e) { log('connect failed: ' + e); }
@@ -155,17 +220,39 @@ $('file').onchange = async (ev) => {
   maybeEnable();
 };
 
+/* Software audio has nothing to connect to, so `connected` never becomes true
+ * for it and gating play on that flag alone leaves the button dead for ever.
+ * One predicate, called from every place that changes either half, rather than
+ * a second path that sets `disabled` directly: two paths is how the button
+ * ended up being enabled on transport change and disabled again on file
+ * choice. */
+function readyToPlay() {
+  return ($('ttype').value === 'audio') ? true : connected;
+}
+
 function maybeEnable() {
-  $('play').disabled = !(fileBytes && connected);
+  $('play').disabled = !(fileBytes && readyToPlay());
 }
 
 function showStatus(prefix) {
   const i = player.info();
   const who = i.name ? `${i.name}${i.author ? ' - ' + i.author : ''}` : '(no title)';
+  /* Software audio adds a line, because "it sounds wrong" has two very
+   * different causes and they are told apart by numbers, not by listening:
+   * starve climbing is the machine not keeping up (heard as crackle), starve
+   * flat is something else entirely. */
+  let audio = '';
+  if (audioOut && audioOut.running) {
+    const s = audioOut.stats();
+    audio = `\naudio ${s.rate} Hz, buffer ${s.queuedMs} ms, ` +
+            `${s.msPerFrame.toFixed(1)} ms/frame of 20, ` +
+            `starved ${s.starvedMs} ms` +
+            (s.clipped >= 0 ? `, clipped ${s.clipped}` : '');
+  }
   log(`${prefix}\n${who}\n` +
       `song ${i.song}/${i.songs}, ${player.refreshHz().toFixed(3)} frames/s, ` +
       `${player.frames()} frames, ${player.sidWrites()} writes, ` +
-      `${player.droppedWrites()} dropped`);
+      `${player.droppedWrites()} dropped` + audio);
 }
 
 $('play').onclick = async () => {
@@ -181,9 +268,51 @@ $('play').onclick = async () => {
   }
   if (!ok) { log('that file is neither a SID nor a program'); return; }
 
+  /* ASID only emits the chips it is told about, and it defaults to one, so a
+   * two or three SID tune played over ASID was sending its first chip only.
+   * The header says how many there are. Set on the transport rather than at
+   * construction because the transport is connected before a file is chosen.
+   *
+   * Only ASID needs this: the board transports carry whatever address the
+   * emulation writes to, and ASID never goes through the worker (Web MIDI has
+   * no worker API), so the transport is always reachable from here. */
+  if (transport && 'nosids' in transport) {
+    const n = isPrg ? 1 : countSids(fileBytes);
+    transport.nosids = n;
+    if (n > 1) log(`${n} SID chips, telling ASID about all of them`);
+  }
+
+  /* Software audio starts here rather than at connect: the synthesis has to be
+   * configured for this tune's clock and chip count, and an AudioContext made
+   * outside a user gesture stays suspended (iOS especially). This handler is
+   * that gesture. */
+  if ($('ttype').value === 'audio') {
+    if (!audioOut) audioOut = new UsPlayerAudio(player);
+    const n = isPrg ? 1 : countSids(fileBytes);
+    /* The chip the tune asks for, not always a 6581: the model decides which
+     * filter is emulated and is plainly audible. A program says nothing, so it
+     * gets the default. */
+    const model = isPrg ? 0 : sidModel(fileBytes);
+    const ok = await audioOut.start({ chips: n, quality: 1, model });
+    if (!ok) { log('reSIDfp would not take this rate; is the wasm built with it?'); return; }
+    log(`software audio: ${audioOut.ctx.sampleRate} Hz, ${n} chip${n === 1 ? '' : 's'}, ` +
+        `${model ? '8580' : '6581'}, sinc`);
+  }
+
   const clk = parseInt($('clock').value, 10);
   if (clk >= 0) await player.setClock(clk);
-  await player.start();
+
+  /* Software audio clocks itself off the ring rather than off the wall clock,
+   * so the player's own pump is not started at all: see UsPlayerAudio.run().
+   * Two clocks would fight, and the wall clock one drops frames when it falls
+   * behind, which on a multi SID tune is a hole in the audio rather than a
+   * frame played late. */
+  if ($('ttype').value === 'audio') {
+    await player.start({ externalClock: true });
+    audioOut.run(player);
+  } else {
+    await player.start();
+  }
 
   ['stop','prev','next','pause','ffwd','runstop'].forEach((id) => $(id).disabled = false);
   $('play').disabled = true;
@@ -193,6 +322,7 @@ $('play').onclick = async () => {
 
 $('stop').onclick = async () => {
   clearInterval(statusTimer); statusTimer = 0;
+  if (audioOut) { audioOut.discard(); await audioOut.stop(); audioOut = null; }
   await player.stop();
   ['stop','prev','next','pause','ffwd','runstop'].forEach((id) => $(id).disabled = true);
   $('play').disabled = false;

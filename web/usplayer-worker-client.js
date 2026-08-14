@@ -54,6 +54,20 @@ export class USBSIDPlayerWorker {
     this._worker = null;
     this._audio = null;
     this._board = null;
+    /* Which transport the worker should build. Undefined means let it choose,
+     * which is what everything but the bench wants. Passing it matters because
+     * a main-thread leg and a worker leg using different transports is not a
+     * comparison of threads, it is a comparison of two unrelated things. */
+    this._prefer = opts.prefer;
+    /* Where the worker's own notes go. The page has a log the user can read and
+     * paste; the console is where a worker's troubles used to stay. */
+    this._onLog = opts.onLog || null;
+    /** Set from the worker's own answer once connect() has run. */
+    this.transportKind = null;
+    /** When a tick-driven state message last arrived. 0 means never. */
+    this._stateAt = 0;
+    /** True when the audio clock never ticked and the worker timer took over. */
+    this.clockFallback = false;
     this._seq = 1;
     this._pending = new Map();
     this._state = {
@@ -75,17 +89,51 @@ export class USBSIDPlayerWorker {
             typeof globalThis.webkitAudioContext !== 'undefined');
   }
 
+  /**
+   * One round trip to the worker.
+   *
+   * With a timeout, because the failure modes that do not produce a reply are
+   * the ones that used to look like nothing happening at all: a module worker
+   * whose import graph fails to load never installs its message handler, and an
+   * AudioContext that is not allowed to start leaves `resume()` pending
+   * indefinitely rather than rejecting. Either one left this promise unsettled
+   * and the page silent, with nothing to go on.
+   *
+   * `init` gets longer than the rest: it compiles the wasm and opens the board.
+   */
   _call(type, payload, transfer) {
     return new Promise((resolve, reject) => {
       const id = this._seq++;
-      this._pending.set(id, { resolve, reject });
+      const ms = (type === 'init') ? 30000 : 15000;
+      const timer = setTimeout(() => {
+        if (!this._pending.delete(id)) return;
+        reject(new Error(`the worker did not answer '${type}' within ${ms / 1000}s`));
+      }, ms);
+      this._pending.set(id, { resolve, reject, timer });
       this._worker.postMessage({ type, payload, id }, transfer || []);
     });
   }
 
+  /** Fail everything outstanding, for when the worker itself has gone wrong. */
+  _failPending(message) {
+    for (const [, waiting] of this._pending) {
+      if (waiting.timer) clearTimeout(waiting.timer);
+      waiting.reject(new Error(message));
+    }
+    this._pending.clear();
+  }
+
+  _log(message) {
+    if (this._onLog) this._onLog('[worker] ' + message);
+    else console.log('[usplayer worker]', message);
+  }
+
   _onMessage(e) {
     const { type, payload, id } = e.data || {};
+    if (type === 'log') { this._log((payload && payload.message) || ''); return; }
     if (type === 'state') {
+      /* Only onTick posts these, so the timestamp is proof the clock runs. */
+      this._stateAt = Date.now();
       this._state = payload || this._state;
       if (this.onState) this.onState(this._state);
       return;
@@ -93,6 +141,7 @@ export class USBSIDPlayerWorker {
     const waiting = this._pending.get(id);
     if (!waiting) return;
     this._pending.delete(id);
+    if (waiting.timer) clearTimeout(waiting.timer);
     if (type === 'error') reject_(waiting, payload);
     else waiting.resolve(payload);
   }
@@ -103,9 +152,14 @@ export class USBSIDPlayerWorker {
    * Must be called from a user gesture: the picker will not open otherwise.
    */
   async connect() {
+    /* Breadcrumbs, because every step here can hang and they all used to look
+     * the same from outside: nothing. */
+    this._log('looking for a granted board');
     const devices = await navigator.usb.getDevices();
     const known = devices.some((d) => d.vendorId === USBSID_VID &&
                                       d.productId === USBSID_PID);
+    this._log(known ? 'board already granted, no picker needed'
+                    : 'not granted yet, asking');
     if (!known) {
       /* Only the picker needs the gesture; the worker opens it afterwards. */
       await navigator.usb.requestDevice({
@@ -113,10 +167,30 @@ export class USBSIDPlayerWorker {
       });
     }
 
+    this._log('starting the worker at ' + this._workerUrl);
     this._worker = new Worker(this._workerUrl, { type: 'module' });
     this._worker.onmessage = (e) => this._onMessage(e);
+    /* A module worker that cannot load its imports fires this and never runs a
+     * line of its own code, so without a handler every call hangs. Same for a
+     * message that cannot be deserialised. */
+    this._worker.onerror = (e) => {
+      const where = e && e.filename ? ` (${e.filename}:${e.lineno})` : '';
+      const msg = 'the worker failed to start: ' +
+                  ((e && e.message) || 'unknown error') + where;
+      this._log(msg);
+      this._failPending(msg);
+    };
+    this._worker.onmessageerror = () => {
+      this._failPending('the worker could not read a message from the page');
+    };
 
-    const { opened, board } = await this._call('init', { wasmUrl: this._wasmUrl });
+    this._log('worker started, asking it to load ' + this._wasmUrl +
+              ' and open the board');
+    const { opened, board, transport } =
+      await this._call('init', { wasmUrl: this._wasmUrl, prefer: this._prefer });
+    this._log('init answered: opened=' + opened + ', transport=' + transport);
+    /** Which transport the worker actually built, not which one we assumed. */
+    this.transportKind = transport || null;
     if (!opened) throw new Error('the worker could not open the board');
     this._board = board || null;
     return true;
@@ -147,6 +221,38 @@ export class USBSIDPlayerWorker {
   async start() {
     await this._startAudioClock();
     await this._call('start');
+    await this._ensureClockRunning();
+  }
+
+  /**
+   * Make sure something is actually driving the emulation.
+   *
+   * The worker only advances on a tick, and every way of not getting one looks
+   * identical from here: the tune loads, the board is open, the calls all
+   * succeed, and nothing plays. A suspended AudioContext does it, and so does a
+   * browser that will not transfer a MessagePort into an AudioWorkletProcessor.
+   *
+   * State messages come from onTick and nowhere else, so their arrival is the
+   * only honest test. If none has, start the worker's own timer, which is worse
+   * in a backgrounded tab but is playing rather than silence, and say so.
+   */
+  async _ensureClockRunning() {
+    const before = this._stateAt;
+    await new Promise((r) => setTimeout(r, 800));
+    if (this._stateAt !== before) return true;
+    const state = this._audio ? this._audio.ctx.state : 'no context';
+    this._log(`no ticks from the audio clock after 800 ms. AudioContext is ` +
+              `${state}. Falling back to a timer in the worker.`);
+    this.clockFallback = true;
+    await this._call('fallbackClock', { on: true });
+    /* Give the fallback the same chance to prove itself. */
+    const beforeFallback = this._stateAt;
+    await new Promise((r) => setTimeout(r, 800));
+    if (this._stateAt === beforeFallback) {
+      this._log('the fallback timer produced no ticks either, so the clock is ' +
+                'not what is wrong: the worker is not stepping the emulation.');
+    }
+    return false;
   }
 
   async _startAudioClock() {
@@ -170,14 +276,35 @@ export class USBSIDPlayerWorker {
 
     const node = new AudioWorkletNode(ctx, 'usp-clock');
     const chan = new MessageChannel();
-    await this._call('clock', { port: chan.port1 }, [chan.port1]);
+    const r = await this._call('clock', { port: chan.port1 }, [chan.port1]);
+    if (!r || !r.ok) {
+      this._log('the worker did not get a usable clock port back (' +
+                ((r && r.kind) || 'no answer') + '), so the audio thread cannot ' +
+                'drive it. The fallback timer will be used.');
+    }
     node.port.postMessage({ port: chan.port2 }, [chan.port2]);
     node.connect(ctx.destination);   // something has to pull it or it never runs
-    await ctx.resume();
+    /* resume() on a context the browser will not let start does not reject: it
+     * stays pending until the user interacts with the page. Waiting on it for
+     * ever is how a second leg of a benchmark silently never began. Give it a
+     * moment, then carry on and say so: the clock will start by itself as soon
+     * as the context is allowed to run. */
+    await Promise.race([
+      ctx.resume(),
+      new Promise((r) => setTimeout(r, 2000)),
+    ]);
+    if (ctx.state !== 'running') {
+      console.warn('[usplayer] the AudioContext is', ctx.state +
+        '. The browser needs a click on the page before audio may start.');
+    }
     this._audio = { ctx, node };
   }
 
   async stop() {
+    if (this.clockFallback) {
+      try { await this._call('fallbackClock', { on: false }); } catch (_) {}
+      this.clockFallback = false;
+    }
     await this._call('stop');
     if (this._audio) {
       const { ctx, node } = this._audio;

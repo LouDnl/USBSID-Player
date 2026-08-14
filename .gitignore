@@ -36,6 +36,31 @@
 !src/**
 !lib
 !lib/driver
+# Vendored third party sources, which have to be in the repository and not just
+# on a developer's disk: CMake decides whether software audio exists by looking
+# for lib/residfp/siddefs-fp.h.in, so a checkout without these silently builds
+# with US_HAVE_RESIDFP=0 and ships a player with no --output=audio, no --output=wav
+# and no browser audio at all. That is what CI was doing.
+#
+# reSIDfp also carries a local patch (USP_NO_THREADS, see FilterModelConfig6581.cpp
+# and 8580.cpp), so re-downloading the pristine tarball in CI would not be
+# equivalent: the WEB build needs the patch or it aborts at runtime with
+# "thread constructor failed".
+!lib/residfp
+!lib/residfp/**
+!lib/miniaudio
+!lib/miniaudio/**
+# Nuked OPL3 1.8, the FM/OPL side of a SID+FM tune. Two self contained C files,
+# GPLv2 or later, vendored for the same reason reSIDfp is: the command line
+# player and the browser have to run the *same* engine, or the same tune sounds
+# different depending on where it is played.
+!lib/nukedopl
+!lib/nukedopl/**
+# The un-ignore rules above are per extension, and these are the ones the
+# vendored trees use that nothing else does.
+!*.h.in
+!*.cc
+!COPYING
 !roms
 !tests
 !web
@@ -45,4 +70,6 @@
 # build's own output into the repository.
 web/usbsid.js
 web/usbsid.mjs
+# The same module again under a name every server serves as JavaScript.
+web/usbsid.esm.js
 web/usbsid.wasm

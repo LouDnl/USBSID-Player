@@ -284,6 +284,205 @@ int test_wait_and_flush(void)
   return 0;
 }
 
+/* ---- holding one voice silent -------------------------------------------- */
+
+/*
+ * A mute changes exactly two registers on its way to the hardware: the gate bit
+ * of the control register and the sustain nibble of the sustain/release
+ * register. Everything checked here is one of the ways that could be subtly
+ * wrong, and the last two are the ones that would be silent bugs: a mute that
+ * ate the release nibble, or one the emulation could see.
+ */
+int test_voice_mute(void)
+{
+  /* Registers of voice two, chip one: control, attack/decay, sustain/release */
+  constexpr data_t kV2Control = 0x0b;
+  constexpr data_t kV2AttDec  = 0x0c;
+  constexpr data_t kV2SusRel  = 0x0d;
+
+  {
+    Bus bus;
+    std::vector<TraceSidBackend::Event> buffer(64);
+    TraceSidBackend trace(buffer.data(), buffer.size());
+    Mos6581_8580 sid(bus, trace);
+    sid.config().count = 1;
+    sid.config().base[0] = 0xd400;
+
+    /* the tune's values, before anything is muted */
+    sid.io_write(0xd400 + kV2Control, 0x41);  /* pulse, gate on */
+    sid.io_write(0xd400 + kV2SusRel, 0xc7);   /* sustain 12, release 7 */
+    sid.io_write(0xd400 + kV2AttDec, 0x59);
+
+    /* muting pushes both registers, sustain first, so the note stops without
+     * waiting for the tune to write either one again */
+    trace.reset();
+    sid.set_voice_mute(1, 2, true);
+    US_CHECK_EQ_U(trace.count(), 2u, "muting sends two writes and no more");
+    if (trace.count() == 2) {
+      US_CHECK_EQ_U(trace.at(0).reg, kV2SusRel, "sustain goes first");
+      US_CHECK_EQ_U(trace.at(0).value, 0x07u,
+                    "with sustain zeroed and release kept");
+      US_CHECK_EQ_U(trace.at(1).reg, kV2Control, "then control");
+      US_CHECK_EQ_U(trace.at(1).value, 0x40u,
+                    "with the gate cleared and the waveform kept");
+    }
+
+    /* while muted, the tune's own writes are masked the same way */
+    trace.reset();
+    sid.io_write(0xd400 + kV2Control, 0x21);  /* sawtooth, gate on */
+    sid.io_write(0xd400 + kV2SusRel, 0xfa);   /* sustain 15, release 10 */
+    sid.io_write(0xd400 + kV2AttDec, 0x24);
+    US_CHECK_EQ_U(trace.count(), 3u, "three writes went out");
+    if (trace.count() == 3) {
+      US_CHECK_EQ_U(trace.at(0).value, 0x20u, "gate stays clear, waveform passes");
+      US_CHECK_EQ_U(trace.at(1).value, 0x0au,
+                    "sustain stays clear, release passes untouched");
+      US_CHECK_EQ_U(trace.at(2).value, 0x24u,
+                    "attack and decay are not a mute's business");
+    }
+
+    /* and the mirror kept what the tune wrote, which is what unmuting restores.
+     * No separate saved copy exists, so this is the mechanism, not a detail. */
+    US_CHECK_EQ_U(sid.peek(kV2Control), 0x21u, "the mirror holds the tune's gate");
+    US_CHECK_EQ_U(sid.peek(kV2SusRel), 0xfau, "and the tune's sustain");
+
+    /* unmuting puts both back, in the same order, from the mirror */
+    trace.reset();
+    sid.set_voice_mute(1, 2, false);
+    US_CHECK_EQ_U(trace.count(), 2u, "unmuting sends two writes");
+    if (trace.count() == 2) {
+      US_CHECK_EQ_U(trace.at(0).reg, kV2SusRel, "sustain first again");
+      US_CHECK_EQ_U(trace.at(0).value, 0xfau,
+                    "restored to what the tune wrote while muted");
+      US_CHECK_EQ_U(trace.at(1).reg, kV2Control, "then control");
+      US_CHECK_EQ_U(trace.at(1).value, 0x21u, "gate back up, note restarts");
+    }
+
+    /* muting the same voice twice is not two mutes */
+    sid.set_voice_mute(1, 2, true);
+    trace.reset();
+    sid.set_voice_mute(1, 2, true);
+    US_CHECK_EQ_U(trace.count(), 0u, "muting an already muted voice sends nothing");
+  }
+
+  {
+    /* the other two voices, and a second chip, are untouched by one voice's
+     * mask. Voice one and voice three share the shape of voice two's registers,
+     * so an off by one in either table would show up here. */
+    Bus bus;
+    std::vector<TraceSidBackend::Event> buffer(64);
+    TraceSidBackend trace(buffer.data(), buffer.size());
+    Mos6581_8580 sid(bus, trace);
+    sid.config().count = 2;
+    sid.config().base[0] = 0xd400;
+    sid.config().base[1] = 0xd420;
+
+    sid.set_voice_mute(1, 2, true);
+    trace.reset();
+
+    sid.io_write(0xd404, 0x41);  /* chip one, voice one, control */
+    sid.io_write(0xd406, 0xc7);  /* chip one, voice one, sustain/release */
+    sid.io_write(0xd412, 0x41);  /* chip one, voice three, control */
+    sid.io_write(0xd414, 0xc7);  /* chip one, voice three, sustain/release */
+    sid.io_write(0xd42b, 0x41);  /* chip two, voice two, control */
+    sid.io_write(0xd42d, 0xc7);  /* chip two, voice two, sustain/release */
+
+    US_CHECK_EQ_U(trace.count(), 6u, "all six writes went out");
+    unsigned unchanged = 0;
+    for (size_t i = 0; i < trace.count(); i++) {
+      if (trace.at(i).value == 0x41u || trace.at(i).value == 0xc7u) unchanged++;
+    }
+    US_CHECK_EQ_U(unchanged, 6u,
+                  "muting voice two of chip one changes nothing else, on either chip");
+  }
+
+  {
+    /* all three voices, so neither register table can be off by one */
+    for (uint8_t voice = 1; voice <= 3; voice++) {
+      Bus bus;
+      std::vector<TraceSidBackend::Event> buffer(16);
+      TraceSidBackend trace(buffer.data(), buffer.size());
+      Mos6581_8580 sid(bus, trace);
+      sid.config().count = 1;
+      sid.config().base[0] = 0xd400;
+
+      const data_t control = static_cast<data_t>(0x04 + (voice - 1) * 7);
+      const data_t susrel  = static_cast<data_t>(0x06 + (voice - 1) * 7);
+      sid.io_write(static_cast<addr_t>(0xd400 + control), 0x41);
+      sid.io_write(static_cast<addr_t>(0xd400 + susrel), 0xc7);
+
+      trace.reset();
+      sid.set_voice_mute(1, voice, true);
+      if (trace.count() == 2) {
+        US_CHECK_EQ_U(trace.at(0).reg, susrel, "voice's own sustain register");
+        US_CHECK_EQ_U(trace.at(0).value, 0x07u, "sustain cleared");
+        US_CHECK_EQ_U(trace.at(1).reg, control, "voice's own control register");
+        US_CHECK_EQ_U(trace.at(1).value, 0x40u, "gate cleared");
+      } else {
+        ++us_test_failures; ++us_test_checks;
+        printf("  FAIL voice %u: expected two writes, got %u\n", voice,
+               static_cast<unsigned>(trace.count()));
+      }
+    }
+  }
+
+  {
+    /*
+     * The emulation must not be able to tell. Voice three answers $d41b, which
+     * tunes read as a timer and as a random source, so a mask that leaked into it
+     * would change what the tune does and not merely what it sounds like.
+     *
+     * Run the identical sequence twice, muted and not, and demand the same
+     * readings. Comparing a muted run against itself would prove nothing, so the
+     * two runs are separate machines given the same writes at the same cycles.
+     */
+    data_t readings[2][4] = { { 0 } };
+    data_t mirror[2][2] = { { 0 } };
+    for (int pass = 0; pass < 2; pass++) {
+      Bus bus;
+      std::vector<TraceSidBackend::Event> buffer(32);
+      TraceSidBackend trace(buffer.data(), buffer.size());
+      Mos6581_8580 sid(bus, trace);
+      sid.config().count = 1;
+      sid.config().base[0] = 0xd400;
+
+      sid.io_write(0xd40e, 0xff);  /* voice three frequency, so it moves */
+      sid.io_write(0xd40f, 0x0f);
+      sid.io_write(0xd412, 0x11);  /* triangle, gate on */
+      sid.io_write(0xd414, 0xc7);  /* sustain 12, release 7 */
+
+      if (pass == 1) sid.set_voice_mute(1, 3, true);
+
+      for (int i = 0; i < 4; i++) {
+        bus.run(1000);
+        readings[pass][i] = sid.io_read(0xd41b);
+      }
+      mirror[pass][0] = sid.peek(0x12);
+      mirror[pass][1] = sid.peek(0x14);
+    }
+
+    /* Without this the comparison is vacuous: four equal zeroes prove nothing. */
+    unsigned moved = 0;
+    for (int i = 1; i < 4; i++) {
+      if (readings[0][i] != readings[0][i - 1]) moved++;
+    }
+    US_CHECK(moved > 0,
+             "voice three's oscillator moves, so the comparison means something");
+
+    unsigned same = 0;
+    for (int i = 0; i < 4; i++) {
+      if (readings[0][i] == readings[1][i]) same++;
+    }
+    US_CHECK_EQ_U(same, 4u, "$d41b reads identically whether the voice is muted");
+    US_CHECK_EQ_U(mirror[1][0], mirror[0][0], "and the mirror's gate is unchanged");
+    US_CHECK_EQ_U(mirror[1][1], mirror[0][1], "and the mirror's sustain too");
+    US_CHECK_EQ_U(mirror[1][0], 0x11u, "the mirror holds the tune's own control value");
+    US_CHECK_EQ_U(mirror[1][1], 0xc7u, "and the tune's own sustain and release");
+  }
+
+  return 0;
+}
+
 /* ---- what the machine does with it -------------------------------------- */
 
 int test_machine_integration(void)
@@ -476,6 +675,7 @@ int us_test_sid(void)
   test_translation();
   test_cycle_deltas();
   test_wait_and_flush();
+  test_voice_mute();
   test_machine_integration();
   test_trace_dump();
   test_voice3();

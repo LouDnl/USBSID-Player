@@ -284,17 +284,12 @@ int test_prg_sweep(void)
    * start it the way a person would, and count the ones that end up making a
    * sound. A program that stops writing registers has hit a bug somewhere
    * between the keyboard buffer and the SID. */
-  char cmd[512];
-  snprintf(cmd, sizeof(cmd), "ls %s/prg/*.prg 2>/dev/null", US_TUNE_DIR);
-  FILE * ls = popen(cmd, "r");
-  if (ls == nullptr) return 0;
-
   unsigned total = 0, parsed = 0, played = 0, silent = 0;
-  char path[512];
+  std::vector<std::string> files;
+  const UsDir listing = us_list_dir(US_TUNE_DIR "/prg", ".prg", files);
 
-  while (fgets(path, sizeof(path), ls) != nullptr) {
-    const size_t n = strlen(path);
-    if (n > 0 && path[n - 1] == '\n') path[n - 1] = 0;
+  for (const std::string & file : files) {
+    const char * path = file.c_str();
 
     std::vector<data_t> bytes;
     if (!read_file(path, bytes)) continue;
@@ -321,16 +316,21 @@ int test_prg_sweep(void)
     if (backend.writes > 50) ++played;
     else { ++silent; printf("    silent: %s\n", path); }
   }
-  pclose(ls);
 
   printf("  %u programs, %u are programs, %u made sound, %u silent\n",
          total, parsed, played, silent);
 
-  ++us_test_checks;
-  if (total == 0) {
-    printf("  skipped the sweep, no programs available\n");
+  /* Missing is a machine without the collection and is a legitimate skip.
+   * Empty is a directory that is there and gave nothing, which used to be
+   * reported as a skip and passed: see us_list_dir(). */
+  if (listing == UsDir::Missing) {
+    ++us_test_checks;
+    printf("  skipped the sweep, no program directory on this machine\n");
     return 0;
   }
+  US_CHECK(listing == UsDir::Listed, "the program directory has programs in it");
+  US_CHECK(total > 0, "the sweep found programs to run");
+  if (total == 0) return us_test_failures;
   US_CHECK_EQ_U(played, parsed, "every program that parses starts and plays");
 
   return 0;

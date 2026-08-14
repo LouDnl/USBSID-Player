@@ -224,6 +224,63 @@ int test_tune_runs(void)
   return 0;
 }
 
+/* ---- the sweep's own listing --------------------------------------------- */
+
+int test_dir_listing(void)
+{
+  /* The sweeps are the regression net for the whole emulation, and for a while
+   * the net had a hole in it: they listed the collection through
+   * `popen("ls ...")`, which reported 160 tunes, then 62, then 0 on three
+   * consecutive runs of an unchanged tree, and a sweep that found nothing
+   * printed "skipped" and passed. This is the test that the replacement cannot
+   * do that again.
+   */
+  namespace fs = std::filesystem;
+  std::error_code ec;
+
+  const fs::path root = fs::temp_directory_path(ec) / "usplayer-listing-test";
+  fs::remove_all(root, ec);
+  fs::create_directories(root, ec);
+  if (ec) { printf("  skipped: no writable temp directory\n"); return 0; }
+
+  std::vector<std::string> got;
+
+  /* A directory that is not there is a machine without the collection. */
+  US_CHECK(us_list_dir((root / "nothing-here").string().c_str(), ".sid", got)
+             == UsDir::Missing, "a missing directory says so");
+
+  /* A directory that is there and yields nothing is the case that used to pass
+   * quietly. It has to be distinguishable from the one above. */
+  US_CHECK(us_list_dir(root.string().c_str(), ".sid", got) == UsDir::Empty,
+           "an empty directory is not the same as a missing one");
+  US_CHECK_EQ_U(got.size(), 0u, "nothing was listed from an empty directory");
+
+  /* Files, sorted, and only the extension asked for. Written out of order on
+   * purpose: a sweep that fails has to name the same tune on every machine. */
+  for (const char * name : { "b.sid", "a.sid", "c.SID", "notes.txt", "d.prg" }) {
+    FILE * f = fopen((root / name).string().c_str(), "wb");
+    if (f != nullptr) { fputc('x', f); fclose(f); }
+  }
+  US_CHECK(us_list_dir(root.string().c_str(), ".sid", got) == UsDir::Listed,
+           "a directory with files says so");
+  US_CHECK_EQ_U(got.size(), 3u, "three .sid files, and not the .txt or the .prg");
+  if (got.size() == 3) {
+    US_CHECK_EQ_STR(fs::path(got[0]).filename().string().c_str(), "a.sid",
+                    "listed in order");
+    US_CHECK_EQ_STR(fs::path(got[2]).filename().string().c_str(), "c.SID",
+                    "the extension test is case insensitive");
+  }
+
+  /* Appends rather than clears, which is what lets one sweep walk two
+   * directories into one list. */
+  const size_t before = got.size();
+  us_list_dir(root.string().c_str(), ".prg", got);
+  US_CHECK_EQ_U(got.size(), before + 1, "a second call appends");
+
+  fs::remove_all(root, ec);
+  return 0;
+}
+
 /* ---- how many tunes survive a few frames -------------------------------- */
 
 int test_tune_sweep(void)
@@ -234,53 +291,61 @@ int test_tune_sweep(void)
   static const char * const dirs[] = { US_TUNE_DIR "/psid", US_TUNE_DIR "/rsid" };
 
   unsigned total = 0, parsed = 0, played = 0, silent = 0;
+  unsigned present = 0, empty = 0;
+  std::vector<std::string> files;
 
   for (const char * dir : dirs) {
-    char cmd[512];
-    snprintf(cmd, sizeof(cmd), "ls %s/*.sid 2>/dev/null", dir);
-    FILE * ls = popen(cmd, "r");
-    if (ls == nullptr) continue;
-
-    char path[512];
-    while (fgets(path, sizeof(path), ls) != nullptr) {
-      const size_t n = strlen(path);
-      if (n > 0 && path[n - 1] == '\n') path[n - 1] = 0;
-
-      std::vector<data_t> bytes;
-      if (!read_file(path, bytes)) continue;
-      ++total;
-
-      SidFile tune;
-      if (!sidfile_parse(bytes.data(), bytes.size(), tune)) continue;
-      ++parsed;
-
-      TestC64 c64;
-      NullSidBackend backend;
-      c64.machine.set_sid_backend(backend);
-      Player player(c64.machine);
-      if (!player.load_sid(bytes.data(), bytes.size())) continue;
-      if (!player.init_tune(0)) continue;
-
-      backend.reset();
-      /* Six seconds, not one: several tunes unpack or wait for a couple of
-       * seconds before their first register write, and judging them after one
-       * second calls a working tune silent. */
-      player.run_frames(300);
-
-      if (backend.writes > 50) ++played;
-      else { ++silent; printf("    silent: %s\n", path); }
+    switch (us_list_dir(dir, ".sid", files)) {
+      case UsDir::Missing: break;
+      case UsDir::Empty:   ++present; ++empty;
+                           printf("    empty: %s\n", dir); break;
+      case UsDir::Listed:  ++present; break;
     }
-    pclose(ls);
+  }
+
+  for (const std::string & file : files) {
+    const char * path = file.c_str();
+
+    std::vector<data_t> bytes;
+    if (!read_file(path, bytes)) continue;
+    ++total;
+
+    SidFile tune;
+    if (!sidfile_parse(bytes.data(), bytes.size(), tune)) continue;
+    ++parsed;
+
+    TestC64 c64;
+    NullSidBackend backend;
+    c64.machine.set_sid_backend(backend);
+    Player player(c64.machine);
+    if (!player.load_sid(bytes.data(), bytes.size())) continue;
+    if (!player.init_tune(0)) continue;
+
+    backend.reset();
+    /* Six seconds, not one: several tunes unpack or wait for a couple of
+     * seconds before their first register write, and judging them after one
+     * second calls a working tune silent. */
+    player.run_frames(300);
+
+    if (backend.writes > 50) ++played;
+    else { ++silent; printf("    silent: %s\n", path); }
   }
 
   printf("  %u tunes, %u parsed, %u played, %u silent\n",
          total, parsed, played, silent);
 
-  ++us_test_checks;
-  if (total == 0) {
-    printf("  skipped the sweep, no tunes available\n");
+  /* No collection on this machine at all: the suite still has to run, and a
+   * skip is honest. A collection that is *there* and yielded nothing is not:
+   * that is a broken harness reporting a pass, which is what this whole
+   * arrangement replaced. See us_list_dir(). */
+  if (present == 0) {
+    ++us_test_checks;
+    printf("  skipped the sweep, no tune directories on this machine\n");
     return 0;
   }
+  US_CHECK_EQ_U(empty, 0u, "every tune directory that exists has tunes in it");
+  US_CHECK(total > 0, "the sweep found tunes to run");
+  if (total == 0) return us_test_failures;
   US_CHECK_EQ_U(parsed, total, "every tune in the collection parses");
   /* Every tune in the collection plays. The bar used to be eight in ten,
    * because fourteen of them were silent; the three faults behind that are
@@ -371,6 +436,7 @@ int us_test_player(void)
   test_parse_synthetic();
   test_real_tunes();
   test_tune_runs();
+  test_dir_listing();
   test_tune_sweep();
 
   US_TEST_END("player");

@@ -93,7 +93,7 @@ static uint64_t g_fake_us = 0;
 static uint32_t g_clock_reads = 0;
 static bool g_free_running = true;
 
-extern "C" uint64_t time_us_64(void)
+static uint64_t fake_time_us_64(void)
 {
   ++g_clock_reads;
   if (g_free_running) g_fake_us += 1000;
@@ -103,7 +103,7 @@ extern "C" uint64_t time_us_64(void)
 /* The player asks for this rather than spinning when it is available, which
  * is what lets the simulated clock be advanced by exactly what was asked for
  * instead of by however many times the spin happened to read it. */
-extern "C" void usplayer_busy_wait_us(uint32_t us)
+static void fake_busy_wait_us(uint32_t us)
 {
   g_fake_us += us;
 }
@@ -233,8 +233,8 @@ DeviceSim g_sim;
 
 } /* namespace */
 
-extern "C" void cycled_write_operation(uint8_t address, uint8_t data,
-                                       uint16_t cycles)
+static void fake_cycled_write(uint8_t address, uint8_t data,
+                              uint16_t cycles)
 {
   ++g_fw.writes;
   g_fw.last_reg = address;
@@ -245,7 +245,7 @@ extern "C" void cycled_write_operation(uint8_t address, uint8_t data,
   g_sim.bus_access(cycles);
 }
 
-extern "C" uint8_t cycled_read_operation(uint8_t address, uint16_t cycles)
+static uint8_t fake_cycled_read(uint8_t address, uint16_t cycles)
 {
   ++g_fw.reads;
   g_fw.last_reg = address;
@@ -255,10 +255,33 @@ extern "C" uint8_t cycled_read_operation(uint8_t address, uint16_t cycles)
   return g_fw.regs[address & 0x7f];
 }
 
-extern "C" void reset_sid(void) { ++g_fw.resets; }
-extern "C" void reset_sid_registers(void) { ++g_fw.register_resets; }
+static void fake_reset_sid(void) { ++g_fw.resets; }
+static void fake_reset_sid_registers(void) { ++g_fw.register_resets; }
 
-extern "C" void apply_clockrate(int n_clock, bool suspend_sids)
+static void fake_apply_clockrate(int n_clock, bool suspend_sids);
+
+/* Bound once, at load, in place of the definitions these used to be. The backend
+ * reaches the firmware through pointers now, because a weak undefined symbol is
+ * an ELF idea and this suite builds on Mach-O and PE as well; see the note in
+ * src/sid/sid_embedded.h. Assigning them is also more honest about what the
+ * tests are doing than defining the firmware's own names was. */
+namespace {
+struct BindFakeFirmware {
+  BindFakeFirmware(void)
+  {
+    us_cycled_write        = &fake_cycled_write;
+    us_cycled_read         = &fake_cycled_read;
+    us_reset_sid           = &fake_reset_sid;
+    us_reset_sid_registers = &fake_reset_sid_registers;
+    us_time_us_64          = &fake_time_us_64;
+    us_busy_wait_us        = &fake_busy_wait_us;
+    us_apply_clockrate     = &fake_apply_clockrate;
+  }
+};
+const BindFakeFirmware g_bind_fake_firmware;
+} /* namespace */
+
+static void fake_apply_clockrate(int n_clock, bool suspend_sids)
 {
   (void)suspend_sids;
   ++g_fw.clock_changes;

@@ -101,7 +101,7 @@ class Bus
     /**
      * @brief Advance the whole machine by exactly one PHI2 cycle.
      *
-     * Fixed order, see PROPOSAL.md section 2:
+     * The order is fixed, and every chip is clocked once per cycle in it:
      *   1. VIC       (PHI1 half: fetches, badline and BA decision, raster IRQ)
      *   2. CIA1      (timers, TOD, serial, IRQ line)
      *   3. CIA2      (idem, NMI line)

@@ -64,6 +64,20 @@ struct SidFile {
   char released[33] = { 0 };
 
   uint16_t flags = 0;
+
+  /**
+   * @brief An RSID that is a C64 BASIC program, started by typing RUN.
+   *
+   * Flags bit 1 means two different things depending on the file. In a PSID it
+   * marks a tune that uses PlaySID's own extensions; in an **RSID** it says the
+   * tune is BASIC, and then `initAddress` must be zero and the machine is meant
+   * to run it the way a person would: boot, and RUN.
+   *
+   * There is no init routine to call and no driver to install. A player that
+   * treats it as an ordinary tune calls the load address as if it were code,
+   * which for a BASIC program is a jump into a tokenised line.
+   */
+  bool is_basic = false;
   uint8_t start_page = 0;   /* where the driver may be relocated to */
   uint8_t max_pages = 0;
   uint16_t reserved = 0;    /* holds the second and third SID addresses */

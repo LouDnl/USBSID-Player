@@ -118,7 +118,14 @@ bool sidfile_parse(const data_t * bytes, size_t len, SidFile & out)
   out.load_last_addr =
     static_cast<addr_t>(out.load_addr + payload_size - 1);
 
-  /* An init address of zero means "the load address" */
+  /* Flags bit 1 in an RSID says the tune is a C64 BASIC program. The spec then
+   * requires initAddress to be zero, and the tune is started by RUN rather than
+   * by calling anything. Read before the defaulting below, which would otherwise
+   * hide the zero that identifies it. */
+  out.is_basic = out.is_rsid && ((out.flags & 0x02) != 0) && (out.init_addr == 0);
+
+  /* An init address of zero means "the load address", except for the BASIC case
+   * above, where there is no init address at all. */
   if (out.init_addr == 0) out.init_addr = out.load_addr;
 
   if (out.songs == 0) out.songs = 1;

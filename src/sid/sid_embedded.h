@@ -37,24 +37,40 @@
 #include "sid_backend.h"
 #include "types.h"
 
-/* The firmware side of the bridge. These are USBSID-Pico's own bus functions,
- * declared weak so this file links anywhere: in a build without the firmware
- * they resolve to null and the backend goes quiet instead of failing to link.
- * That is also what lets the tests substitute their own definitions. */
+/* The firmware side of the bridge: USBSID-Pico's own bus functions, reached
+ * through pointers.
+ *
+ * They used to be declared `__attribute__((weak))` and called directly, which
+ * reads better and only works on ELF. An undefined weak resolving to null is an
+ * ELF property, and the desktop suite builds on three platforms:
+ *
+ *   Linux, ELF        an undefined weak is null, as intended
+ *   macOS, Mach-O     refuses to link an undefined weak at all
+ *                     `ld: symbol(s) not found for architecture arm64`
+ *   Windows, PE/COFF  the library's weak collides with the test's definition
+ *                     `multiple definition of '.weak.time_us_64...'`
+ *
+ * Pointers behave the same everywhere. Nothing else changes: the backend was
+ * already written to test each of these against null before using it, because a
+ * weak that resolved to null was always a possibility, so the semantics were
+ * pointer shaped from the start and only the mechanism was ELF specific.
+ *
+ * The firmware is unaffected and needs no edit. Under `EMBEDDED` the real
+ * symbols are declared normally and these are initialised to their addresses in
+ * `sid_embedded.cpp`; everywhere else they start null, and a test assigns them.
+ */
 extern "C" {
-  void cycled_write_operation(uint8_t address, uint8_t data, uint16_t cycles)
-    __attribute__((weak));
-  uint8_t cycled_read_operation(uint8_t address, uint16_t cycles)
-    __attribute__((weak));
-  void reset_sid(void) __attribute__((weak));
-  void reset_sid_registers(void) __attribute__((weak));
+  extern void (*us_cycled_write)(uint8_t address, uint8_t data, uint16_t cycles);
+  extern uint8_t (*us_cycled_read)(uint8_t address, uint16_t cycles);
+  extern void (*us_reset_sid)(void);
+  extern void (*us_reset_sid_registers)(void);
   /* the Pico SDK's microsecond clock, the only real time this backend has */
-  uint64_t time_us_64(void) __attribute__((weak));
-  /* Optional: block for this long. Nothing defines it on the device, where the
-   * fallback spin on time_us_64 is what a busy wait would have been anyway. It
-   * exists so a test can run the pacer against a clock it controls, which is
+  extern uint64_t (*us_time_us_64)(void);
+  /* Optional: block for this long. Nothing sets it on the device, where the
+   * fallback spin on us_time_us_64 is what a busy wait would have been anyway.
+   * It exists so a test can run the pacer against a clock it controls, which is
    * the only way to measure device tempo without a device. */
-  void usplayer_busy_wait_us(uint32_t us) __attribute__((weak));
+  extern void (*us_busy_wait_us)(uint32_t us);
 }
 
 namespace usbsid {
@@ -95,7 +111,7 @@ class EmbeddedSidBackend final : public SidBackend
     /** @brief Whether the firmware bus functions are actually linked in. */
     static bool hardware_present(void)
     {
-      return cycled_write_operation != nullptr;
+      return us_cycled_write != nullptr;
     }
 
     /** @brief Reset the chips themselves, not just this object's counters. */

@@ -50,8 +50,56 @@ constexpr data_t kSidNotMapped = 0xfe;
  * @brief How many SIDs there are and where they live.
  */
 struct SidConfig {
+  /**
+   * @brief Hand the backend the time that passes when the tune writes nothing.
+   *
+   * Off for hardware, on for a software SID, set by its attach().
+   *
+   * A backend normally learns how much time has passed from the gap carried by
+   * the next access, so a stretch with no accesses at all costs nothing and is
+   * simply carried across. A board is happy with that: it plays in real time
+   * and idles when there is no work.
+   *
+   * A software SID is not, because it only renders when it is told time has
+   * passed. A tune that touches no register for a hundred frames produces no
+   * samples for a hundred frames, and anything pacing itself by "emulate until
+   * there is enough audio" then races ahead at fifteen times speed until the
+   * tune starts making sound again. That is exactly what the browser player did
+   * on tunes with a silent introduction.
+   *
+   * With this set, the end of each video frame pushes whatever time has gone by
+   * to the backend, so silence is rendered as silence and one frame of
+   * emulation always yields one frame of audio.
+   */
+  bool render_idle = false;
   uint8_t count = 1;            /* 1 to 4 */
   addr_t base[4] = { 0xd400, 0x0000, 0x0000, 0x0000 };
+
+  /**
+   * @brief Which voices are held silent, one byte per chip, bits 0 to 2.
+   *
+   * A muted voice has two things forced on the way to the hardware: the **gate
+   * bit** of its control register, and the **sustain nibble** of its
+   * sustain/release register, both held at 0.
+   *
+   * The gate alone leaves the note's release audible, and release runs to 24
+   * seconds, so a voice muted mid note would fade for as long as the tune asked
+   * for. Taking the sustain floor away as well makes it quiet and keeps it quiet
+   * however the tune re-gates it.
+   *
+   * Everything else goes through untouched: the release nibble, the waveform,
+   * ring modulation and sync. So the tune can keep changing a muted voice and all
+   * of it is heard when the mute is lifted. The tune's own sustain value needs no
+   * separate saving, because `regs_[]` below is written before the mask is
+   * applied and therefore always holds it.
+   *
+   * Masked on the way **out** and nowhere else. `regs_[]` keeps what the tune
+   * wrote, voice three's emulation is fed the unmasked value, and a trace shows
+   * the tune's own writes. That matters beyond tidiness: tunes poll `$d41b` as a
+   * timer and as a random source, so a mute that changed those answers would
+   * change what the tune does rather than what it sounds like.
+   */
+  uint8_t voice_mute[4] = { 0, 0, 0, 0 };
 
   /* USBSID-Pico socket layout, mirrored from the device config */
   uint8_t sids_socket_one = 1;
@@ -100,6 +148,18 @@ class Mos6581_8580 final : public IoDevice, public VicFrameObserver
      * Returns kSidNotMapped when the address belongs to no configured chip.
      */
     data_t translate(addr_t addr, uint8_t & chip) const US_RAM_ATTR;
+
+    /**
+     * @brief What the hardware should see. See the definition.
+     *
+     * Deliberately left as an ordinary out of line declaration. It looks like it
+     * belongs inline, since it sits on the per write path of all three players,
+     * but it was measured: gcc at -O3 already inlines it into `io_write()`, both
+     * being in the same translation unit, and hand rolling an inline fast path
+     * in this header made `io_write()` five instructions longer and about ten
+     * percent slower. Measurement in `_project/PROGRESS.md`, 2026-08-11.
+     */
+    data_t mask_for_output(data_t reg, data_t value) const US_RAM_ATTR;
     /**
      * @brief Start measuring cycle deltas from now.
      *
@@ -120,6 +180,31 @@ class Mos6581_8580 final : public IoDevice, public VicFrameObserver
 
     /* the register mirror, one 32 byte block per chip */
     data_t peek(data_t physical_reg) const { return regs_[physical_reg & 0x7f]; }
+
+    /**
+     * @brief Hold one voice silent, or let it go again.
+     *
+     * @param chip   1 to 4
+     * @param voice  1 to 3
+     *
+     * Setting the mask is only half of it. The chip holds its gate high until
+     * something writes to that register, and a tune with a long sustain may not
+     * write it again for seconds, so muting also sends both affected registers
+     * once, sustain then control. Unmuting sends the tune's current values back in
+     * the same order, which restores the sustain level and then restarts the note
+     * if its gate is high: immediate and predictable, which is what a listener
+     * expects from unmuting.
+     *
+     * Two writes per change rather than one, and the order matters in both
+     * directions. The reasoning is with the code.
+     */
+    void set_voice_mute(uint8_t chip, uint8_t voice, bool muted);
+
+    /** @brief The mute bits for one chip, bits 0 to 2. Chip counts from 1. */
+    uint8_t voice_mute(uint8_t chip) const
+    {
+      return (chip >= 1 && chip <= 4) ? config_.voice_mute[chip - 1] : 0;
+    }
 
     uint32_t writes(void) const { return writes_; }
     uint32_t reads(void) const { return reads_; }

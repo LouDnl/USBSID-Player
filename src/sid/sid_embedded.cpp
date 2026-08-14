@@ -85,8 +85,8 @@ void EmbeddedSidBackend::set_clock_hz(uint32_t hz)
  */
 void EmbeddedSidBackend::wait_until_due(void)
 {
-  if (time_us_64 == nullptr || !pacing_) return;
-  const uint64_t now = time_us_64();
+  if (us_time_us_64 == nullptr || !pacing_) return;
+  const uint64_t now = us_time_us_64();
 
   if (due_cycles_ > kMaxDueCycles) { /* before the fixed point product grows */
     origin_us_ = now;
@@ -103,10 +103,10 @@ void EmbeddedSidBackend::wait_until_due(void)
 
   if (now < due) {
     const uint32_t us = static_cast<uint32_t>(due - now);
-    if (usplayer_busy_wait_us != nullptr) {
-      usplayer_busy_wait_us(us);
+    if (us_busy_wait_us != nullptr) {
+      us_busy_wait_us(us);
     } else {
-      while (time_us_64() < due) { /* spin */ }
+      while (us_time_us_64() < due) { /* spin */ }
     }
     return;
   }
@@ -145,11 +145,11 @@ void EmbeddedSidBackend::wait_until_due(void)
  */
 uint16_t EmbeddedSidBackend::trim_to_now(uint16_t hw)
 {
-  if (hw == 0 || !pacing_ || time_us_64 == nullptr || us_per_cycle_q16_ == 0) {
+  if (hw == 0 || !pacing_ || us_time_us_64 == nullptr || us_per_cycle_q16_ == 0) {
     return hw;
   }
 
-  const uint64_t now = time_us_64();
+  const uint64_t now = us_time_us_64();
   const uint64_t due = origin_us_ + ((due_cycles_ * us_per_cycle_q16_) >> 16);
   if (now <= due) return hw; /* the board is still ahead, the chain is intact */
 
@@ -185,8 +185,8 @@ uint16_t EmbeddedSidBackend::schedule(uint16_t cycles)
   /* The first access after a resync is where the timeline starts. Its own gap
    * is whatever came before the tune and is not part of it, so it is not
    * accounted and there is nothing yet to pace against. */
-  if (!paced_ && time_us_64 != nullptr) {
-    origin_us_ = time_us_64();
+  if (!paced_ && us_time_us_64 != nullptr) {
+    origin_us_ = us_time_us_64();
     due_cycles_ = 0;
     paced_ = true;
     return hw;
@@ -200,7 +200,7 @@ uint16_t EmbeddedSidBackend::schedule(uint16_t cycles)
 
   /* Short enough for the hardware to absorb, or there is no clock to pace
    * against, which is every build that is not the firmware. */
-  if (cycles <= kPacedGap || time_us_64 == nullptr || clock_hz_ == 0) {
+  if (cycles <= kPacedGap || us_time_us_64 == nullptr || clock_hz_ == 0) {
     return hw;
   }
 
@@ -216,16 +216,21 @@ void EmbeddedSidBackend::write(data_t reg, data_t value, uint16_t cycles)
 {
   ++writes_;
   const uint16_t hw = schedule(cycles);
-  if (cycled_write_operation == nullptr) return;
-  cycled_write_operation(reg, value, hw);
+  /* $80 and above are not SID registers: they are the FM/OPL addresses that no
+   * chip claimed, and only a transport that carries FM itself can use them. This
+   * one talks to a board, so it drops them, which is what happened before they
+   * were forwarded at all. */
+  if (reg >= 0x80) return;
+  if (us_cycled_write == nullptr) return;
+  us_cycled_write(reg, value, hw);
 }
 
 data_t EmbeddedSidBackend::read(data_t reg, uint16_t cycles)
 {
   ++reads_;
   const uint16_t hw = schedule(cycles);
-  if (cycled_read_operation == nullptr) return 0xff;
-  return cycled_read_operation(reg, hw);
+  if (us_cycled_read == nullptr) return 0xff;
+  return us_cycled_read(reg, hw);
 }
 
 /**
@@ -245,10 +250,10 @@ void EmbeddedSidBackend::wait(uint16_t cycles)
 {
   waited_ += cycles;
 
-  if (time_us_64 == nullptr || clock_hz_ == 0) return;
+  if (us_time_us_64 == nullptr || clock_hz_ == 0) return;
 
   if (!paced_) { /* the timeline starts here, see schedule() */
-    origin_us_ = time_us_64();
+    origin_us_ = us_time_us_64();
     due_cycles_ = 0;
     paced_ = true;
     return;
@@ -272,8 +277,8 @@ void EmbeddedSidBackend::reset(void)
 
 void EmbeddedSidBackend::reset_hardware(void)
 {
-  if (reset_sid_registers != nullptr) reset_sid_registers();
-  if (reset_sid != nullptr) reset_sid();
+  if (us_reset_sid_registers != nullptr) us_reset_sid_registers();
+  if (us_reset_sid != nullptr) us_reset_sid();
 }
 
 } /* namespace usbsid */

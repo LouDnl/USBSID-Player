@@ -91,6 +91,11 @@ void UsbSidBackend::set_clock_rate(uint32_t hz)
 void UsbSidBackend::write(data_t reg, data_t value, uint16_t cycles)
 {
   if (!open_) return;
+  /* $80 and above are not SID registers: they are the FM/OPL addresses that no
+   * chip claimed, and only a transport that carries FM itself can use them. This
+   * one talks to a board, so it drops them, which is what happened before they
+   * were forwarded at all. */
+  if (reg >= 0x80) return;
   /* Straight through. The cycle the access itself costs has already been taken
    * off upstream, by SidConfig::access_overhead in cycles_since_last_event(),
    * so what arrives here is the pre-delay the board should sit out and nothing

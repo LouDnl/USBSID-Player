@@ -164,6 +164,123 @@ uint16_t Mos6581_8580::cycles_since_last_event(void)
   return static_cast<uint16_t>((delta > overhead) ? (delta - overhead) : 0);
 }
 
+namespace {
+
+/* Which voice a chip local control register belongs to, or 0 for none. */
+inline uint8_t control_reg_voice(data_t local)
+{
+  switch (local & 0x1f) {
+    case 0x04: return 1;
+    case 0x0b: return 2;
+    case 0x12: return 3;
+    default:   return 0;
+  }
+}
+
+/* Which voice a chip local sustain/release register belongs to, or 0 for none.
+ * Together with the control register above, these are the only two registers a
+ * mute touches. */
+inline uint8_t sr_reg_voice(data_t local)
+{
+  switch (local & 0x1f) {
+    case 0x06: return 1;
+    case 0x0d: return 2;
+    case 0x14: return 3;
+    default:   return 0;
+  }
+}
+
+constexpr data_t kGateBit = 0x01;
+/* Sustain is the high nibble of the sustain/release register; release is the
+ * low nibble and is left exactly as the tune wrote it. */
+constexpr data_t kSustainMask = 0xf0;
+
+} /* namespace */
+
+/**
+ * @brief The value the hardware should see, which is not always what was written.
+ *
+ * Two bits' worth of change, on two registers of a muted voice:
+ *
+ *   control ($04/$0b/$12)  the gate bit is forced to 0
+ *   sustain ($06/$0d/$14)  the sustain nibble is forced to 0
+ *
+ * The gate alone is not enough. Clearing it starts the release phase, and
+ * release can be up to 24 seconds, so a voice muted mid note stays audible for
+ * as long as the tune happens to have asked for. Holding sustain at 0 as well
+ * takes the envelope's floor away, so the voice goes quiet and stays quiet
+ * however the tune re-gates it.
+ *
+ * Everything else is passed through: the release nibble, the waveform, ring
+ * modulation and sync, and every other register. So a muted voice keeps
+ * following the tune and comes back exactly where the tune has got to.
+ */
+data_t Mos6581_8580::mask_for_output(data_t reg, data_t value) const
+{
+  const uint8_t chip = static_cast<uint8_t>((reg >> 5) & 0x03);
+  const uint8_t mask = config_.voice_mute[chip];
+  if (mask == 0) return value;
+
+  const uint8_t control = control_reg_voice(reg);
+  if (control != 0) {
+    if ((mask & (1u << (control - 1))) == 0) return value;
+    return static_cast<data_t>(value & ~kGateBit);
+  }
+
+  const uint8_t sr = sr_reg_voice(reg);
+  if (sr != 0) {
+    if ((mask & (1u << (sr - 1))) == 0) return value;
+    return static_cast<data_t>(value & ~kSustainMask);
+  }
+
+  return value;
+}
+
+void Mos6581_8580::set_voice_mute(uint8_t chip, uint8_t voice, bool muted)
+{
+  if (chip < 1 || chip > 4 || voice < 1 || voice > 3) return;
+  const uint8_t bit = static_cast<uint8_t>(1u << (voice - 1));
+  uint8_t & mask = config_.voice_mute[chip - 1];
+  const bool was = (mask & bit) != 0;
+  if (was == muted) return;
+  mask = static_cast<uint8_t>(muted ? (mask | bit) : (mask & ~bit));
+
+  /* Setting the mask does not silence a note that is already sounding: the chip
+   * holds its gate until something writes to that register, and a long sustain
+   * may not be written again for seconds. So push both registers now, and on the
+   * way back too, so the voice returns without waiting for the tune.
+   *
+   * Sustain goes first, both directions, and the order is not arbitrary.
+   *
+   * Muting: dropping sustain to 0 while the voice is still gated makes the
+   * envelope fall to zero at the decay rate, and clearing the gate then releases
+   * from zero. The other order releases from whatever level the note was holding,
+   * at the release rate, which is the long tail this is meant to avoid.
+   *
+   * Unmuting: putting the tune's sustain back before the gate goes high means a
+   * restarted note has the right level from its first cycle rather than climbing
+   * to it after the fact.
+   *
+   * `regs_[]` is the save slot for the sustain nibble, and no separate copy is
+   * needed: the mirror is written before the mask is applied, so it always holds
+   * what the tune last wrote, whether that write happened before the mute or
+   * during it. */
+  static const data_t kSustainRelease[3] = { 0x06, 0x0d, 0x14 };
+  static const data_t kControl[3]        = { 0x04, 0x0b, 0x12 };
+  if (backend_ != nullptr) {
+    const data_t base = static_cast<data_t>((chip - 1) * 0x20);
+    const data_t order[2] = {
+      static_cast<data_t>(base + kSustainRelease[voice - 1]),
+      static_cast<data_t>(base + kControl[voice - 1]),
+    };
+    for (const data_t reg : order) {
+      backend_->write(reg, mask_for_output(reg, regs_[reg & 0x7f]),
+                      cycles_since_last_event());
+      ++writes_;
+    }
+  }
+}
+
 void Mos6581_8580::io_write(addr_t addr, data_t value)
 {
   uint8_t chip = 0;
@@ -172,6 +289,23 @@ void Mos6581_8580::io_write(addr_t addr, data_t value)
   if (reg == kSidNotMapped) return;
 
   regs_[reg & 0x7f] = value;
+
+  /* The FM/OPL addresses when no SID claims them, chip 5 out of translate().
+   *
+   * On a board that is the end of it: nothing can play them, so nothing is sent.
+   * Over ASID it is not, because ASID carries FM itself, in its own SysEx, and a
+   * receiver that has an OPL can play it whatever the board does. So they go to
+   * the backend as $80 for $df40 and $90 for $df50, out of the 0..$7f range any
+   * SID register lives in, and a backend that cannot use them drops them.
+   *
+   * That is why the three hardware transports guard on `reg >= 0x80`: they never
+   * used to be handed these and sending them to a board would be junk. */
+  if (chip == 5) {
+    backend_->write(reg, value, cycles_since_last_event());
+    ++writes_;
+    return;
+  }
+
   if (chip >= 1 && chip <= 4) {
     US_LOG_IF(sid_rw, "[W SID%u] $%04x $%02x:%02x [C]%5u\n", chip, addr, reg,
               value, static_cast<unsigned>(bus_.cycles() - last_event_));
@@ -180,7 +314,10 @@ void Mos6581_8580::io_write(addr_t addr, data_t value)
      * what lets it be caught up lazily and still come out exact. */
     voice3_[chip - 1].write(static_cast<reg_t>(addr & 0x1f), value,
                             bus_.cycles());
-    backend_->write(reg, value, cycles_since_last_event());
+    /* The only place a mute is applied: on the way out, after the mirror and
+     * voice three have both seen what the tune actually wrote. */
+    backend_->write(reg, mask_for_output(reg, value), cycles_since_last_event());
+    // backend_->write(reg, value, cycles_since_last_event());
     ++writes_;
   }
 }
@@ -225,6 +362,33 @@ data_t Mos6581_8580::io_read(addr_t addr)
 
 void Mos6581_8580::vic_frame_ended(void)
 {
+  /* A software SID renders only when it is told that time has passed, and it is
+   * told by the gap carried on an access. A tune that writes nothing for a
+   * while therefore produces no audio at all for that while, and a player that
+   * paces itself by "emulate until the ring has enough samples" reads that as
+   * "not enough yet" and emulates flat out. Vicious_SID_2-Greets writes once in
+   * its first fifty frames and 47 672 times by frame 150; c64_mp3 writes nothing
+   * at all for its first three hundred. Both raced.
+   *
+   * So for a software SID the outstanding time goes out here, at the frame
+   * boundary, in the same kMaxDelta chunks an access would have used. The delta
+   * base moves with it, which is safe precisely because the time has been
+   * delivered rather than dropped.
+   *
+   * Hardware keeps the old behaviour, and must: there the deltas are the clock,
+   * the board idles when it has no work, and handing it idle time to wait out
+   * would be inventing work. See cycles_since_last_event(). */
+  if (config_.render_idle) {
+    const cycle_t now = bus_.cycles();
+    uint32_t delta = static_cast<uint32_t>(now - last_event_);
+    while (delta > kMaxDelta) {
+      delta -= kMaxDelta;
+      backend_->wait(static_cast<uint16_t>(kMaxDelta));
+    }
+    if (delta > 0) backend_->wait(static_cast<uint16_t>(delta));
+    last_event_ = now;
+  }
+
   /* A flush is a transport event, not a timing one, so the delta base is left
    * alone: the first write of the next frame carries the whole gap since the
    * last write, across the frame boundary.

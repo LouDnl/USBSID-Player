@@ -12,6 +12,9 @@ on:
       - "src/**"
       - "lib/**"
       - "tests/**"
+      # The browser player is JavaScript around the same emulation, and the web
+      # job below builds and loads it. A change to either half should run it.
+      - "web/**"
       - ".github/workflows/build.yml"
   # Allows you to run this workflow manually from the Actions tab when needed
   workflow_dispatch:
@@ -90,18 +93,43 @@ jobs:
       - name: Configure and build ${{ matrix.buildname }}
         run: |
           pushd repo
-          # The suite links the embedded backend, whose firmware hooks are weak
-          # symbols. An undefined weak resolves to null on ELF; Mach-O refuses
-          # to link one and PE/COFF collides with the tests' own definitions.
-          # So the tests are built where that works and the player everywhere.
-          # See TODO 12.
-          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then TESTS=1; else TESTS=0; fi
+          # The suite is built everywhere again. It used to be Linux only,
+          # because the embedded backend reached the firmware through weak
+          # symbols: an undefined weak resolves to null on ELF, Mach-O refuses to
+          # link one at all, and PE/COFF collided with the tests' own
+          # definitions. Those are function pointers now, which behave the same
+          # on all three, so this is the check that the fix actually holds. If
+          # macOS or Windows fails to link here, that is TODO 12 coming back.
+          TESTS=1
           JOBS=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
+          # REQUIRE_AUDIO=1 turns "Software audio: OFF, lib/residfp is empty"
+          # from a STATUS line into a configure error. Without it a checkout
+          # missing the vendored reSIDfp sources builds a player with no
+          # --output=audio and no --output=wav and says so only in the log,
+          # which is what every build here did until those sources were added
+          # to the repository.
           cmake -S . -B build -DDESKTOP=1 -DEMBEDDED=0 -DWEB=0 \
-            -DBUILD_TESTS=$TESTS -DPROFILE=0 -DSTRICT=1 \
+            -DBUILD_TESTS=$TESTS -DPROFILE=0 -DSTRICT=1 -DREQUIRE_AUDIO=1 \
             -DEXECUTABLE=${{ matrix.buildname }}
           cmake --build build -j "$JOBS"
           ls -lh build/${{ matrix.buildname }}* || true
+          popd
+
+      - name: Run the test suite
+        run: |
+          pushd repo
+          # Built above and never run, which meant the pinned write stream hash
+          # was compiled and then thrown away. It is the one check that says the
+          # emulation still sends what it always sent.
+          #
+          # The name is `usbsid-test` whatever -DEXECUTABLE says: CMakeLists
+          # hardcodes it, so it does not follow matrix.buildname.
+          BIN=build/usbsid-test
+          [ -f "$BIN.exe" ] && BIN="$BIN.exe"
+          if [ ! -f "$BIN" ]; then
+            echo "::error::no test binary at $BIN"; ls -l build; exit 1
+          fi
+          "./$BIN"
           popd
 
       - name: Upload
@@ -114,3 +142,77 @@ jobs:
             repo/build/${{ matrix.buildname }}
             repo/build/${{ matrix.buildname }}.exe
           if-no-files-found: error
+
+  ### The browser player. It had no CI at all, which is how a web only change
+  ### could break the wasm build without anything noticing until a release.
+  web:
+    name: Build web
+    if: ${{ ! startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          submodules: true
+
+      - name: Set up Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 4.0.12
+
+      - name: Build the WASM player
+        run: |
+          # build-web/ is the same directory ./build.sh uses, so a runner and a
+          # developer configure the same tree the same way. It used to be
+          # temp/build_web, which read as if temp/ were part of the build: it
+          # is the project's scratch directory and is not in the repository.
+          emcmake cmake -S . -B build-web -DWEB=1 -DREQUIRE_AUDIO=1
+          cmake --build build-web -j "$(getconf _NPROCESSORS_ONLN)"
+
+      - name: Check the wasm exports the audio API
+        run: |
+          # The WEB build links with an explicit EXPORTED_FUNCTIONS list, so a
+          # function can compile and still not be reachable from JavaScript,
+          # which looks to a page exactly like a browser that cannot do audio.
+          # Loading it under node is the cheapest way to ask.
+          node --input-type=module -e "
+            import Module from './web/usbsid.mjs';
+            const M = await Module();
+            const want = ['_usp_audio_configure', '_usp_audio_take',
+                          '_usp_audio_discard', '_usp_audio_clipped',
+                          '_usp_audio_fm_writes'];
+            const missing = want.filter((f) => typeof M[f] !== 'function');
+            if (missing.length) {
+              console.error('missing from the wasm:', missing.join(', '));
+              process.exit(1);
+            }
+            console.log('the audio API is exported:', want.length, 'functions');
+          "
+
+      - name: Check every web module parses
+        run: |
+          # Nothing else compiles the JavaScript, so a syntax error in it is
+          # only found by loading a page. The worklet is a template literal
+          # inside usplayer-audio.js and is not covered by importing the module,
+          # so it is checked on its own: a stray backtick in a comment there
+          # silently ends the string, which has happened.
+          # `self` is shimmed because usplayer-worker.js is a worker script and
+          # assigns self.onmessage at the top level, which is a ReferenceError
+          # under node without it. Loading the module rather than only parsing
+          # it is worth the shim: it catches a bad import path too.
+          for f in web/usplayer-*.js web/usbsid-*.js web/asid-midi.js; do
+            node --input-type=module \
+              -e "globalThis.self = globalThis; await import('./$f')" \
+              || { echo "::error file=$f::this module does not load"; exit 1; }
+            echo "ok $f"
+          done
+          node -e "
+            const fs = require('fs'), vm = require('vm');
+            const src = fs.readFileSync('web/usplayer-audio.js', 'utf8');
+            const m = src.match(/const PROCESSOR_SRC = \`([\s\S]*?)\n\`;/);
+            if (!m) { console.error('PROCESSOR_SRC not found'); process.exit(1); }
+            new vm.Script('function registerProcessor(){};' +
+                          m[1].replace('extends AudioWorkletProcessor', 'extends Object'));
+            console.log('ok the AudioWorklet processor source parses');
+          "

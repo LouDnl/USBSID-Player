@@ -71,10 +71,14 @@ jobs:
           pushd repo
           # `nproc` is not on macOS. getconf answers everywhere the matrix runs.
           JOBS=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
+          # REQUIRE_AUDIO=1 refuses to configure when lib/residfp is missing
+          # instead of shipping a player with no --output=audio and no
+          # --output=wav and only a STATUS line to say so. Every release before
+          # the vendored sources were added to the repository was that player.
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} \
             -DDESKTOP=1 -DEMBEDDED=0 -DWEB=0 \
-            -DBUILD_TESTS=0 -DPROFILE=0 -DSTRICT=1 \
+            -DBUILD_TESTS=0 -DPROFILE=0 -DSTRICT=1 -DREQUIRE_AUDIO=1 \
             -DEXECUTABLE=${{ matrix.buildname }}
           cmake --build build -j "$JOBS"
           popd
@@ -90,6 +94,12 @@ jobs:
           mkdir -p stage
           cp "$SRC" stage/
           cp repo/README.md repo/LICENSE stage/ 2>/dev/null || true
+          # The binary has reSIDfp and miniaudio compiled into it, so their
+          # licences ship with it. reSIDfp is GPLv2, the same as this project,
+          # and its COPYING has to travel with a binary that contains it.
+          mkdir -p stage/licenses
+          cp repo/lib/residfp/COPYING stage/licenses/reSIDfp-COPYING 2>/dev/null || true
+          cp repo/lib/miniaudio/LICENSE stage/licenses/miniaudio-LICENSE 2>/dev/null || true
 
           # A MinGW build needs its runtime beside it or it will not start on a
           # machine without MSYS2. Take whatever it actually links against.
@@ -136,20 +146,74 @@ jobs:
 
       - name: Build the WASM player
         run: |
-          emcmake cmake -S . -B temp/build_web -DWEB=1
-          cmake --build temp/build_web -j "$(getconf _NPROCESSORS_ONLN)"
+          # build-web/ is the same directory ./build.sh uses. See build.yml.
+          emcmake cmake -S . -B build-web -DWEB=1 -DREQUIRE_AUDIO=1
+          cmake --build build-web -j "$(getconf _NPROCESSORS_ONLN)"
+
+      - name: Check the wasm exports the audio API
+        run: |
+          # The WEB build links with an explicit EXPORTED_FUNCTIONS list, so a
+          # function can compile and still not be reachable from JavaScript,
+          # which looks to a page exactly like a browser that cannot do audio.
+          #
+          # This replaces a step that ran temp/tools/web_smoke.mjs and hid its
+          # own failure behind `|| echo ... skipped`. temp/ is scratch and is not
+          # in the repository, so that file never existed on a runner: the check
+          # reported success for every release without ever running. A check
+          # that cannot fail is worse than no check, because it is believed.
+          node --input-type=module -e "
+            import Module from './web/usbsid.mjs';
+            const M = await Module();
+            const want = ['_usp_audio_configure', '_usp_audio_take',
+                          '_usp_audio_discard', '_usp_audio_clipped',
+                          '_usp_audio_fm_writes'];
+            const missing = want.filter((f) => typeof M[f] !== 'function');
+            if (missing.length) {
+              console.error('missing from the wasm:', missing.join(', '));
+              process.exit(1);
+            }
+            console.log('the audio API is exported:', want.length, 'functions');
+          "
+
+      - name: Install dependencies for the native suite
+        run: |
+          # The suite links usbsidcore, which carries the USB driver, so it is a
+          # DESKTOP=1 build and needs libusb. DESKTOP=0 with WEB=0 is not a
+          # configuration: CMake refuses it, there being no target to build.
+          sudo apt-get update
+          sudo apt-get install -y pkg-config cmake build-essential \
+            libusb-1.0-0 libusb-1.0-0-dev libudev1 libudev-dev
 
       - name: Check the write stream is the one the suite expects
         run: |
-          # Both wrappers are built from the same objects, so both must agree.
-          # A release that fails this is shipping a different emulation.
-          node temp/tools/web_smoke.mjs --expect d99971b0 || echo "no tune collection on the runner, stream check skipped"
+          # The pinned hash, from the committed suite rather than from a scratch
+          # tool. Both wrappers are built from the same objects as this, so a
+          # release that fails here is shipping a different emulation.
+          # build/ here, and not build-web/ above: this is a native build in the
+          # same checkout, and the two toolchains must not share a cache.
+          cmake -S . -B build -DDESKTOP=1 -DWEB=0 \
+            -DBUILD_TESTS=1 -DSTRICT=1 -DREQUIRE_AUDIO=1
+          cmake --build build --target usbsid-test \
+            -j "$(getconf _NPROCESSORS_ONLN)"
+          ./build/usbsid-test
 
       - name: Package the web bundle
         run: |
           # The build copies usbsid.js, .mjs and .wasm into web/, so the
           # directory is already the deliverable. See CMakeLists.txt.
+          # web/README.md is the bundle's own, and is not overwritten.
           cp docs/WEB.md web/ 2>/dev/null || true
+          # reSIDfp is compiled into the wasm, so its licence ships beside it.
+          mkdir -p web/licenses
+          cp lib/residfp/COPYING web/licenses/reSIDfp-COPYING
+          # The bundle must be able to make a sound on its own, and
+          # usplayer-audio.js is what does it. Named rather than trusted to the
+          # glob: it is the newest file here and the one a stale checkout would
+          # be missing.
+          for f in usbsid.js usbsid.mjs usbsid.wasm usplayer-web.js \
+                   usplayer-audio.js usplayer-adapter.js demo.html; do
+            [ -f "web/$f" ] || { echo "::error::web/$f is missing from the bundle"; exit 1; }
+          done
           ls -l web
           tar -czf usbsid-web.tar.gz web
 

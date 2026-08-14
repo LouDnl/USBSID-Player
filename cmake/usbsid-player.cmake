@@ -50,6 +50,18 @@ message(STATUS "USBSID-Player from ${USPLAYER_ROOT}")
 
 ### Everything that goes into the firmware. The desktop only files, the CLI
 ### frontend and the USB driver backend, are deliberately not here.
+### This list is the firmware's, and it is **not** the one in CMakeLists.txt.
+###
+### Two lists that have to agree about anything the firmware needs, and nothing
+### tells you when they stop agreeing except a link error on a machine with an
+### ARM toolchain. `firmware_hooks.cpp` was added to the other one and not to
+### this one, and the first anyone knew was
+###   undefined reference to `us_reset_sid_registers'
+###
+### What belongs here: everything the player needs on the device. What does not:
+### `main_cli.cpp`, `web_api.cpp`, `sid_usbsid.cpp` (libusb), `sid_web.cpp`,
+### `pacing.cpp` (the desktop pacer) and `songlengths.cpp` (no filesystem).
+### Adding a file to the core build means asking which of those two it is.
 set(USPLAYER_SOURCES
   ${USPLAYER_ROOT}/src/api/usplayer.cpp
   ${USPLAYER_ROOT}/src/core/bus.cpp
@@ -68,6 +80,7 @@ set(USPLAYER_SOURCES
   ${USPLAYER_ROOT}/src/mem/roms/rom_data.cpp
   ${USPLAYER_ROOT}/src/player/player.cpp
   ${USPLAYER_ROOT}/src/sid/mos6581_8580.cpp
+  ${USPLAYER_ROOT}/src/sid/firmware_hooks.cpp
   ${USPLAYER_ROOT}/src/sid/sid_embedded.cpp
   ${USPLAYER_ROOT}/src/sid/sid_voice3.cpp
   ${USPLAYER_ROOT}/src/vic/mos6569.cpp

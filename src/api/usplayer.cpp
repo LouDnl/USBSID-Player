@@ -47,10 +47,24 @@
 
 using namespace usbsid;
 
-/* The firmware's clock switch. Weak, so this links without it. The index is
- * into the firmware's own table: { DEFAULT, PAL, NTSC, DREAN, NTSC2 }. */
+/* The firmware's clock switch, reached through a pointer for the same reason as
+ * the bus functions in sid_embedded.h: an undefined weak symbol is an ELF idea
+ * and this builds on Mach-O and PE as well. The index is into the firmware's own
+ * table: { DEFAULT, PAL, NTSC, DREAN, NTSC2 }.
+ *
+ * Under EMBEDDED the real symbol is there and is taken by address, so the
+ * firmware needs no edit; everywhere else it starts null and the clock is simply
+ * not switched, which is what a null weak did. */
+#if defined(EMBEDDED) && EMBEDDED
+extern "C" void apply_clockrate(int n_clock, bool suspend_sids);
+#endif
+
 extern "C" {
-  void apply_clockrate(int n_clock, bool suspend_sids) __attribute__((weak));
+#if defined(EMBEDDED) && EMBEDDED
+void (*us_apply_clockrate)(int, bool) = &apply_clockrate;
+#else
+void (*us_apply_clockrate)(int, bool) = nullptr;
+#endif
 }
 
 namespace {
@@ -104,10 +118,10 @@ void apply_tune_clock(void)
    * it: it is what turns a cycle gap into microseconds to wait out. */
   g_backend.set_clock_hz(want);
 
-  if (!g_clock_follows_tune || apply_clockrate == nullptr) return;
+  if (!g_clock_follows_tune || us_apply_clockrate == nullptr) return;
 
   for (int i = 0; i < static_cast<int>(sizeof(kRates) / sizeof(kRates[0])); i++) {
-    if (kRates[i] == want) { apply_clockrate(i, true); return; }
+    if (kRates[i] == want) { us_apply_clockrate(i, true); return; }
   }
 }
 
@@ -207,7 +221,8 @@ void init_sidplayer(void)
 
   g_backend.reset_hardware();
   g_backend.set_pacing(false); /* see load_prg: setup is not playback */
-  g_prepared = g_player.init_tune(g_song);
+  /* load_sid turns a BASIC RSID into a program, since that is what it is. */
+  g_prepared = g_player.is_prg() ? g_player.init_prg() : g_player.init_tune(g_song);
   g_backend.set_pacing(true);
 }
 
@@ -345,6 +360,23 @@ void usplayer_set_sid_config(uint8_t numsids, uint8_t sids_socket_one,
   (void)numsids;
 }
 
+/**
+ * @brief The machine itself, for a frontend that needs to reach past this API.
+ *
+ * C++ only and deliberately not part of the C surface. The software audio
+ * backend has to be attached to the same machine the player is stepping, and it
+ * is a C++ object with a C++ constructor, so there is nothing to be gained by
+ * pretending otherwise. `attach_once()` first, so a caller cannot get a machine
+ * that has not been set up.
+ */
+namespace usbsid {
+Machine & usplayer_machine(void)
+{
+  attach_once();
+  return g_machine;
+}
+} /* namespace usbsid */
+
 void usplayer_set_clock_follows_tune(bool enable)
 {
   g_clock_follows_tune = enable;
@@ -354,6 +386,46 @@ bool usplayer_playing(void) { return g_player.playing(); }
 bool usplayer_paused(void) { return g_player.paused(); }
 bool usplayer_loaded(void) { return g_tune_size != 0; }
 bool usplayer_is_prg(void) { return g_is_prg; }
+
+uint32_t usplayer_irq_sources(void)
+{
+  uint32_t out = 0;
+  if (g_tune_size == 0) return 0;
+
+  /* A CIA source is armed when the interrupt mask allows it and, for the two
+   * timers, when the timer is actually started. A mask bit on its own says
+   * nothing: plenty of init routines set the mask and never start the timer,
+   * and reporting that as "this tune runs on Timer B" would be wrong. Control
+   * register bit 0 is the start bit for both timers. */
+  struct { Mos6526 & cia; uint32_t ta, tb, tod; } cias[] = {
+    { g_machine.cia1(), USP_IRQ_CIA1_TA, USP_IRQ_CIA1_TB, USP_IRQ_CIA1_TOD },
+    { g_machine.cia2(), USP_IRQ_CIA2_TA, USP_IRQ_CIA2_TB, USP_IRQ_CIA2_TOD },
+  };
+  for (auto & c : cias) {
+    const data_t imr = c.cia.imr();
+    if ((imr & 0x01) != 0 && (c.cia.peek(0x0e) & 0x01) != 0) out |= c.ta;
+    if ((imr & 0x02) != 0 && (c.cia.peek(0x0f) & 0x01) != 0) out |= c.tb;
+    if ((imr & 0x04) != 0) out |= c.tod;
+  }
+
+  /* The VIC's own interrupt enable, bit 0 being the raster compare. */
+  if ((g_machine.vic().irq_enable() & 0x01) != 0) out |= USP_IRQ_VIC_RASTER;
+  return out;
+}
+
+uint16_t usplayer_cia_latch(uint8_t cia, uint8_t timer)
+{
+  Mos6526 & c = (cia == 2) ? g_machine.cia2() : g_machine.cia1();
+  return (timer == 1) ? c.latch_b() : c.latch_a();
+}
+
+int usplayer_start_mode(void)
+{
+  if (!g_is_prg) return USP_START_DRIVER;
+  /* A BASIC RSID is loaded as a program, so the two are told apart by whether
+   * a tune was parsed at all. */
+  return g_player.tune().valid ? USP_START_BASIC : USP_START_PRG;
+}
 
 uint32_t usplayer_clock_hz(void)
 {
@@ -383,6 +455,31 @@ double usplayer_refresh_hz(void)
 uint16_t usplayer_song(void) { return g_player.song(); }
 uint16_t usplayer_songs(void) { return g_player.songs(); }
 uint32_t usplayer_frames(void) { return g_player.frames_played(); }
+
+bool usplayer_restart_song(uint16_t song)
+{
+  attach_once();
+  return g_player.restart_song(song);
+}
+
+uint32_t usplayer_playtime_ms(void)
+{
+  const double hz = usplayer_refresh_hz();
+  if (hz <= 0.0) return 0;
+  return static_cast<uint32_t>(
+    (static_cast<double>(g_player.frames_played()) * 1000.0) / hz);
+}
+
+void usplayer_set_voice_mute(uint8_t chip, uint8_t voice, bool muted)
+{
+  attach_once();
+  g_machine.sid().set_voice_mute(chip, voice, muted);
+}
+
+uint8_t usplayer_voice_mute(uint8_t chip)
+{
+  return g_machine.sid().voice_mute(chip);
+}
 uint16_t usplayer_driver_address(void) { return g_player.driver_address(); }
 const char * usplayer_tune_name(void) { return g_player.tune().name; }
 const char * usplayer_tune_author(void) { return g_player.tune().author; }
@@ -395,7 +492,7 @@ uint32_t usplayer_benchmark(uint32_t cycles)
 {
   attach_once();
 
-  if (time_us_64 == nullptr || cycles == 0) return 0;
+  if (us_time_us_64 == nullptr || cycles == 0) return 0;
 
   /* Nothing should reach the SIDs while this runs, and whatever was playing
    * should find its backend where it left it. */
@@ -403,9 +500,9 @@ uint32_t usplayer_benchmark(uint32_t cycles)
   SidBackend & previous = g_machine.sid().backend();
   g_machine.set_sid_backend(measuring);
 
-  const uint64_t started = time_us_64();
+  const uint64_t started = us_time_us_64();
   g_machine.run(cycles);
-  const uint64_t elapsed = time_us_64() - started;
+  const uint64_t elapsed = us_time_us_64() - started;
 
   g_machine.set_sid_backend(previous);
   g_machine.sid().resync();

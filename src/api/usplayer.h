@@ -46,6 +46,16 @@
   extern "C" {
 #endif
 
+/* The firmware's clock switch, as a pointer rather than a weak function. See the
+ * note in usplayer.cpp: an undefined weak symbol resolves to null only on ELF,
+ * and the desktop suite builds on Mach-O and PE too.
+ *
+ * The firmware does not need this and is unaffected: under EMBEDDED the real
+ * `apply_clockrate` is taken by address. It is declared here for the web build
+ * and the tests, which bind it to their own. Null means the clock is left alone.
+ */
+extern void (*us_apply_clockrate)(int n_clock, bool suspend_sids);
+
 /* ------------------------------------------------------------------------ *
  * The old API, unchanged
  *
@@ -93,6 +103,61 @@ extern bool stop_sidplayer(void);
 
 extern void next_subtune(void);
 extern void previous_subtune(void);
+
+/**
+ * @brief Start one song, by number, from its beginning.
+ *
+ * @param song  1 to `usplayer_songs()`. Out of range returns false and changes
+ *              nothing. It does **not** wrap, on purpose: wrapping made a caller
+ *              that had lost track of the song count look as though it had
+ *              worked, since `usplayer_restart_song(1231)` on a thirteen song
+ *              tune quietly played song 1.
+ *
+ * **For a next or previous button, call `next_subtune()` or
+ * `previous_subtune()` instead.** They wrap, they re-initialise, and they need no
+ * number from the caller, which matters because the player is the only thing that
+ * knows which song it is on and how many there are: the firmware has neither
+ * until it asks, and arithmetic done in three frontends is arithmetic one of them
+ * gets wrong.
+ *
+ * Both go through a full re-initialise. That used to be the expensive option and
+ * is not any more: about 19 000 cycles since the boot image, fourteen
+ * milliseconds on the RP2350, against a driver side jump that jams the CPU on
+ * `psid/Last_Ninja_2.sid` from song 4 onward.
+ */
+extern bool usplayer_restart_song(uint16_t song);
+
+/**
+ * @brief How long the current song has been playing, in milliseconds.
+ *
+ * Per **song**, not per session: every load and every init resets the frame
+ * counter, so a subtune change starts it again. The CLI learned that the hard
+ * way, where a session counter showed the wrong time after pressing next.
+ *
+ * Not the song's *length*, which needs HVSC's Songlengths database, five
+ * megabytes that have no business on the device.
+ */
+extern uint32_t usplayer_playtime_ms(void);
+
+/**
+ * @brief Hold one voice of one SID silent while the tune keeps playing.
+ *
+ * @param chip   1 to 4
+ * @param voice  1 to 3
+ *
+ * The voice's **gate bit** is forced to 0 on the way to the hardware and every
+ * other bit passes through, so a muted voice still follows the tune's waveform,
+ * sync and filter changes and returns in the right state. Muting clears the gate
+ * at once rather than waiting for the tune to write that register again, which
+ * for a long sustain could be seconds.
+ *
+ * The emulation is untouched: `$d41b` and `$d41c` still answer as the tune
+ * expects, so a tune polling voice three as a timer keeps working.
+ */
+extern void usplayer_set_voice_mute(uint8_t chip, uint8_t voice, bool muted);
+
+/** @brief The mute bits for one chip, bits 0 to 2. Chip counts from 1. */
+extern uint8_t usplayer_voice_mute(uint8_t chip);
 
 /** @brief Send everything to socket two instead of socket one. */
 extern void force_socktwo(void);
@@ -201,6 +266,62 @@ extern bool usplayer_loaded(void);
 /** @brief Whether what is loaded is a program rather than a tune. */
 extern bool usplayer_is_prg(void);
 
+/**
+ * @brief Which interrupt sources the tune has actually armed, as a bitmask.
+ *
+ * What drives a tune's play routine is one of the few things about it that is
+ * interesting and that the file never states: it is whatever the init routine
+ * programmed. A CIA timer is the usual answer, a raster interrupt is what a
+ * tune synchronised to the screen uses, and a TOD alarm is rare enough to be
+ * worth seeing when it happens.
+ *
+ * Read from the chips rather than guessed: a CIA source counts when its mask
+ * bit is set **and** the timer that feeds it is running, and the VIC's raster
+ * source counts when its enable bit is set. So this answers for the tune as it
+ * is playing now, and changes if a later subtune programs something else.
+ *
+ * CIA2 raises NMI rather than IRQ on a real machine; it is reported here
+ * because "what is driving this" is the question being asked, not "which pin".
+ */
+#define USP_IRQ_CIA1_TA   0x01u
+#define USP_IRQ_CIA1_TB   0x02u
+#define USP_IRQ_CIA1_TOD  0x04u
+#define USP_IRQ_CIA2_TA   0x08u
+#define USP_IRQ_CIA2_TB   0x10u
+#define USP_IRQ_CIA2_TOD  0x20u
+#define USP_IRQ_VIC_RASTER 0x40u
+extern uint32_t usplayer_irq_sources(void);
+
+/**
+ * @brief A CIA timer's latch, the value it reloads from.
+ *
+ * How fast a CIA driven tune calls its play routine: divide a frame's cycles by
+ * this, so a latch of about 19654 is once a frame on PAL and half of it is
+ * twice. `usplayer_irq_sources()` says *which* timer is driving; this says how
+ * often.
+ *
+ * The latch and not the counter, because the counter is wherever the timer has
+ * got to at the moment of asking and is a different number every time. Reading
+ * the latch has no side effects, which reading the chip's own registers does.
+ *
+ * @param cia    1 or 2, anything else is treated as 1
+ * @param timer  0 for timer A, 1 for timer B
+ */
+extern uint16_t usplayer_cia_latch(uint8_t cia, uint8_t timer);
+
+/**
+ * @brief How what is loaded was started.
+ *
+ * `USP_START_DRIVER` is the normal path for a tune: the PSID driver is
+ * installed and calls init and play. `USP_START_BASIC` is an RSID with the
+ * BASIC flag and no init address, which is a program the machine boots and RUNs
+ * with no driver at all. `USP_START_PRG` is a .prg or .p00.
+ */
+#define USP_START_DRIVER 0
+#define USP_START_BASIC  1
+#define USP_START_PRG    2
+extern int usplayer_start_mode(void);
+
 /** @brief The SID clock the loaded tune was written for, in Hz. */
 extern uint32_t usplayer_clock_hz(void);
 /** @brief Whether that clock is one of the two PAL ones. */
@@ -262,6 +383,18 @@ extern uint32_t usplayer_static_footprint(void);
  * there is no clock to time against.
  */
 extern uint32_t usplayer_benchmark(uint32_t cycles);
+
+#if defined(__cplusplus)
+} /* the C surface ends here */
+
+namespace usbsid {
+class Machine;
+/** @brief The machine the player is stepping. C++ only, see the definition. */
+Machine & usplayer_machine(void);
+}
+
+extern "C" {
+#endif
 
 #ifdef __cplusplus
   }

@@ -60,6 +60,13 @@ void Pacer::start(uint32_t cycles_per_frame, uint32_t clock_hz)
   lag_us_ = 0;
 }
 
+void Pacer::rebase(uint64_t frame)
+{
+  start_us_ = now_us();
+  base_frame_ = frame;
+  lag_us_ = 0;
+}
+
 void Pacer::wait_for_frame(uint64_t frame)
 {
   /* The deadline is measured from a fixed point, never from the previous

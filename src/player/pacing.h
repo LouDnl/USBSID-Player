@@ -47,6 +47,17 @@ class Pacer
     /** @brief Sleep until frame number n is due. */
     void wait_for_frame(uint64_t frame);
 
+    /**
+     * @brief Make frame n due now, and everything after it relative to that.
+     *
+     * For when time has deliberately been skipped rather than lost: a seek runs
+     * frames as fast as the host can and the schedule afterwards has nothing to
+     * do with the one before. `wait_for_frame` would eventually rebase itself,
+     * once the lag passed its threshold, but that is a recovery from a fault and
+     * this is not a fault.
+     */
+    void rebase(uint64_t frame);
+
     /** @brief How far behind real time playback has fallen, in microseconds. */
     int64_t lag_us(void) const { return lag_us_; }
 

@@ -92,9 +92,38 @@ class Player
     bool typing(void) const { return machine_.keyboard().busy(); }
 
     /** @brief Switch subtune in place, the way the existing player does. */
+    /**
+     * @brief The driver's "load another song" entry. **Nothing uses this.**
+     *
+     * Kept because it is the mechanism the working player uses and it is cheaper
+     * than a re-initialise, and left unused because it **jams the CPU on some
+     * tunes**: `psid/Last_Ninja_2.sid` dies at song 4 and stays dead. If it is
+     * ever wanted again, `temp/tools/dbg_subtune.cpp` walks a tune both ways and
+     * reports jams.
+     */
     void select_subtune(uint16_t song);
+
+    /** @brief The next or previous song, from its beginning, wrapping. */
     void next_subtune(void);
     void previous_subtune(void);
+
+    /**
+     * @brief Change song and start it from its beginning.
+     *
+     * `next_subtune()` and `previous_subtune()` use `select_subtune()` while a
+     * tune is playing, which writes the new song number into the driver and
+     * jumps to its "load another song" entry. That deliberately keeps the
+     * machine and the tune's own data in place, and the consequence is that
+     * most tunes carry on from wherever the music had got to rather than
+     * starting the new song at its start.
+     *
+     * @param song  1 to songs(). **Not** wrapped: out of range returns false.
+     *              Relative movement belongs to next_subtune() and
+     *              previous_subtune(), which wrap and need no number, because the
+     *              player is the only thing that knows which song it is on and
+     *              how many there are.
+     */
+    bool restart_song(uint16_t song);
 
     /** @brief Run one frame's worth of cycles. */
     void run_frame(void);

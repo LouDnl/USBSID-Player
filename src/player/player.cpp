@@ -70,8 +70,8 @@ void Player::apply_boot_image(void)
  *
  * This is expensive: 2 240 002 cycles, which on the device is 1.7 seconds of
  * silence before a tune starts. It is not skippable and it is not cheaply
- * cacheable, and TODO.md item 4 has the measurements behind both halves of
- * that. In short: tunes read the vectors, the zero page and what RAMTAS left
+ * cacheable, and both halves of that have been measured rather than assumed.
+ * In short: tunes read the vectors, the zero page and what RAMTAS left
  * under the ROMs, so a machine that has not booted plays something different;
  * and replaying the 1557 bytes of RAM the boot changes is not enough either,
  * because the raster phase it finishes on matters too, and a machine restored
@@ -155,6 +155,34 @@ bool Player::load_sid(const data_t * bytes, size_t len, uint16_t song)
 
   song_ = (song == 0) ? tune_.start_song : song;
   if (song_ < 1 || song_ > tune_.songs) song_ = tune_.start_song;
+
+  /* An RSID that is a C64 BASIC program is not a tune with an init routine, it
+   * is a program, and the machine is meant to start it the way a person would:
+   * boot, then RUN. There is nothing to call and no driver to install.
+   *
+   * Treating it as an ordinary tune is what broke
+   * `demos/Combustible_Psychic_Mushrooms.sid`: with `initAddress` zero the
+   * parser defaults init to the load address, so the player installed a driver
+   * and jumped to $0801, which for a BASIC program is the middle of a tokenised
+   * line. A player that does play it reports "Driver = $0400-$03ff", a range of
+   * no length at all, and "Init = $0000": no driver, nothing called.
+   *
+   * The program path already knows how to do this, so hand it over. */
+  if (tune_.is_basic) {
+    prg_ = PrgFile{};
+    prg_.valid = true;
+    prg_.load_addr = tune_.load_addr;
+    prg_.end_addr = tune_.load_last_addr;
+    prg_.data = tune_.data;
+    prg_.data_size = tune_.data_size;
+    /* Whether it SYSes somewhere is the program parser's question, and for the
+     * BASIC case the answer does not change what happens: RUN starts it either
+     * way. */
+    prg_.has_sys_stub = false;
+    is_prg_ = true;
+    loaded_ = true;
+    return true;
+  }
 
   loaded_ = true;
   return true;
@@ -390,6 +418,15 @@ void Player::select_subtune(uint16_t song)
   while (!machine_.cpu().instruction_done()) machine_.tick();
   machine_.cpu().pc(
     static_cast<addr_t>(reloc_addr_ + kPsidDrvNextSongOffset));
+  /* The jump above is made from wherever the tune happened to be, which is
+   * usually inside its own interrupt. Without clearing the registers the driver
+   * inherits that interrupt's stack and its interrupt-disable, and the new song
+   * carries on from the middle of the old one rather than starting: the symptom
+   * LouD reported as "n and p start into the tune and not at the start".
+   *
+   * Old player ~ src/vsidpsid.cpp next_prev_tune() calls hot_reset() here for
+   * this reason and ours did not. */
+  machine_.cpu().hot_reset();
 }
 
 void Player::next_subtune(void)
@@ -406,7 +443,31 @@ void Player::next_subtune(void)
   if (tune_.songs <= 1) return;
   uint16_t next = static_cast<uint16_t>(song_ + 1);
   if (next > tune_.songs) next = 1;
-  if (playing_) select_subtune(next); else init_tune(next);
+  /* Re-initialise, always. This used to jump into the driver's "load another
+   * song" entry while playing, which is cheaper and jams the CPU on some tunes:
+   * `psid/Last_Ninja_2.sid` dies at song 4 and stays dead through every later
+   * switch and the wrap back to song 1. Seen on the device as well as on the
+   * desktop.
+   *
+   * Doing the whole job here, rather than offering a caller a song number to
+   * pass back in, is the point: **the player is the only thing that knows which
+   * song it is on and how many there are.** The firmware has neither, so a call
+   * taking a number cannot be used correctly by it, and `select_subtune()`'s
+   * wrap arithmetic does not belong in three frontends. */
+  init_tune(next);
+}
+
+bool Player::restart_song(uint16_t song)
+{
+  if (is_prg_ || !tune_.valid) return false;
+  /* Strict, and it used to wrap. Wrapping here made a caller that had lost track
+   * of the song count look as though it had worked: `restart_song(1231)` on a
+   * thirteen song tune quietly played song 1. A caller naming an absolute song
+   * either knows the number or has a bug, and should hear about it. Relative
+   * movement, with the wrap, is what next_subtune() and previous_subtune() are
+   * for, and they need no number from anyone. */
+  if (song < 1 || song > tune_.songs) return false;
+  return init_tune(song);
 }
 
 void Player::previous_subtune(void)
@@ -415,7 +476,7 @@ void Player::previous_subtune(void)
   if (!tune_.valid) return;
   if (tune_.songs <= 1) return;
   uint16_t prev = (song_ <= 1) ? tune_.songs : static_cast<uint16_t>(song_ - 1);
-  if (playing_) select_subtune(prev); else init_tune(prev);
+  init_tune(prev);   /* see next_subtune() for why this is not select_subtune() */
 }
 
 bool Player::type(const char * text)

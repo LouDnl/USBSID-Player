@@ -142,8 +142,23 @@ void UsbSidBackend::flush(void)
 void UsbSidBackend::reset(void)
 {
   if (!open_) return;
+  /* Throw the queue away before resetting, not after.
+   *
+   * The two calls below go out through USBSID_SingleWrite(), which bypasses
+   * the driver's ring, so they overtake whatever is still queued in it. Without
+   * this the board is reset and *then* plays out the backlog that was already
+   * on its way: up to ring_size / 4 writes, which is 2048 at the default size,
+   * each still carrying its own cycle delay. A stop or a subtune change keeps
+   * making noise for as long as that takes to drain, which at ordinary write
+   * rates is tens of seconds.
+   *
+   * Dropping it is right rather than merely convenient: those writes belong to
+   * a tune that is being abandoned, and there is nothing to be gained by
+   * delivering them late. */
+  device_->USBSID_ResetRingBuffer();
   device_->USBSID_ResetAllRegisters();
   device_->USBSID_Reset();
+  device_->USBSID_UnMute();
 }
 
 void UsbSidBackend::mute(bool muted)

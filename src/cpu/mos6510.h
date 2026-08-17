@@ -343,10 +343,6 @@ class Mos6510 final : public ClockedDevice
     bool nmi_hijack_ = false; /* an NMI stole the vector of a BRK or IRQ */
     bool jammed_ = false;
 
-    /* BA / RDY. The VIC pulls BA low, the 6510 keeps going for three more
-     * cycles and then only stalls on read cycles. The line itself is read
-     * from the bus, only the grace counter is CPU state. */
-    uint8_t ba_credit_ = 3;
 };
 
 } /* namespace usbsid */

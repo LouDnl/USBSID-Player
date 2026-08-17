@@ -314,7 +314,6 @@ void Mos6510::reset(void)
   jammed_ = false;
   irq_sampled_ = nmi_sampled_ = take_interrupt_ = false;
   nmi_hijack_ = false;
-  ba_credit_ = 3;
 
   /* Vector fetch without spending cycles. The cycle exact variant is
    * trigger_reset(), which a real machine reset uses. */
@@ -351,13 +350,25 @@ bool Mos6510::state_writes(State s)
 
 bool Mos6510::ba_allows_cycle(void)
 {
-  /* BA is read off the bus, and the three cycle grace restarts every time
-   * the VIC lets go of the bus again. */
-  const bool ba = bus_.ba();
-  if (US_LIKELY(ba)) { ba_credit_ = 3; return true; }
-  /* A 6510 keeps running for three cycles after BA drops */
-  if (ba_credit_ > 0) { --ba_credit_; return true; }
-  /* After that only write cycles get through, reads are held off */
+  /* A read waits for the bus, a write does not.
+   *
+   * The three cycles a 6510 famously keeps running after BA drops are **not**
+   * counted here, because the VIC has already counted them: it pulls BA low
+   * three cycles before it needs the bus, at cycle 12 of a bad line for
+   * fetches that start at cycle 15, and the sprite windows in
+   * `rebuild_sprite_ba()` start three cycles early for the same reason. Giving
+   * the CPU a second three cycle grace on top of that stole 40 cycles from it
+   * where the hardware steals 43 minus wherever the read happened to land.
+   *
+   * That is not a rounding error, it is the difference between a demo playing
+   * and hanging: `HBFS.sid` spins on
+   *
+   *     LAX $dc04 / SBX #$33 / STA $ff / CPX $dc04 / BNE
+   *
+   * which is nine cycles between two reads of the same timer, and leaves only
+   * when a bad line has put exactly $33 more between them. With the extra
+   * grace the loop sees 9 and 49 and nothing else, for ever. See TODO 33. */
+  if (US_LIKELY(bus_.ba())) return true;
   return state_writes(state_);
 }
 

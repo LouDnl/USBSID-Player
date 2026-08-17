@@ -131,6 +131,22 @@ void Player::setup_for_driver(bool is_pal)
   mmu.write(0xdd07, 0xff);
 
   mmu.write(0x0001, 0x37);  /* BASIC, IO and KERNAL all in */
+
+  /* Cursor blink off.
+   *
+   * The KERNAL's interrupt inverts the character under the cursor, straight
+   * into screen memory, and a tune that leaves the KERNAL interrupt chained in
+   * has it running for as long as it plays. With the driver relocated into the
+   * screen, which is where a tune's own header often puts it, the KERNAL
+   * rewrites the player underneath it: in `Ghostbusters.sid` the cursor sits on
+   * $04f0, the `$4c` of the driver's `jmp idle` became a `$cc`, and the idle
+   * loop fell through into `jmp (initvec)` and started the tune again.
+   *
+   * A real machine is in this state too whenever a program is running: the
+   * cursor only blinks while the editor is waiting for a line, and $cc is
+   * non-zero the rest of the time. Booting to the READY prompt leaves it at
+   * zero, so it has to be put back. */
+  mmu.write(0x00cc, 0x01);
 }
 
 bool Player::load_sid(const data_t * bytes, size_t len, uint16_t song)

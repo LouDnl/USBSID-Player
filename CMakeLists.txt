@@ -318,20 +318,19 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
   ###
   ### Two knobs, both passed on the cmake line, and nothing about the workspace
   ### layout is assumed here. Neither has to be set: with both empty this builds
-  ### against `lib/driver`, the submodule, which is what a clone gets.
+  ### against `lib/driver`. Locally that is a symlink to the driver working copy;
+  ### in CI the workflows check the driver out into it.
   ###
-  ###   US_DRIVER_SIBLING  a local driver working copy to prefer over the
-  ###                      submodule, so a driver change is picked up by the next
-  ###                      build instead of having to be committed and pulled into
-  ###                      lib/driver first. The two repositories are developed
-  ###                      together, which is the whole reason this exists.
-  ###                      **Ignored in GitHub Actions**, see below.
+  ###   US_DRIVER_SIBLING  a driver working copy to use instead of
+  ###                      lib/driver. Rarely needed now that lib/driver is not a
+  ###                      pinned submodule, and kept for building against a
+  ###                      second checkout. **Ignored in GitHub Actions**.
   ###   US_DRIVER_DIR      build against exactly this directory and do not work
   ###                      anything out. Wins over everything, CI included.
   ###
   ### In GitHub Actions `US_DRIVER_SIBLING` is ignored even if it is passed: a
-  ### runner has no local checkout, and a release has to be built from the
-  ### revision the submodule pins rather than from whatever is on a workstation.
+  ### runner has no local checkout, and the workflows put the driver in
+  ### lib/driver themselves rather than taking a path from a workstation.
   ### `GITHUB_ACTIONS` is set to true by every Actions runner, so that is the
   ### signal rather than something the workflows have to remember to pass.
   ### STRING and not PATH on purpose. CMake's PATH cache type rewrites a relative
@@ -343,14 +342,14 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
   set(US_DRIVER_DIR "" CACHE STRING
     "Directory holding USBSID.cpp. Overrides everything, including in CI. Empty to work it out")
   set(US_DRIVER_SIBLING "" CACHE STRING
-    "Local driver working copy to prefer over lib/driver. Ignored in GitHub Actions. Empty to use lib/driver")
+    "Driver working copy to use instead of lib/driver. Ignored in GitHub Actions. Empty to use lib/driver")
 
   if(NOT US_DRIVER_DIR STREQUAL "")
     get_filename_component(US_DRIVER_DIR
       ${US_DRIVER_DIR} ABSOLUTE BASE_DIR ${CMAKE_CURRENT_LIST_DIR})
     set(US_DRIVER_WHY "asked for with -DUS_DRIVER_DIR")
   elseif(DEFINED ENV{GITHUB_ACTIONS})
-    set(US_DRIVER_WHY "GitHub Actions, so the pinned submodule")
+    set(US_DRIVER_WHY "GitHub Actions, so lib/driver as the workflow checked it out")
   elseif(NOT US_DRIVER_SIBLING STREQUAL "")
     ### Relative is allowed and is resolved against this file, so
     ### `-DUS_DRIVER_SIBLING=../driver-repo/src` means what it looks like from the
@@ -362,7 +361,7 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
       set(US_DRIVER_DIR ${US_DRIVER_SIBLING_ABS})
       set(US_DRIVER_WHY "US_DRIVER_SIBLING")
     else()
-      ### Named outright and not there. Falling through to the submodule would
+      ### Named outright and not there. Falling through to lib/driver would
       ### build the wrong driver and say nothing, and a typo in a make.sh is
       ### exactly the case this has to catch.
       message(FATAL_ERROR
@@ -374,17 +373,16 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
         "  US_DRIVER_SIBLING empty to build against lib/driver.")
     endif()
   else()
-    set(US_DRIVER_WHY "no US_DRIVER_SIBLING, so the submodule")
+    set(US_DRIVER_WHY "no US_DRIVER_SIBLING, so lib/driver")
   endif()
 
   ### Falling back to lib/driver, wherever its sources actually sit.
   ###
-  ### It is a submodule of USBSID-Pico-driver, and that repository keeps its
-  ### sources in src/ with java/, webusb/ and the rest beside it. So a real
-  ### submodule checkout, which is what CI does, gives lib/driver/src/. A
-  ### working copy that has the four files dropped in flat, which is what this
-  ### tree had and why it built here and not on a runner, gives lib/driver/.
-  ### Take whichever is actually present rather than assuming.
+  ### USBSID-Pico-driver keeps its sources in src/ with java/, webusb/ and the
+  ### rest beside it, so a checkout of it gives lib/driver/src/, which is what
+  ### the workflows produce. A symlink pointed straight at that src/, which is
+  ### the local arrangement, gives lib/driver/. Take whichever is present
+  ### rather than assuming.
   if(US_DRIVER_DIR STREQUAL "")
     set(US_DRIVER_ROOT ${CMAKE_CURRENT_LIST_DIR}/lib/driver)
     if(EXISTS ${US_DRIVER_ROOT}/src/USBSID.cpp)
@@ -402,8 +400,8 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
       "    -DUS_DRIVER_SIBLING, if given and not in GitHub Actions\n"
       "    ${CMAKE_CURRENT_LIST_DIR}/lib/driver/src\n"
       "    ${CMAKE_CURRENT_LIST_DIR}/lib/driver\n"
-      "  For the submodule, run\n"
-      "    git submodule update --init --recursive")
+      "  Locally, lib/driver is a symlink to the driver working copy:\n"
+      "    ln -s ../../driver-repo/src lib/driver")
   endif()
   message(STATUS "USBSID driver sources: ${US_DRIVER_DIR} (${US_DRIVER_WHY})")
 

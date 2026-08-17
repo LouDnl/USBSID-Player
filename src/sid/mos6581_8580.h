@@ -101,6 +101,17 @@ struct SidConfig {
    */
   uint8_t voice_mute[4] = { 0, 0, 0, 0 };
 
+  /* Whole chips held silent, bit 0 for chip one.
+   *
+   * Not the same mechanism as voice_mute above, and deliberately so. A voice is
+   * masked on the way out because the tune must carry on writing it: the gate and
+   * the sustain are what get masked and everything else passes. A muted chip has
+   * its writes **dropped** instead, which is what the board's own mute does and
+   * what makes it useful for an FM/OPL chip or a second SID a tune is fighting
+   * over. `regs_[]` and voice three still see everything, so $d41b and $d41c keep
+   * answering and a tune polling them behaves the same muted or not. */
+  uint8_t chip_mute = 0;
+
   /* USBSID-Pico socket layout, mirrored from the device config */
   uint8_t sids_socket_one = 1;
   uint8_t sids_socket_two = 0;
@@ -200,6 +211,18 @@ class Mos6581_8580 final : public IoDevice, public VicFrameObserver
      */
     void set_voice_mute(uint8_t chip, uint8_t voice, bool muted);
 
+    /**
+     * @brief Hold a whole chip silent, dropping its writes.
+     *
+     * Chip counts from 1. Silences the chip at once rather than waiting for the
+     * tune, and on the way back replays what the tune wrote while it was muted so
+     * it resumes in the right state instead of wherever it was frozen.
+     */
+    void set_chip_mute(uint8_t chip, bool muted);
+
+    /** @brief The muted chips, bit 0 for chip one. */
+    uint8_t chip_mute(void) const { return config_.chip_mute; }
+
     /** @brief The mute bits for one chip, bits 0 to 2. Chip counts from 1. */
     uint8_t voice_mute(uint8_t chip) const
     {
@@ -226,6 +249,25 @@ class Mos6581_8580 final : public IoDevice, public VicFrameObserver
     SidVoice3 voice3_[4];
 
     cycle_t last_event_ = 0;
+
+    /* Chips whose mute state has changed and whose registers still need pushing,
+     * bit 0 for chip one.
+     *
+     * set_chip_mute() is called from the configuration handler, which on the
+     * device runs on core 0 while the emulation runs on core 1. It must not touch
+     * the backend or the cycle accounting: cycles_since_last_event() reads
+     * bus_.cycles() and writes last_event_, both owned by the emulating core, and
+     * a delta computed across the two comes out enormous, at which point its
+     * `while (delta > kMaxDelta)` loop emits a flood of wait() calls and the board
+     * sits out most of a minute. That was heard as the player freezing on unmute
+     * and then recovering.
+     *
+     * So the caller only sets a bit here, and the work happens on the emulating
+     * core in io_write(). Any SID write services it, whichever chip it is for, and
+     * a tune writes constantly, so nothing waits long enough to notice. */
+    volatile uint8_t chip_mute_pending_ = 0;
+
+    void apply_chip_mute_pending(void);
     uint32_t writes_ = 0;
     uint32_t reads_ = 0;
 };

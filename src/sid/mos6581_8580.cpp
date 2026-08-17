@@ -281,12 +281,102 @@ void Mos6581_8580::set_voice_mute(uint8_t chip, uint8_t voice, bool muted)
   }
 }
 
+/**
+ * @brief Hold a whole chip silent, dropping its writes.
+ *
+ * Dropping writes freezes a chip, it does not quiet it: whatever it was last told
+ * to play keeps sounding. So the volume goes to zero first and the drop starts
+ * after, and on the way back the chip is written out of `regs_[]` before the mask
+ * is lifted, so it resumes as the tune believes it to be rather than wherever it
+ * happened to be frozen.
+ *
+ * The volume register carries the filter mode in its high nibble, so only the low
+ * nibble is cleared: restoring it later then puts back a filter setting the tune
+ * may have changed while muted.
+ */
+void Mos6581_8580::set_chip_mute(uint8_t chip, bool muted)
+{
+  if (chip < 1 || chip > 4) return;
+  const uint8_t bit = static_cast<uint8_t>(1u << (chip - 1));
+  const bool was = (config_.chip_mute & bit) != 0;
+  if (was == muted) return;
+
+  /* The mask, and a note that this chip's registers need attention. Nothing else:
+   * see chip_mute_pending_ for why this must not write to the backend. */
+  config_.chip_mute = static_cast<uint8_t>(muted ? (config_.chip_mute | bit)
+                                                 : (config_.chip_mute & ~bit));
+  chip_mute_pending_ = static_cast<uint8_t>(chip_mute_pending_ | bit);
+}
+
+/**
+ * @brief Do what set_chip_mute() could not, on the core that owns the backend.
+ *
+ * Muting: silence the chip. Dropping its writes only freezes it, so whatever it
+ * was last told to play would carry on sounding. Only the low nibble of $18 goes,
+ * because the high nibble is the filter mode.
+ *
+ * Unmuting: put back everything the tune wrote while it was silent, in register
+ * order with the volume last, so the chip resumes as the tune believes it to be
+ * rather than wherever it froze. Voice mutes still apply on the way out.
+ */
+void Mos6581_8580::apply_chip_mute_pending(void)
+{
+  const uint8_t pending = chip_mute_pending_;
+  chip_mute_pending_ = 0;
+  if (backend_ == nullptr) return;
+
+  /* Start counting from now, not from the last write that reached the backend.
+   *
+   * A muted chip's writes are dropped before the cycle accounting, so on a tune
+   * whose only SID is muted nothing advances `last_event_` for as long as the mute
+   * lasts. The first write after it would then carry a delta covering the whole
+   * silent stretch, and cycles_since_last_event() turns a delta that large into a
+   * run of `wait()` calls: the board would sit out the mute a second time. Heard
+   * as the play time freezing for exactly as long as the chip had been muted, then
+   * carrying on.
+   *
+   * The board has already lived through that silence in real time, so there is
+   * nothing to wait out. Anywhere another chip kept writing this is a no-op,
+   * because `last_event_` is already now. */
+  last_event_ = bus_.cycles();
+
+  for (uint8_t chip = 1; chip <= 4; ++chip) {
+    const uint8_t bit = static_cast<uint8_t>(1u << (chip - 1));
+    if ((pending & bit) == 0) continue;
+
+    const data_t base = static_cast<data_t>((chip - 1) * 0x20);
+    const data_t vol = static_cast<data_t>(base + 0x18);
+
+    if ((config_.chip_mute & bit) != 0) {
+      backend_->write(vol, static_cast<data_t>(regs_[vol & 0x7f] & 0xf0),
+                      cycles_since_last_event());
+      ++writes_;
+      continue;
+    }
+
+    for (data_t r = 0; r <= 0x17; ++r) {
+      const data_t reg = static_cast<data_t>(base + r);
+      backend_->write(reg, mask_for_output(reg, regs_[reg & 0x7f]),
+                      cycles_since_last_event());
+      ++writes_;
+    }
+    backend_->write(vol, regs_[vol & 0x7f], cycles_since_last_event());
+    ++writes_;
+  }
+}
+
 void Mos6581_8580::io_write(addr_t addr, data_t value)
 {
   uint8_t chip = 0;
   const data_t reg = translate(addr, chip);
 
   if (reg == kSidNotMapped) return;
+
+  /* A mute changed since the last write. Serviced here because this runs on the
+   * core that owns the backend and the cycle accounting, and the caller does not.
+   * Before the write below, so a chip coming back is already itself when the
+   * tune's next write lands on it. */
+  if (chip_mute_pending_ != 0) apply_chip_mute_pending();
 
   regs_[reg & 0x7f] = value;
 
@@ -314,7 +404,16 @@ void Mos6581_8580::io_write(addr_t addr, data_t value)
      * what lets it be caught up lazily and still come out exact. */
     voice3_[chip - 1].write(static_cast<reg_t>(addr & 0x1f), value,
                             bus_.cycles());
-    /* The only place a mute is applied: on the way out, after the mirror and
+    /* A muted chip's writes are dropped here, and only here.
+     *
+     * After the mirror and voice three, never before: `regs_[]` has to hold what
+     * the tune wrote so unmuting can put the chip back the way the tune believes
+     * it is, and voice three has to keep running or $d41b and $d41c would answer
+     * differently muted than not, which changes what a tune *does* rather than
+     * what it sounds like. Tunes poll those as a timer and as a random source. */
+    if ((config_.chip_mute & (1u << (chip - 1))) != 0) return;
+
+    /* The only place a voice mute is applied: on the way out, after the mirror and
      * voice three have both seen what the tune actually wrote. */
     backend_->write(reg, mask_for_output(reg, value), cycles_since_last_event());
     // backend_->write(reg, value, cycles_since_last_event());

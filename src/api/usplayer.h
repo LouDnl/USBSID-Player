@@ -159,6 +159,28 @@ extern void usplayer_set_voice_mute(uint8_t chip, uint8_t voice, bool muted);
 /** @brief The mute bits for one chip, bits 0 to 2. Chip counts from 1. */
 extern uint8_t usplayer_voice_mute(uint8_t chip);
 
+/**
+ * @brief Hold a whole chip silent, dropping its writes.
+ *
+ * @param chip  1 to 4
+ * @param muted true to silence
+ *
+ * Not the same as muting its three voices. A voice mute masks the gate and the
+ * sustain on the way out and lets everything else through, which is right for a
+ * voice a tune keeps playing. A chip mute drops the chip's writes entirely, so it
+ * also silences anything going through the volume register: a tune playing samples
+ * on $d418 carries on regardless of any voice mute, which is what made this
+ * necessary.
+ *
+ * Unlike the board's own mute this is per chip, so one SID can be silenced while
+ * the others play. `$d41b` and `$d41c` keep answering either way, because the
+ * mirror and voice three see every write before the drop.
+ */
+extern void usplayer_set_chip_mute(uint8_t chip, bool muted);
+
+/** @brief The muted chips, bit 0 for chip one. */
+extern uint8_t usplayer_chip_mute(void);
+
 /** @brief Send everything to socket two instead of socket one. */
 extern void force_socktwo(void);
 

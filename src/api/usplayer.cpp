@@ -480,6 +480,17 @@ uint8_t usplayer_voice_mute(uint8_t chip)
 {
   return g_machine.sid().voice_mute(chip);
 }
+
+void usplayer_set_chip_mute(uint8_t chip, bool muted)
+{
+  attach_once();
+  g_machine.sid().set_chip_mute(chip, muted);
+}
+
+uint8_t usplayer_chip_mute(void)
+{
+  return g_machine.sid().chip_mute();
+}
 uint16_t usplayer_driver_address(void) { return g_player.driver_address(); }
 const char * usplayer_tune_name(void) { return g_player.tune().name; }
 const char * usplayer_tune_author(void) { return g_player.tune().author; }

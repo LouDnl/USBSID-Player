@@ -183,6 +183,14 @@ int test_cycle_deltas(void)
   c64.machine.mmu().write(0xdc0d, 0x7f);
   (void)c64.machine.mmu().read(0xdc0d);
 
+  /* Blanking only takes effect from the next frame: DEN is sampled on raster
+   * $30, and a frame that has already sampled it goes on having bad lines to
+   * the bottom of the screen. So step over that sampling point with the screen
+   * already off, or a bad line lands in the middle of the loop below and the
+   * gap it measures is the stall rather than the instructions. */
+  while (c64.machine.vic().raster() != 0) c64.machine.tick();
+  while (c64.machine.vic().raster() < 0x40) c64.machine.tick();
+
   const data_t program[] = {
     0xa9, 0x11,             /* lda #$11        */
     0x8d, 0x00, 0xd4,       /* sta $d400       */
@@ -211,10 +219,19 @@ int test_cycle_deltas(void)
 
   US_CHECK(trace.count() >= 6, "the trace recorded some writes");
 
-  /* the first delta is measured from whenever the last event was, so start
-   * looking from the second write onwards */
+  /* The first delta is measured from whenever the last event was, so start
+   * looking from the second write onwards, and start on a write to register 0:
+   * where in the loop the trace opens depends on where the CPU was when it was
+   * pointed at $0300, and pairing the halves the wrong way round compares the
+   * gaps to each other's expectations. */
+  size_t first = 2;
+  while (first + 1 < trace.count() &&
+         !(trace.at(first).kind == 'w' && trace.at(first).reg == 0x00)) {
+    ++first;
+  }
+
   unsigned checked = 0;
-  for (size_t i = 2; i + 1 < trace.count() && checked < 6; i += 2) {
+  for (size_t i = first; i + 1 < trace.count() && checked < 6; i += 2) {
     const TraceSidBackend::Event & a = trace.at(i);
     const TraceSidBackend::Event & b = trace.at(i + 1);
     if (a.kind != 'w' || b.kind != 'w') continue;

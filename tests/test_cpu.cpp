@@ -470,19 +470,36 @@ int test_ba_stall(void)
   m.code(0x1000, { 0xa9, 0x01, 0xa9, 0x02, 0xa9, 0x03, 0xa9, 0x04,
                    0xa9, 0x05, 0xa9, 0x06 });
 
-  /* BA low: the CPU keeps going for three cycles, then stalls on reads */
+  /* BA low: a read cycle waits, and it waits from the first cycle.
+   *
+   * No grace period here. The three cycles a 6510 keeps running after BA drops
+   * are the VIC's doing: it pulls BA low three cycles before it takes the bus,
+   * so by the time the fetches start the CPU has had them. Counting them again
+   * in the CPU steals 40 cycles from it where the hardware steals 43, which is
+   * three cycles a bad line, every bad line. See TODO 33 and
+   * `Mos6510::ba_allows_cycle()`. */
   m.bus.set_ba(false);
-  const addr_t pc_before = m.cpu.pc();
-  m.bus.run(3);
-  US_CHECK(m.cpu.pc() != pc_before, "cpu runs during the three cycle credit");
-
   const addr_t pc_stalled = m.cpu.pc();
   m.bus.run(20);
-  US_CHECK_EQ_U(m.cpu.pc(), pc_stalled, "cpu is held off while BA is low");
+  US_CHECK_EQ_U(m.cpu.pc(), pc_stalled, "a read waits from the first BA low cycle");
 
   m.bus.set_ba(true);
   m.bus.run(2);
   US_CHECK(m.cpu.pc() != pc_stalled, "cpu resumes when BA returns");
+
+  /* A write goes through: the CPU drives the bus for those, whatever the VIC
+   * wants. BA has to drop once the store's own read cycles are behind it,
+   * because those wait like any other read; it is the write cycle itself that
+   * is allowed through. */
+  {
+    TestMachine w;
+    w.ram.write(0x0040, 0x00);
+    w.code(0x1000, { 0xa9, 0x77, 0x85, 0x40 });  /* LDA #$77 / STA $40 */
+    w.bus.run(4);            /* LDA, then the store's opcode and operand */
+    w.bus.set_ba(false);
+    w.bus.run(1);            /* the write cycle */
+    US_CHECK_EQ_U(w.ram.read(0x0040), 0x77u, "a write still reaches memory");
+  }
 
   return 0;
 }

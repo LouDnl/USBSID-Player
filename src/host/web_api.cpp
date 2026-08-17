@@ -326,6 +326,29 @@ int usp_voice_mute(int chip)
 }
 
 /**
+ * @brief Hold a whole chip silent, dropping its writes.
+ *
+ * @param chip  1 to 4
+ * @param muted non zero to silence
+ *
+ * Not three voice mutes. A voice mute masks the gate and the sustain on the way
+ * out and lets every other write through, which is right for a voice the tune
+ * keeps playing. A chip mute drops the chip's writes, and that is the only one of
+ * the two that reaches $18: a tune playing samples through the volume register
+ * carries on regardless of any number of voice mutes.
+ */
+void usp_set_chip_mute(int chip, int muted)
+{
+  usplayer_set_chip_mute(static_cast<uint8_t>(chip), muted != 0);
+}
+
+/** @brief The muted chips, bit 0 for chip one. */
+int usp_chip_mute(void)
+{
+  return usplayer_chip_mute();
+}
+
+/**
  * @brief The last value written to a SID register, from the emulation's mirror.
  *
  * A page showing a register grid, a piano or an oscilloscope needs to know what

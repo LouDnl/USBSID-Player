@@ -473,6 +473,8 @@ if(${WEB} EQUAL 1)
     _usp_audio_fm_writes
     _usp_set_voice_mute
     _usp_voice_mute
+    _usp_set_chip_mute
+    _usp_chip_mute
     _usp_playtime_ms
     _usp_song_md5
     _usp_songlength_ms

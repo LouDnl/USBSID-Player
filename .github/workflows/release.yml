@@ -147,6 +147,20 @@ jobs:
         with:
           ref: ${{ github.ref }}
 
+      # The WASM build needs no driver: CMake only looks for one when
+      # DESKTOP=1 AND WEB=0. But this job also builds the test suite natively,
+      # further down, and that links usbsidcore which carries the driver. So the
+      # driver is needed here too, and without it the whole release fails at that
+      # step with "No USBSID driver found" long after the wasm has built fine.
+      #
+      # No `path:` on the checkout above, so this repository is at the workspace
+      # root and lib/driver is where CMake looks.
+      - name: Checkout USBSID driver
+        uses: actions/checkout@v4
+        with:
+          repository: LouDnl/USBSID-Pico-driver
+          path: lib/driver
+
       - name: Set up Emscripten
         uses: mymindstorm/setup-emsdk@v14
         with:

@@ -60,6 +60,56 @@ void on_signal(int)
   g_stop = 1;
 }
 
+/**
+ * @brief Read a `--mute`/`--solo` list into a bit per voice per chip.
+ *
+ * `1:3,2` is voice three of the first chip and all of the second. A chip on its
+ * own means its three voices, which is the common case and saves writing them
+ * out. Chips and voices count from one, the way the sockets and the datasheet
+ * do, because the alternative is a flag that means something different from
+ * every other place these are named.
+ *
+ * @param spec  the argument as given
+ * @param mask  out, four bytes, bits 0 to 2 per chip
+ * @returns true if the whole string parsed, false on the first thing that did
+ *          not, with mask left as far as it got
+ */
+bool parse_voice_spec(const char * spec, uint8_t mask[4])
+{
+  mask[0] = mask[1] = mask[2] = mask[3] = 0;
+  if (spec == nullptr || *spec == '\0') return false;
+  const char * p = spec;
+  while (*p != '\0') {
+    if (*p < '1' || *p > '4') return false;
+    const int chip = *p++ - '0';
+    int voices = 0x7;
+    if (*p == ':') {
+      p++;
+      if (*p < '1' || *p > '3') return false;
+      voices = 1 << (*p++ - '1');
+    }
+    mask[chip - 1] = static_cast<uint8_t>(mask[chip - 1] | voices);
+    if (*p == ',') { p++; continue; }
+    if (*p != '\0') return false;
+  }
+  return true;
+}
+
+/** @brief Print what was silenced, so a WAV file's provenance is on screen. */
+void print_voice_mask(const char * label, const uint8_t mask[4])
+{
+  printf("  %-9s: ", label);
+  bool first = true;
+  for (int c = 0; c < 4; c++) {
+    for (int v = 0; v < 3; v++) {
+      if ((mask[c] & (1 << v)) == 0) continue;
+      printf("%schip %d voice %d", first ? "" : ", ", c + 1, v + 1);
+      first = false;
+    }
+  }
+  printf("%s\n", first ? "nothing" : "");
+}
+
 void usage(const char * argv0)
 {
   printf(
@@ -80,7 +130,14 @@ void usage(const char * argv0)
     "      --rate N      sample rate for audio and wav (default 44100). A device\n"
     "                    may impose its own, which is then what is used\n"
     "      --quality Q   fast (linear) or good (sinc, default)\n"
-    "  -T, --trace FILE  write every SID register event to FILE\n"
+    "  -T, --trace FILE  write every SID register event to FILE. Records what\n"
+    "                    is played, so it works with a board and with --wav;\n"
+    "                    add -n for a silent run that only records\n"
+    "      --mute SPEC   silence voices. SPEC is a comma separated list of\n"
+    "                    CHIP:VOICE or CHIP for all three, chips and voices\n"
+    "                    counting from 1, for example 1:3 or 2 or 1:1,1:2\n"
+    "      --solo SPEC   the other way round: silence everything except SPEC.\n"
+    "                    --solo 1:2 --wav v2.wav records voice two on its own\n"
     "      --pal         force PAL timing\n"
     "      --ntsc        force NTSC timing\n"
     "\n"
@@ -243,6 +300,8 @@ int main(int argc, char ** argv)
 {
   const char * path = nullptr;
   const char * trace_path = nullptr;
+  const char * mute_spec = nullptr;
+  const char * solo_spec = nullptr;
   uint16_t song = 0;
   int seconds = 0;
   bool info_only = false;
@@ -277,6 +336,8 @@ int main(int argc, char ** argv)
       seconds = atoi(argv[++i]);
     else if ((!strcmp(a, "-T") || !strcmp(a, "--trace")) && i + 1 < argc)
       trace_path = argv[++i];
+    else if (!strcmp(a, "--mute") && i + 1 < argc) mute_spec = argv[++i];
+    else if (!strcmp(a, "--solo") && i + 1 < argc) solo_spec = argv[++i];
     else if (!strcmp(a, "-rr")) real_reads = true;
     else if (!strcmp(a, "-f")) force_socket_two = true;
     else if (!strcmp(a, "-fa") && i + 1 < argc) {
@@ -389,14 +450,23 @@ int main(int argc, char ** argv)
   WavWriter wav;
   std::vector<int16_t> soft_buf;
   bool soft_active = false;
+  /* Kept so the synthesis can be reconfigured once the tune's own video
+   * standard is known. See the reconfigure after the load. */
+  unsigned soft_out_rate = 0;
+  uint8_t soft_chips = 0;
+  SoftSidModel soft_model = SoftSidModel::Mos6581;
+  uint32_t soft_clock = 0;
 
+  /* The trace is built here and chained in below, once it is known what it is
+   * going in front of. It used to be the machine's only backend, which meant a
+   * trace could only ever be taken of a silent run: `-T` with a board attached
+   * recorded nothing that was played. `-n -T file` is the old behaviour. */
   if (trace_path != nullptr) {
     trace_buffer.resize(4u * 1000u * 1000u);
     trace = new TraceSidBackend(trace_buffer.data(), trace_buffer.size());
-    machine.set_sid_backend(*trace);
-    active_backend = trace;
-    no_device = true;
-  } else if (output == OutputMode::UsbSid && !no_device) {
+  }
+
+  if (output == OutputMode::UsbSid && !no_device) {
     if (usb.open()) {
       printf("  device   : USBSID-Pico, pcb v%d, %d SID%s "
              "(socket one %d, socket two %d)\n",
@@ -453,6 +523,10 @@ int main(int argc, char ** argv)
     soft.attach(machine);
     active_backend = &soft;
     soft_active = true;
+    soft_out_rate = rate;
+    soft_chips = chips;
+    soft_model = model;
+    soft_clock = clock_hz;
     soft_buf.resize(65536);
     overhead = 0;   /* so the header below reports what is actually in force */
 
@@ -479,6 +553,15 @@ int main(int argc, char ** argv)
      * latency depending on which way it goes. A WAV has no clock at all and
      * should render as fast as the machine can. */
     no_device = true;
+  }
+
+  /* Chain the trace in front of whatever ended up playing. `attach()` above
+   * made the software SID the machine's backend, so this has to come after it;
+   * what attach() did to the access overhead stays done. */
+  if (trace != nullptr) {
+    trace->set_next(active_backend);
+    machine.set_sid_backend(*trace);
+    active_backend = trace;
   }
 
   /* What the hardware is, and what one access to it costs. Before anything is
@@ -534,6 +617,65 @@ int main(int argc, char ** argv)
   }
 
   const VicTiming & timing = machine.vic().timing();
+
+  /* The synthesis was configured before the file was read, because that is
+   * where the audio device has to be opened, and at that point the machine was
+   * still on whatever standard it powers on with. An NTSC tune moves it after
+   * the header is parsed, and reSIDfp derives its resampler from the clock, so
+   * leaving it configured for the old one renders the whole tune at the wrong
+   * rate: PAL against NTSC is 985248 against 1022727, so 3.8% long and 3.8%
+   * flat, and a thirty second render finished three seconds late.
+   *
+   * Nothing has been played yet, the tune's init writes go out on the first
+   * frame, so reconfiguring here costs one resampler table and no state. */
+  if (soft_active && timing.clock_hz != soft_clock) {
+    if (!soft.configure(soft_chips, static_cast<double>(timing.clock_hz),
+                        soft_out_rate, soft_quality, soft_model)) {
+      printf("  audio    : reSIDfp would not accept %u Hz at a %u Hz clock\n",
+             soft_out_rate, timing.clock_hz);
+      return 1;
+    }
+    soft.attach(machine);
+    soft_clock = timing.clock_hz;
+    /* attach() takes the machine's backend, so the trace has to go back in
+     * front of it. */
+    if (trace != nullptr) machine.set_sid_backend(*trace);
+  }
+
+  /* Muting, after the load, because `init_tune()` powers the machine on again
+   * and a mute set before it would be forgotten.
+   *
+   * The mute lives in the SID layer, on the way out to whatever is playing, so
+   * this works the same for a board, for the speakers and for a WAV: recording
+   * three files with `--solo 1:1`, `1:2` and `1:3` gives the three voices
+   * separately from the same run of the same emulation. */
+  if (mute_spec != nullptr || solo_spec != nullptr) {
+    uint8_t mask[4] = { 0, 0, 0, 0 };
+    const char * spec = (solo_spec != nullptr) ? solo_spec : mute_spec;
+    if (!parse_voice_spec(spec, mask)) {
+      printf("  cannot read --%s %s, expected CHIP or CHIP:VOICE, "
+             "comma separated, counting from 1\n",
+             (solo_spec != nullptr) ? "solo" : "mute", spec);
+      return 2;
+    }
+    if (solo_spec != nullptr) {
+      /* Only as far as the tune has chips: inverting all four would report
+       * nine voices silenced on a one chip tune, which reads as a fault. */
+      const int chips_here = is_sid ? player.tune().sid_count : 2;
+      for (int c = 0; c < 4; c++) {
+        mask[c] = (c < chips_here) ? static_cast<uint8_t>(~mask[c] & 0x7) : 0;
+      }
+    }
+    for (int c = 0; c < 4; c++) {
+      for (int v = 0; v < 3; v++) {
+        if (mask[c] & (1 << v)) {
+          machine.sid().set_voice_mute(static_cast<uint8_t>(c + 1),
+                                       static_cast<uint8_t>(v + 1), true);
+        }
+      }
+    }
+    print_voice_mask("muted", mask);
+  }
 
   Pacer pacer;
   pacer.start(vic_cycles_per_frame(machine.video_model()), timing.clock_hz);

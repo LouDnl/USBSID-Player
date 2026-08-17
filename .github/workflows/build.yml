@@ -42,8 +42,17 @@ jobs:
         with:
           # Forces checkout of the branch head instead of a specific commit SHA
           ref: ${{ github.ref }}
-          submodules: true
           path: repo
+
+      # The driver is developed alongside this repository, so it is checked out
+      # here rather than pinned as a submodule: a build always gets the driver
+      # as it is now, instead of whatever revision a submodule bump last
+      # recorded. CMake picks it up at lib/driver/src, see CMakeLists.txt.
+      - name: Checkout USBSID driver
+        uses: actions/checkout@v4
+        with:
+          repository: LouDnl/USBSID-Pico-driver
+          path: repo/lib/driver
 
       - name: Install dependencies (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
@@ -154,7 +163,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.ref }}
-          submodules: true
 
       - name: Set up Emscripten
         uses: mymindstorm/setup-emsdk@v14

@@ -59,24 +59,54 @@ class TraceSidBackend final : public SidBackend
     TraceSidBackend(Event * buffer, size_t capacity)
       : events_(buffer), capacity_(capacity) {}
 
+    /**
+     * @brief Pass everything on to another backend after recording it.
+     *
+     * Without this, recording and playing are exclusive: the machine has one
+     * backend and the trace was it, so a trace could only ever be taken of a
+     * silent run. Chained, the trace sits in front of the board or of the
+     * software SID and writes down what goes past on its way there, which is
+     * the only way to see what was actually sent while a tune was playing.
+     *
+     * Recording happens first so that the file is complete even if the thing
+     * behind it fails, and the cycle deltas handed on are the ones that came
+     * in: nothing here changes what the backend below sees.
+     */
+    void set_next(SidBackend * next) { next_ = next; }
+    SidBackend * next(void) const { return next_; }
+
     void write(data_t reg, data_t value, uint16_t cycles) override
     {
       cycle_ += cycles;
       record('w', reg, value, cycles);
+      if (next_ != nullptr) next_->write(reg, value, cycles);
     }
     data_t read(data_t reg, uint16_t cycles) override
     {
       cycle_ += cycles;
-      record('r', reg, 0, cycles);
-      return 0;
+      /* A chained read records what the backend below answered, which is the
+       * value the tune went on to act on. Unchained there is nothing to record
+       * but the fact of the read, as before. */
+      const data_t v = (next_ != nullptr) ? next_->read(reg, cycles) : 0;
+      record('r', reg, v, cycles);
+      return v;
     }
     void wait(uint16_t cycles) override
     {
       cycle_ += cycles;
       record('i', 0, 0, cycles);
+      if (next_ != nullptr) next_->wait(cycles);
     }
-    void flush(void) override { record('f', 0, 0, 0); }
-    void reset(void) override { count_ = 0; dropped_ = 0; cycle_ = 0; }
+    void flush(void) override
+    {
+      record('f', 0, 0, 0);
+      if (next_ != nullptr) next_->flush();
+    }
+    void reset(void) override
+    {
+      count_ = 0; dropped_ = 0; cycle_ = 0;
+      if (next_ != nullptr) next_->reset();
+    }
 
     size_t count(void) const { return count_; }
     size_t dropped(void) const { return dropped_; }
@@ -116,6 +146,7 @@ class TraceSidBackend final : public SidBackend
     }
 
     Event * events_;
+    SidBackend * next_ = nullptr;
     size_t capacity_;
     size_t count_ = 0;
     size_t dropped_ = 0;

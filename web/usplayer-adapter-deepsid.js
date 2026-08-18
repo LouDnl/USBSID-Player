@@ -2,7 +2,34 @@
  * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
  * line playback, for embedding on RP2350 (Pico2), and in a browser.
  *
- * web/usplayer-adapter.js
+ * js/handlers/usplayer/usplayer-adapter-deepsid.js
+ *
+ * A DEEPSID FORK of usplayer-adapter.js, and the only file in DeepSID's
+ * `usplayer/` that is not byte identical to the shared set. Named for it so the
+ * difference cannot be missed.
+ *
+ * THIS FILE IS THE SOURCE. It lives here in `player-repo/web` beside the adapter
+ * it forks, and is deployed to two places, which must stay byte identical to it:
+ *
+ *   git.deepsid/js/handlers/usplayer/usplayer-adapter-deepsid.js
+ *   deepsid/public_html/deepsid/js/handlers/usplayer/usplayer-adapter-deepsid.js
+ *
+ * Keeping it here rather than only in DeepSID is the point: a file with copies
+ * and no source is the one nobody thinks to propagate, which is how the SendSID
+ * subtune byte and the driver's globalThis block both drifted.
+ *
+ * Three things differ, all because DeepSID has no host application to hand this
+ * an already connected board, where config-tool-web does:
+ *
+ *   - it imports `usbsid-driver.js`
+ *   - `_ensure()` adopts that driver's `usbsidDevice` singleton in the WebUSB
+ *     branch, rather than being given a device
+ *   - `disconnect()` closes that adopted driver, and `connect()` takes it back
+ *
+ * Do not merge this back over the shared file: the other hosts have no
+ * `usbsid-driver.js` inside their `usplayer/` directory, so the import would fail
+ * to resolve and take their player down with it. Fixes that are not about the
+ * above belong in both.
  * The player wearing the interface another app expects.
  *
  * Carried over from player-repo/web/usplayer-adapter.js. It wraps
@@ -44,6 +71,7 @@
 
 import { USBSIDPlayerWeb, NullTransport, isSidHeader, countSids, sidModel }
   from './usplayer-web.js';
+import './usbsid-driver.js';
 import { USBSIDWebUSBTransport } from './usbsid-webusb.js';
 import { USBSIDWebSerialTransport } from './usbsid-webserial.js';
 import { ASIDMIDITransport } from './asid-midi.js';
@@ -63,7 +91,7 @@ const WASM_DIR = new URL('./', import.meta.url).href;
 
 /* A cache buster to pass on, when the host gave this file one.
  *
- * A host that imports this as `usplayer-adapter.js?v=<something>` wants that
+ * A host that imports this as `usplayer-adapter-deepsid.js?v=<something>` wants that
  * `<something>` on the wasm and the ES module too, and it matters more there
  * than here: those two are fetched by script rather than by the document, so a
  * reload does not necessarily refetch them, and even a hard reload was seen to
@@ -161,6 +189,7 @@ export class USPlayerAdapter {
     this._boardPollFails = 0;
     this._audio = null;
     this._player = null;
+    this._driver = null;
     this._transport = null;
     this._bytes = null;
     this._info = { maxSubsong: 0, songName: '', songAuthor: '', songReleased: '', numSids: 1 };
@@ -483,6 +512,37 @@ export class USPlayerAdapter {
           if (!ok) this._log('no serial port granted yet, press Connect');
         } catch (e) { this._log('Web Serial: ' + e.message); }
       } else {
+        /* A driver of our own.
+         *
+         * config-tool-web hands the adapter the USBSIDDevice it has already
+         * connected, and the transport then talks through it rather than opening
+         * a second conversation with the same board. DeepSID has no such object,
+         * so one is made here and used the same way: `_extDev` is what puts the
+         * board reads on the driver's serialised config path.
+         *
+         * `reconnect()` and not `connect()`. The latter calls `requestDevice()`,
+         * which shows a picker and needs a user gesture, and this runs while the
+         * page is still loading. `reconnect()` takes only what the origin has
+         * already been granted and answers false when there is nothing. The
+         * picker belongs to the Connect button, which reaches it through
+         * `connect()` below. */
+        if (!this._device && globalThis.usbsidDevice) {
+          try {
+            /* The driver's own singleton, the one config-tool-web uses, rather
+             * than a second instance: two drivers on one board would each hold
+             * their own endpoint state and take each other's replies. */
+            const drv = globalThis.usbsidDevice;
+            if (drv.isOpen || await drv.reconnect()) {
+              this._driver = drv;
+              this._device = drv;
+            } else {
+              this._driver = drv;   /* kept, so Connect can open it */
+              this._log('no board granted yet, press Connect');
+            }
+          } catch (e) {
+            this._log('USBSID driver: ' + (e && e.message ? e.message : e));
+          }
+        }
         this._transport = new USBSIDWebUSBTransport({ device: this._device });
         try {
           /* With a device handed to us there is nothing to ask for: the host has
@@ -586,6 +646,23 @@ export class USPlayerAdapter {
      * `_ensure()` is memoized and will not retry, so the retry lives here. */
     if (!this.isConnected() && this._transport &&
         typeof this._transport.connect === 'function') {
+      /* When the board is reached through a driver of ours, the picker is the
+       * driver's. The transport's own `connect()` only confirms a device it was
+       * handed, so on its own it can never acquire one, and pressing Connect
+       * with nothing granted would do nothing at all. */
+      if (this._driver && !this._driver.isOpen) {
+        /* Granted first, picker second. After a disconnect the origin still has
+         * permission, so `reconnect()` takes the board back with no dialog; only
+         * a board that was never granted needs the picker, and this call came
+         * from a button so a gesture is in hand. */
+        try {
+          if (!await this._driver.reconnect()) await this._driver.connect();
+        } catch (e) { this._log('driver connect: ' + (e && e.message ? e.message : e)); }
+        if (this._driver.isOpen) {
+          this._device = this._driver;
+          if (this._transport) this._transport._extDev = this._driver;
+        }
+      }
       try { await this._transport.connect(); }
       catch (e) { this._log('connect: ' + (e && e.message ? e.message : e)); }
       /* This is where a board is really chosen, so this is where it has to be
@@ -621,6 +698,23 @@ export class USPlayerAdapter {
     if (this._transport && typeof this._transport.disconnect === 'function') {
       try { await this._transport.disconnect(); }
       catch (e) { this._log('disconnect: ' + (e && e.message ? e.message : e)); }
+    }
+    /* The transport will not close a device it was handed: "not ours to close"
+     * is right when the host app owns it, as config-tool-web does. Here the
+     * driver was adopted by `_ensure()` and nothing else holds it, so nobody
+     * else would ever close it. Without this the link stays open, `isOpen` keeps
+     * answering true through `_extDev`, and the host's Connect button sits on
+     * "Connected" logging a disconnect on every press while nothing happens.
+     *
+     * `_driver` is only set when we adopted it, which is exactly the case where
+     * closing it is ours to do. */
+    if (this._driver && typeof this._driver.close === 'function') {
+      try { await this._driver.close(); }
+      catch (e) { this._log('driver close: ' + (e && e.message ? e.message : e)); }
+      /* Dropped as well, so the next connect() re-acquires rather than handing
+       * the transport a device that has been shut underneath it. */
+      this._device = null;
+      if (this._transport) this._transport._extDev = null;
     }
     this._log('disconnected');
     this._status('disconnected');

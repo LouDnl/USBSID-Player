@@ -73,3 +73,7 @@ web/usbsid.mjs
 # The same module again under a name every server serves as JavaScript.
 web/usbsid.esm.js
 web/usbsid.wasm
+# Ignore test docs
+web/README.md
+web/bench.html
+web/usbsid-diag.html

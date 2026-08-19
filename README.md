@@ -2,6 +2,11 @@
 USBSID-Player is a Cycle Exact Commodore64 emulating PSID/RSID & PRG tune player for command line, websites and embedding that is aimed for use with USBSID-Pico. USBSID-Pico is a RPi Pico/PicoW (RP2040) & Pico2/Pico2W (RP2350) based board for interfacing one or two MOS SID chips and/or hardware SID emulators over (WEB)USB with your computer, phone or ASID supporting player.
 
 
+# USBSID-Player is currently (being) implemented in
+- [USBSID-Pico Web configtool](https://usbsid.loudai.nl/)
+- [HippoPlayer](https://hippoplayer.se) ~ a webbased Amiga emulator
+- [Deepsid](https://deepsid.chordian.net)
+
 # Libraries used for non USBSID audio play (CLI & Web)
 - [ResidFp](https://github.com/libsidplayfp/libresidfp)
 - [miniaudio](https://github.com/mackron/miniaudio)

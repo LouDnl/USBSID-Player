@@ -89,6 +89,47 @@ extern void load_prg(uint8_t * binary_, size_t binsize_, bool loop);
  */
 extern void load_sidtune(uint8_t * sidfile, int sidfilesize, char subt);
 
+/* ------------------------------------------------------------------------ *
+ * Streaming upload
+ *
+ * load_sidtune()/load_prg() above assume the whole file is already sitting in
+ * one buffer the caller owns. A host that receives the file over USB in small
+ * packets does not have that buffer without inventing one, and the firmware
+ * used to: it staged the whole thing in its own 64KB allocation first, then
+ * handed it to load_sidtune()/load_prg(), which copied it a second time into
+ * this player's own tune buffer. Two copies of a file that only ever needs
+ * one home.
+ *
+ * These three let the packets land directly in the player's own buffer as
+ * they arrive:
+ *
+ *   usplayer_upload_start();
+ *   while (more packets) usplayer_upload_feed(packet, n);
+ *   usplayer_upload_finish_prg(false);      // or:
+ *   usplayer_upload_finish_tune(subtune);
+ *
+ * load_sidtune()/load_prg() are unchanged and still work exactly as before
+ * for a caller that already has the whole file in memory (the desktop/CLI
+ * frontends) - they are now built on top of these same three underneath.
+ * ------------------------------------------------------------------------ */
+
+/** @brief Reset the upload buffer. Call once before the first packet. */
+extern void usplayer_upload_start(void);
+
+/**
+ * @brief Append one packet's worth of bytes to the upload buffer.
+ * @return false once the buffer is full; bytes past that point are dropped,
+ *         the same truncation load_sidtune()/load_prg() already do for an
+ *         oversized single buffer.
+ */
+extern bool usplayer_upload_feed(const uint8_t * buf, size_t len);
+
+/** @brief Finish an upload started as a PRG. Same as load_prg()'s tail. */
+extern void usplayer_upload_finish_prg(bool loop);
+
+/** @brief Finish an upload started as a SID tune. Same as load_sidtune()'s tail. */
+extern void usplayer_upload_finish_tune(char subt);
+
 /** @brief Boot the machine, relocate the driver, enter it. The slow one. */
 extern void init_sidplayer(void);
 

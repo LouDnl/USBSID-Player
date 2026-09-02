@@ -128,23 +128,45 @@ void apply_tune_clock(void)
 } /* namespace */
 
 /* ------------------------------------------------------------------------ *
- * loading
+ * loading and streaming upload
+ *
+ * The three primitives load_sidtune()/load_prg() are themselves now built
+ * on: a caller with the whole file in one buffer already (load_sidtune/
+ * load_prg) copies it in with a single usplayer_upload_feed() instead of a
+ * private loop, and a caller receiving it in USB packets (the firmware) can
+ * feed it straight into g_tune_bytes as each packet arrives, with no
+ * firmware-owned staging buffer at all.
  * ------------------------------------------------------------------------ */
 
-void load_sidtune(uint8_t * sidfile, int sidfilesize, char subt)
+void usplayer_upload_start(void)
 {
   attach_once();
-
   g_prepared = false;
-  g_is_prg = false;
+  g_is_prg = false; /* set for real by whichever finish_*() is eventually called */
   g_tune_size = 0;
+}
 
-  if (sidfile == nullptr || sidfilesize <= 0) return;
+bool usplayer_upload_feed(const uint8_t * buf, size_t len)
+{
+  if (buf == nullptr || len == 0) return true;
 
-  size_t len = static_cast<size_t>(sidfilesize);
-  if (len > kMaxTuneBytes) len = kMaxTuneBytes;
-  for (size_t i = 0; i < len; i++) g_tune_bytes[i] = sidfile[i];
-  g_tune_size = len;
+  const size_t room = kMaxTuneBytes - g_tune_size;
+  const size_t n = (len < room) ? len : room;
+  for (size_t i = 0; i < n; i++) g_tune_bytes[g_tune_size + i] = buf[i];
+  g_tune_size += n;
+
+  /* false means some of this packet did not fit and was dropped, the same
+   * truncation load_sidtune()/load_prg() already did for an oversized
+   * single buffer, just discoverable per packet instead of silent. */
+  return n == len;
+}
+
+void usplayer_upload_finish_tune(char subt)
+{
+  g_is_prg = false;
+  g_prepared = false;
+
+  if (g_tune_size == 0) return;
 
   /* The firmware counts subtunes from zero and uses zero for "the tune's own
    * default", which is how the old player read it too. */
@@ -160,7 +182,7 @@ void load_sidtune(uint8_t * sidfile, int sidfilesize, char subt)
 }
 
 /**
- * @brief Load a program and start it.
+ * @brief Finish an upload as a program and start it.
  *
  * Unlike a tune, a program has no separate init step in this API: the firmware
  * calls this and then goes straight to loop_sidplayer(). So the boot, the
@@ -168,21 +190,13 @@ void load_sidtune(uint8_t * sidfile, int sidfilesize, char subt)
  * argument is what the old player restarted a finished program with; nothing
  * here decides that a program has finished, so it is accepted and ignored.
  */
-void load_prg(uint8_t * binary_, size_t binsize_, bool loop)
+void usplayer_upload_finish_prg(bool loop)
 {
   (void)loop;
-  attach_once();
-
-  g_prepared = false;
   g_is_prg = true;
-  g_tune_size = 0;
+  g_prepared = false;
 
-  if (binary_ == nullptr || binsize_ < 3) return;
-
-  size_t len = binsize_;
-  if (len > kMaxTuneBytes) len = kMaxTuneBytes;
-  for (size_t i = 0; i < len; i++) g_tune_bytes[i] = binary_[i];
-  g_tune_size = len;
+  if (g_tune_size < 3) return;
 
   if (!g_player.load_prg(g_tune_bytes, g_tune_size)) {
     g_tune_size = 0;
@@ -202,6 +216,24 @@ void load_prg(uint8_t * binary_, size_t binsize_, bool loop)
   g_prepared = g_player.init_prg();
   /* A program has no separate start call, so the pacer starts here instead */
   g_backend.set_pacing(true);
+}
+
+void load_sidtune(uint8_t * sidfile, int sidfilesize, char subt)
+{
+  usplayer_upload_start();
+  if (sidfile != nullptr && sidfilesize > 0) {
+    usplayer_upload_feed(sidfile, static_cast<size_t>(sidfilesize));
+  }
+  usplayer_upload_finish_tune(subt);
+}
+
+void load_prg(uint8_t * binary_, size_t binsize_, bool loop)
+{
+  usplayer_upload_start();
+  if (binary_ != nullptr) {
+    usplayer_upload_feed(binary_, binsize_);
+  }
+  usplayer_upload_finish_prg(loop);
 }
 
 /* ------------------------------------------------------------------------ *

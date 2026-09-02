@@ -103,6 +103,18 @@ set(USPLAYER_INCLUDE_DIRS
   ${USPLAYER_ROOT}/src/vic
 )
 
+### Optional: Cynthcart (MC68B50 ACIA on IO1, $de00-$deff). Off unless the
+### firmware turns on ONBOARD_CYNTHCART=1. Kept out of USPLAYER_SOURCES so a
+### plain tune-playback build never pays for it. Embedded only, see
+### src/cart/cynthcart_embedded.cpp.
+set(USPLAYER_CYNTHCART_SOURCES
+  ${USPLAYER_ROOT}/src/cart/MC68B50.cpp
+  ${USPLAYER_ROOT}/src/cart/cynthcart_embedded.cpp
+)
+set(USPLAYER_CYNTHCART_INCLUDE_DIRS
+  ${USPLAYER_ROOT}/src/cart
+)
+
 ### EMBEDDED picks the RAM placement attributes in types.h and the firmware
 ### side of the SID backend. DESKTOP has to be defined as 0 rather than left
 ### undefined, because the sources test it with #if.

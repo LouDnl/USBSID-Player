@@ -6,6 +6,7 @@
 !.gitmodules
 !.gitattributes
 !README.md
+!CHANGELOG.md
 !LICENSE
 !CMakeLists.txt
 !usplayer.code-workspace

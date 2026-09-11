@@ -38,27 +38,10 @@
 #include "types.h"
 
 /* The firmware side of the bridge: USBSID-Pico's own bus functions, reached
- * through pointers.
- *
- * They used to be declared `__attribute__((weak))` and called directly, which
- * reads better and only works on ELF. An undefined weak resolving to null is an
- * ELF property, and the desktop suite builds on three platforms:
- *
- *   Linux, ELF        an undefined weak is null, as intended
- *   macOS, Mach-O     refuses to link an undefined weak at all
- *                     `ld: symbol(s) not found for architecture arm64`
- *   Windows, PE/COFF  the library's weak collides with the test's definition
- *                     `multiple definition of '.weak.time_us_64...'`
- *
- * Pointers behave the same everywhere. Nothing else changes: the backend was
- * already written to test each of these against null before using it, because a
- * weak that resolved to null was always a possibility, so the semantics were
- * pointer shaped from the start and only the mechanism was ELF specific.
- *
- * The firmware is unaffected and needs no edit. Under `EMBEDDED` the real
- * symbols are declared normally and these are initialised to their addresses in
- * `sid_embedded.cpp`; everywhere else they start null, and a test assigns them.
- */
+ * through pointers rather than `__attribute__((weak))` - weak-undefined-is-
+ * null is an ELF-only property, and macOS/Windows builds fail or collide on
+ * it. Under `EMBEDDED` these are initialised to the real addresses in
+ * sid_embedded.cpp; everywhere else they start null and a test assigns them. */
 extern "C" {
   extern void (*us_cycled_write)(uint8_t address, uint8_t data, uint16_t cycles);
   extern uint8_t (*us_cycled_read)(uint8_t address, uint16_t cycles);
@@ -102,8 +85,8 @@ class EmbeddedSidBackend final : public SidBackend
   public:
     EmbeddedSidBackend(void) = default;
 
-    void write(data_t reg, data_t value, uint16_t cycles) override US_RAM_ATTR;
-    data_t read(data_t reg, uint16_t cycles) override US_RAM_ATTR;
+    void write(addr_t reg, data_t value, uint16_t cycles) override US_RAM_ATTR;
+    data_t read(addr_t reg, uint16_t cycles) override US_RAM_ATTR;
     void wait(uint16_t cycles) override US_RAM_ATTR;
     void flush(void) override {}
     void reset(void) override;

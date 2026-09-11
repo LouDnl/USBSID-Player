@@ -57,15 +57,10 @@ enum class UsDir {
 /**
  * @brief Every file in `dir` ending in `ext`, sorted.
  *
- * `std::filesystem` and not `popen("ls ...")`, which is what the two sweeps used
- * to do. Three runs in a row reported 160, then 62, then 0 tunes while every
- * file was readable from a plain program: a pipe to `ls` can fail, be truncated
- * or be cut short by the shell without any of it being visible to the caller,
- * and the sweeps then reported "skipped" and **passed**. A regression net that
- * quietly tests nothing is worse than no net.
- *
- * Sorted, so a failure names the same tune on every machine and a bisect can be
- * repeated.
+ * `std::filesystem` and not a pipe to `ls`: a shell pipe can fail, truncate, or
+ * be cut short without any of it being visible to the caller, and the sweeps
+ * would then report "skipped" and pass. Sorted, so a failure names the same
+ * tune on every machine and a bisect can be repeated.
  *
  * @param dir  directory to read
  * @param ext  extension to keep, with the dot, compared case insensitively

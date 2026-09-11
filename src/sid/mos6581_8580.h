@@ -6,10 +6,10 @@
  * The SID as the machine sees it, and the bookkeeping that turns a register
  * write into a timestamped event for USBSID-Pico.
  *
- * The address translation (one to four SIDs, socket forcing, the FM/OPL
+ * The address translation (one to kMaxSids SIDs, socket forcing, the FM/OPL
  * address, forced addresses) is carried over from
  * old player ~ src/c64/mos6581_8580_sid.cpp, which is known good and was not
- * worth redesigning.
+ * worth redesigning; only how many chips it counts to has changed since.
  *
  * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
@@ -39,12 +39,24 @@
 #include "mos6569.h"
 #include "sid_backend.h"
 #include "sid_voice3.h"
+#include "sidfile.h"
 #include "types.h"
 
 namespace usbsid {
 
-/* The address translation returns this when an address is not a SID at all */
-constexpr data_t kSidNotMapped = 0xfe;
+/* The address translation returns this when an address is not a SID at all.
+ * Out of range of every real register (0x0000-0x01df, kMaxSids chips at
+ * 0x20 each) and of the FM/OPL "parked, unclaimed" block (0x01e0-0x01ff, see
+ * kFmOplParkBase in mos6581_8580.cpp), so it can never collide with a
+ * legitimate translate() answer now that reg is a 16 bit address rather than
+ * an 8 bit one. */
+constexpr addr_t kSidNotMapped = 0xffff;
+
+/* Register mirror size (regs_[] below): kMaxSids chips at 0x20 registers
+ * each = 0x1e0 bytes, rounded to a power of two so indexing stays a mask,
+ * with the spare 0x20 at the top parking the FM/OPL "unclaimed" case (see
+ * kFmOplParkBase, mos6581_8580.cpp). */
+constexpr size_t kRegsSize = 0x200;
 
 /**
  * @brief How many SIDs there are and where they live.
@@ -53,64 +65,32 @@ struct SidConfig {
   /**
    * @brief Hand the backend the time that passes when the tune writes nothing.
    *
-   * Off for hardware, on for a software SID, set by its attach().
-   *
-   * A backend normally learns how much time has passed from the gap carried by
-   * the next access, so a stretch with no accesses at all costs nothing and is
-   * simply carried across. A board is happy with that: it plays in real time
-   * and idles when there is no work.
-   *
-   * A software SID is not, because it only renders when it is told time has
-   * passed. A tune that touches no register for a hundred frames produces no
-   * samples for a hundred frames, and anything pacing itself by "emulate until
-   * there is enough audio" then races ahead at fifteen times speed until the
-   * tune starts making sound again. That is exactly what the browser player did
-   * on tunes with a silent introduction.
-   *
-   * With this set, the end of each video frame pushes whatever time has gone by
-   * to the backend, so silence is rendered as silence and one frame of
-   * emulation always yields one frame of audio.
+   * Off for hardware, on for a software SID (set by its attach()). A
+   * software SID only renders when told time has passed, so a silent
+   * stretch with no register writes would otherwise produce no audio and
+   * let pacing race ahead once sound resumes. This pushes elapsed time to
+   * the backend at the end of each video frame regardless.
    */
   bool render_idle = false;
-  uint8_t count = 1;            /* 1 to 4 */
-  addr_t base[4] = { 0xd400, 0x0000, 0x0000, 0x0000 };
+  uint8_t count = 1;            /* 1 to kMaxSids (15), see sidfile.h */
+  addr_t base[kMaxSids] = { 0xd400 };
 
   /**
    * @brief Which voices are held silent, one byte per chip, bits 0 to 2.
    *
-   * A muted voice has two things forced on the way to the hardware: the **gate
-   * bit** of its control register, and the **sustain nibble** of its
-   * sustain/release register, both held at 0.
-   *
-   * The gate alone leaves the note's release audible, and release runs to 24
-   * seconds, so a voice muted mid note would fade for as long as the tune asked
-   * for. Taking the sustain floor away as well makes it quiet and keeps it quiet
-   * however the tune re-gates it.
-   *
-   * Everything else goes through untouched: the release nibble, the waveform,
-   * ring modulation and sync. So the tune can keep changing a muted voice and all
-   * of it is heard when the mute is lifted. The tune's own sustain value needs no
-   * separate saving, because `regs_[]` below is written before the mask is
-   * applied and therefore always holds it.
-   *
-   * Masked on the way **out** and nowhere else. `regs_[]` keeps what the tune
-   * wrote, voice three's emulation is fed the unmasked value, and a trace shows
-   * the tune's own writes. That matters beyond tidiness: tunes poll `$d41b` as a
-   * timer and as a random source, so a mute that changed those answers would
-   * change what the tune does rather than what it sounds like.
+   * Forces the gate bit and sustain nibble to 0 on the way to hardware
+   * (gate alone would leave up to 24s of release audible). Everything else
+   * passes through untouched, and only on the way out: `regs_[]` keeps
+   * what the tune wrote so `$d41b`/`$d41c` polling still behaves the same
+   * muted or not.
    */
-  uint8_t voice_mute[4] = { 0, 0, 0, 0 };
+  uint8_t voice_mute[kMaxSids] = { 0 };
 
-  /* Whole chips held silent, bit 0 for chip one.
-   *
-   * Not the same mechanism as voice_mute above, and deliberately so. A voice is
-   * masked on the way out because the tune must carry on writing it: the gate and
-   * the sustain are what get masked and everything else passes. A muted chip has
-   * its writes **dropped** instead, which is what the board's own mute does and
-   * what makes it useful for an FM/OPL chip or a second SID a tune is fighting
-   * over. `regs_[]` and voice three still see everything, so $d41b and $d41c keep
-   * answering and a tune polling them behaves the same muted or not. */
-  uint8_t chip_mute = 0;
+  /* Whole chips held silent, bit 0 for chip one. Unlike voice_mute above,
+   * writes are dropped entirely (matches the board's own mute), used for
+   * an FM/OPL chip or a second SID a tune is fighting over. uint16_t since
+   * kMaxSids is 15, one bit short of an 8 bit mask. */
+  uint16_t chip_mute = 0;
 
   /* USBSID-Pico socket layout, mirrored from the device config */
   uint8_t sids_socket_one = 1;
@@ -123,12 +103,9 @@ struct SidConfig {
 
   bool real_reads = false;      /* read back from the hardware, not the mirror */
 
-  /* What performing one access costs the hardware, in cycles. It is taken off
-   * every delta before it is sent, because the access itself is time. One is
-   * the measured figure for USBSID-Pico; it is here rather than a constant so
-   * it can be checked against a board without a rebuild. With a tune writing
-   * twenty five registers a frame, being a cycle out is inaudible. With a digi
-   * writing six hundred, it is a percent of the frame. */
+  /* Cost of one hardware access, in cycles, subtracted from every delta
+   * before it's sent. Measured figure for USBSID-Pico (1); a field rather
+   * than a constant so it can be checked against a board without rebuild. */
   uint8_t access_overhead = 1;
 };
 
@@ -157,76 +134,66 @@ class Mos6581_8580 final : public IoDevice, public VicFrameObserver
      * @brief Map a C64 address to a physical USBSID register.
      *
      * Returns kSidNotMapped when the address belongs to no configured chip.
+     * Returns a 16 bit address, not an 8 bit register byte, since kMaxSids
+     * (15) no longer fits 3 top bits; a real-board backend still gets a
+     * value under 0x80 for the 4 chips it can use (see UsbSidBackend::write()).
      */
-    data_t translate(addr_t addr, uint8_t & chip) const US_RAM_ATTR;
+    addr_t translate(addr_t addr, uint8_t & chip) const US_RAM_ATTR;
 
+    /** @brief What the hardware should see. Out of line deliberately: gcc
+     * already inlines it into io_write() at -O3, a hand-rolled inline
+     * fast path measured slower. */
+    data_t mask_for_output(addr_t reg, data_t value) const US_RAM_ATTR;
     /**
-     * @brief What the hardware should see. See the definition.
-     *
-     * Deliberately left as an ordinary out of line declaration. It looks like it
-     * belongs inline, since it sits on the per write path of all three players,
-     * but it was measured: gcc at -O3 already inlines it into `io_write()`, both
-     * being in the same translation unit, and hand rolling an inline fast path
-     * in this header made `io_write()` five instructions longer and about ten
-     * percent slower. Measurement in `_project/PROGRESS.md`, 2026-08-11.
-     */
-    data_t mask_for_output(data_t reg, data_t value) const US_RAM_ATTR;
-    /**
-     * @brief Start measuring cycle deltas from now.
-     *
-     * The delta carried by the first write after a long stretch of nothing is
-     * measured from the last access, and after a machine boot that is millions
-     * of cycles ago: enough to be chopped into dozens of maximum length waits
-     * for a gap that never happened as far as the tune is concerned. The
-     * player calls this when a tune actually starts.
+     * @brief Start measuring cycle deltas from now. Called when a tune
+     * actually starts, so the first write's delta isn't measured from
+     * boot (which would chop into many max-length waits).
      */
     void resync(void)
     {
       last_event_ = bus_.cycles();
-      for (uint8_t i = 0; i < 4; i++) voice3_[i].resync(last_event_);
+      for (uint8_t i = 0; i < kMaxSids; i++) voice3_[i].resync(last_event_);
     }
 
     /** @brief Voice three of a chip, 1 based, for tests. */
-    SidVoice3 & voice3(uint8_t chip) { return voice3_[(chip - 1) & 0x03]; }
+    SidVoice3 & voice3(uint8_t chip)
+    {
+      return voice3_[(chip >= 1 && chip <= kMaxSids) ? (chip - 1) : 0];
+    }
 
-    /* the register mirror, one 32 byte block per chip */
-    data_t peek(data_t physical_reg) const { return regs_[physical_reg & 0x7f]; }
+    /* the register mirror, one 32 byte block per chip. Masked to 0x1ff
+     * (kRegsSize - 1, a power of two one past kMaxSids * 0x20) rather than
+     * kRegsSize itself, so this stays a cheap AND regardless of what the
+     * caller hands in. */
+    data_t peek(addr_t physical_reg) const { return regs_[physical_reg & (kRegsSize - 1)]; }
 
     /**
      * @brief Hold one voice silent, or let it go again.
      *
-     * @param chip   1 to 4
+     * @param chip   1 to kMaxSids
      * @param voice  1 to 3
      *
-     * Setting the mask is only half of it. The chip holds its gate high until
-     * something writes to that register, and a tune with a long sustain may not
-     * write it again for seconds, so muting also sends both affected registers
-     * once, sustain then control. Unmuting sends the tune's current values back in
-     * the same order, which restores the sustain level and then restarts the note
-     * if its gate is high: immediate and predictable, which is what a listener
-     * expects from unmuting.
-     *
-     * Two writes per change rather than one, and the order matters in both
-     * directions. The reasoning is with the code.
+     * Setting the mask alone isn't enough: the chip holds gate high until
+     * next written, which may be seconds away. Muting/unmuting both push
+     * sustain then control immediately, in that order, so unmute restores
+     * level and restarts the note if gated.
      */
     void set_voice_mute(uint8_t chip, uint8_t voice, bool muted);
 
     /**
-     * @brief Hold a whole chip silent, dropping its writes.
-     *
-     * Chip counts from 1. Silences the chip at once rather than waiting for the
-     * tune, and on the way back replays what the tune wrote while it was muted so
-     * it resumes in the right state instead of wherever it was frozen.
+     * @brief Hold a whole chip silent, dropping its writes. Chip counts
+     * from 1. On unmute, replays what the tune wrote while muted so it
+     * resumes in the right state.
      */
     void set_chip_mute(uint8_t chip, bool muted);
 
     /** @brief The muted chips, bit 0 for chip one. */
-    uint8_t chip_mute(void) const { return config_.chip_mute; }
+    uint16_t chip_mute(void) const { return config_.chip_mute; }
 
     /** @brief The mute bits for one chip, bits 0 to 2. Chip counts from 1. */
     uint8_t voice_mute(uint8_t chip) const
     {
-      return (chip >= 1 && chip <= 4) ? config_.voice_mute[chip - 1] : 0;
+      return (chip >= 1 && chip <= kMaxSids) ? config_.voice_mute[chip - 1] : 0;
     }
 
     uint32_t writes(void) const { return writes_; }
@@ -239,33 +206,27 @@ class Mos6581_8580 final : public IoDevice, public VicFrameObserver
     SidBackend * backend_;
     SidConfig config_;
 
-    /* $00-$1f first chip, $20-$3f second, and so on. $80 and up is the
-     * "nowhere" block the FM/OPL translation uses when no chip claims it. */
-    data_t regs_[0x80] = { 0 };
+    /* $00-$1f first chip, $20-$3f second, and so on, up to kMaxSids chips.
+     * $1e0-$1ff is the "nowhere" block the FM/OPL translation uses when no
+     * chip claims it - see kFmOplParkBase, mos6581_8580.cpp. Sized to
+     * kRegsSize (a power of two) rather than kMaxSids * 0x20 exactly, so
+     * peek() and every reg-indexed access here can mask instead of branch. */
+    data_t regs_[kRegsSize] = { 0 };
 
     /* $d41b and $d41c are the only readable registers a SID has, and tunes
      * poll them for timing and for random numbers, so voice three of every
      * configured chip is emulated far enough to answer them. */
-    SidVoice3 voice3_[4];
+    SidVoice3 voice3_[kMaxSids];
 
     cycle_t last_event_ = 0;
 
-    /* Chips whose mute state has changed and whose registers still need pushing,
-     * bit 0 for chip one.
-     *
-     * set_chip_mute() is called from the configuration handler, which on the
-     * device runs on core 0 while the emulation runs on core 1. It must not touch
-     * the backend or the cycle accounting: cycles_since_last_event() reads
-     * bus_.cycles() and writes last_event_, both owned by the emulating core, and
-     * a delta computed across the two comes out enormous, at which point its
-     * `while (delta > kMaxDelta)` loop emits a flood of wait() calls and the board
-     * sits out most of a minute. That was heard as the player freezing on unmute
-     * and then recovering.
-     *
-     * So the caller only sets a bit here, and the work happens on the emulating
-     * core in io_write(). Any SID write services it, whichever chip it is for, and
-     * a tune writes constantly, so nothing waits long enough to notice. */
-    volatile uint8_t chip_mute_pending_ = 0;
+    /* Chips whose mute state changed and still need their registers pushed,
+     * bit 0 for chip one. set_chip_mute() runs on core 0 (config handler)
+     * and only sets a bit here; the actual push happens on the emulating
+     * core (core 1) in io_write(), since cycle accounting must stay on
+     * that core. uint16_t since kMaxSids is 15, one bit short of an 8 bit
+     * mask. */
+    volatile uint16_t chip_mute_pending_ = 0;
 
     void apply_chip_mute_pending(void);
     uint32_t writes_ = 0;

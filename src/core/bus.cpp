@@ -90,14 +90,9 @@ void Bus::cia_rescheduled(const Mos6526 * who)
   else if (who == fast_cia2_) cia2_wake_ = 1;
 }
 
-/**
- * @brief One PHI2 cycle.
- *
- * With a whole machine attached the four devices are called by their real
- * types, which is four direct calls rather than four loads from a vtable
- * followed by four indirect branches. It is worth a few percent on a desktop
- * and rather more on a Cortex-M33, where an indirect call predicts badly.
- */
+/* One PHI2 cycle. With a whole machine attached, the four devices are
+ * called by their real types - direct calls instead of vtable dispatch,
+ * worth more on a Cortex-M33 where indirect calls predict badly. */
 #if defined(US_PROFILE) && US_PROFILE
 Profile profile;
 #endif

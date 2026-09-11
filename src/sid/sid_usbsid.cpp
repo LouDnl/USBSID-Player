@@ -34,7 +34,10 @@
 
 namespace usbsid {
 
-UsbSidBackend::UsbSidBackend(void) {}
+UsbSidBackend::UsbSidBackend(void)
+{
+  for (int8_t & slot : chip_to_slot_) slot = -1;
+}
 
 UsbSidBackend::~UsbSidBackend(void)
 {
@@ -88,27 +91,56 @@ void UsbSidBackend::set_clock_rate(uint32_t hz)
   }
 }
 
-void UsbSidBackend::write(data_t reg, data_t value, uint16_t cycles)
+/**
+ * @brief See the header. Also where the FM/OPL "unclaimed" park lands.
+ *
+ * `kFmOplParkBase` (mos6581_8580.cpp) sits at chip index kMaxSids, one past
+ * the last real chip, specifically so it can never be selected here: the
+ * `reg >= kBoardRegLimit` check below drops it in both the selected and the
+ * unselected case, exactly as the old fixed `reg >= 0x80` check always
+ * dropped it too.
+ */
+bool UsbSidBackend::remap(addr_t & reg) const
 {
-  if (!open_) return;
-  /* $80 and above are not SID registers: they are the FM/OPL addresses that no
-   * chip claimed, and only a transport that carries FM itself can use them. This
-   * one talks to a board, so it drops them, which is what happened before they
-   * were forwarded at all. */
-  if (reg >= 0x80) return;
-  /* Straight through. The cycle the access itself costs has already been taken
-   * off upstream, by SidConfig::access_overhead in cycles_since_last_event(),
-   * so what arrives here is the pre-delay the board should sit out and nothing
-   * more. Taking a second cycle off here, which is what this used to do, made
-   * every write land a cycle early and the error piled up across a frame. */
-  device_->USBSID_WriteRingCycled(reg, value, cycles);
+  constexpr addr_t kBoardRegLimit = static_cast<addr_t>(kMaxSids) * 0x20;
+  if (!select_active_) {
+    /* Default: the tune's first four SIDs pass through, chip five and up
+     * is dropped (this backend has 4 real sockets, see kMaxSids). */
+    return reg < 0x80;
+  }
+  if (reg >= kBoardRegLimit) return false;
+  const int8_t slot = chip_to_slot_[reg >> 5];
+  if (slot < 0) return false;
+  reg = static_cast<addr_t>((static_cast<addr_t>(slot) * 0x20) + (reg & 0x1f));
+  return true;
 }
 
-data_t UsbSidBackend::read(data_t reg, uint16_t cycles)
+void UsbSidBackend::set_sid_select(const uint8_t * tune_sids, uint8_t count)
+{
+  for (int8_t & slot : chip_to_slot_) slot = -1;
+  select_active_ = (count > 0);
+  const uint8_t slots = (count > 4) ? 4 : count;
+  for (uint8_t slot = 0; slot < slots; slot++) {
+    const uint8_t tune_sid = tune_sids[slot];
+    if (tune_sid < 1 || tune_sid > kMaxSids) continue;
+    chip_to_slot_[tune_sid - 1] = static_cast<int8_t>(slot);
+  }
+}
+
+void UsbSidBackend::write(addr_t reg, data_t value, uint16_t cycles)
+{
+  if (!open_) return;
+  if (!remap(reg)) return;
+  /* Straight through: access_overhead is already subtracted upstream
+   * (cycles_since_last_event()), do not subtract it again here. */
+  device_->USBSID_WriteRingCycled(static_cast<uint8_t>(reg), value, cycles);
+}
+
+data_t UsbSidBackend::read(addr_t reg, uint16_t cycles)
 {
   (void)cycles;
-  if (!open_) return 0;
-  return device_->USBSID_Read(reg);
+  if (!open_ || !remap(reg)) return 0;
+  return device_->USBSID_Read(static_cast<uint8_t>(reg));
 }
 
 /**

@@ -132,20 +132,13 @@ void Player::setup_for_driver(bool is_pal)
 
   mmu.write(0x0001, 0x37);  /* BASIC, IO and KERNAL all in */
 
-  /* Cursor blink off.
-   *
-   * The KERNAL's interrupt inverts the character under the cursor, straight
-   * into screen memory, and a tune that leaves the KERNAL interrupt chained in
-   * has it running for as long as it plays. With the driver relocated into the
-   * screen, which is where a tune's own header often puts it, the KERNAL
-   * rewrites the player underneath it: in `Ghostbusters.sid` the cursor sits on
-   * $04f0, the `$4c` of the driver's `jmp idle` became a `$cc`, and the idle
-   * loop fell through into `jmp (initvec)` and started the tune again.
-   *
-   * A real machine is in this state too whenever a program is running: the
-   * cursor only blinks while the editor is waiting for a line, and $cc is
-   * non-zero the rest of the time. Booting to the READY prompt leaves it at
-   * zero, so it has to be put back. */
+  /* Cursor blink off. The KERNAL's interrupt inverts the character under the
+   * cursor straight into screen memory, and a tune that leaves the KERNAL
+   * interrupt chained in has it running for as long as it plays, corrupting
+   * a driver relocated into the screen page byte by byte over time. A real
+   * machine is in this state too whenever a program is running (the cursor
+   * only blinks while the editor waits for a line); booting to READY leaves
+   * it at zero, so it has to be put back. */
   mmu.write(0x00cc, 0x01);
 }
 
@@ -162,11 +155,18 @@ bool Player::load_sid(const data_t * bytes, size_t len, uint16_t song)
    * keeps whatever the machine is set to. */
   if (tune_.video_known) machine_.set_video_model(tune_.video_model);
 
-  /* Tell the SID layer where the tune's chips are */
+  /* Tell the SID layer where the tune's chips are. The emulation core
+   * (SidConfig::base, mos6581_8580.h) now goes up to kMaxSids (15), the most
+   * a v5 tune's own multiSidConfig can ask for, so every address the file
+   * gives is wired up. What actually plays them is a separate question: the
+   * software audio backend (sid_residfp.h) synthesises up to kMaxSoftSids
+   * (also 15), but a real board - UsbSidBackend, EmbeddedSidBackend,
+   * WebSidBackend - only ever has 4 physical sockets and drops the rest, by
+   * design, not by anything clamped here. */
   SidConfig & sid = machine_.sid().config();
-  sid.count = tune_.sid_count;
-  for (uint8_t i = 0; i < 4; i++) {
-    sid.base[i] = (i < tune_.sid_count) ? tune_.sid_addr[i] : 0;
+  sid.count = (tune_.sid_count > kMaxSids) ? kMaxSids : tune_.sid_count;
+  for (uint8_t i = 0; i < kMaxSids; i++) {
+    sid.base[i] = (i < sid.count) ? tune_.sid_addr[i] : 0;
   }
 
   song_ = (song == 0) ? tune_.start_song : song;
@@ -174,16 +174,10 @@ bool Player::load_sid(const data_t * bytes, size_t len, uint16_t song)
 
   /* An RSID that is a C64 BASIC program is not a tune with an init routine, it
    * is a program, and the machine is meant to start it the way a person would:
-   * boot, then RUN. There is nothing to call and no driver to install.
-   *
-   * Treating it as an ordinary tune is what broke
-   * `demos/Combustible_Psychic_Mushrooms.sid`: with `initAddress` zero the
-   * parser defaults init to the load address, so the player installed a driver
-   * and jumped to $0801, which for a BASIC program is the middle of a tokenised
-   * line. A player that does play it reports "Driver = $0400-$03ff", a range of
-   * no length at all, and "Init = $0000": no driver, nothing called.
-   *
-   * The program path already knows how to do this, so hand it over. */
+   * boot, then RUN. There is nothing to call and no driver to install; treating
+   * it as an ordinary tune installs a driver and jumps into the middle of a
+   * tokenised BASIC line, since a zero initAddress defaults to the load
+   * address. The program path already knows how to do this, so hand it over. */
   if (tune_.is_basic) {
     prg_ = PrgFile{};
     prg_.valid = true;
@@ -434,14 +428,10 @@ void Player::select_subtune(uint16_t song)
   while (!machine_.cpu().instruction_done()) machine_.tick();
   machine_.cpu().pc(
     static_cast<addr_t>(reloc_addr_ + kPsidDrvNextSongOffset));
-  /* The jump above is made from wherever the tune happened to be, which is
-   * usually inside its own interrupt. Without clearing the registers the driver
-   * inherits that interrupt's stack and its interrupt-disable, and the new song
-   * carries on from the middle of the old one rather than starting: the symptom
-   * LouD reported as "n and p start into the tune and not at the start".
-   *
-   * Old player ~ src/vsidpsid.cpp next_prev_tune() calls hot_reset() here for
-   * this reason and ours did not. */
+  /* The jump above is made from wherever the tune happened to be, usually
+   * inside its own interrupt; hot_reset() clears the inherited stack and
+   * interrupt-disable so the new song starts rather than continuing from the
+   * middle of the old one. */
   machine_.cpu().hot_reset();
 }
 
@@ -459,29 +449,21 @@ void Player::next_subtune(void)
   if (tune_.songs <= 1) return;
   uint16_t next = static_cast<uint16_t>(song_ + 1);
   if (next > tune_.songs) next = 1;
-  /* Re-initialise, always. This used to jump into the driver's "load another
-   * song" entry while playing, which is cheaper and jams the CPU on some tunes:
-   * `psid/Last_Ninja_2.sid` dies at song 4 and stays dead through every later
-   * switch and the wrap back to song 1. Seen on the device as well as on the
-   * desktop.
-   *
-   * Doing the whole job here, rather than offering a caller a song number to
-   * pass back in, is the point: **the player is the only thing that knows which
-   * song it is on and how many there are.** The firmware has neither, so a call
-   * taking a number cannot be used correctly by it, and `select_subtune()`'s
-   * wrap arithmetic does not belong in three frontends. */
+  /* Re-initialise, always, rather than select_subtune()'s cheaper driver
+   * jump (see select_subtune()'s comment for why). Doing the wrap here
+   * rather than taking a song number from the caller matters because the
+   * player is the only thing that knows which song it is on and how many
+   * there are; the firmware has neither. */
   init_tune(next);
 }
 
 bool Player::restart_song(uint16_t song)
 {
   if (is_prg_ || !tune_.valid) return false;
-  /* Strict, and it used to wrap. Wrapping here made a caller that had lost track
-   * of the song count look as though it had worked: `restart_song(1231)` on a
-   * thirteen song tune quietly played song 1. A caller naming an absolute song
-   * either knows the number or has a bug, and should hear about it. Relative
-   * movement, with the wrap, is what next_subtune() and previous_subtune() are
-   * for, and they need no number from anyone. */
+  /* Strict, deliberately not wrapped: a caller naming an absolute song either
+   * knows the number or has a bug, and should hear about it. Relative
+   * movement, with the wrap, is what next_subtune()/previous_subtune() are
+   * for. */
   if (song < 1 || song > tune_.songs) return false;
   return init_tune(song);
 }

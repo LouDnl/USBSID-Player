@@ -51,7 +51,7 @@ class TraceSidBackend final : public SidBackend
     struct Event {
       uint64_t cycle;   /* running total, so two traces line up */
       uint16_t delta;   /* cycles since the previous event */
-      data_t reg;
+      addr_t reg;
       data_t value;
       char kind;        /* 'w' write, 'r' read, 'f' flush, 'i' wait */
     };
@@ -75,13 +75,13 @@ class TraceSidBackend final : public SidBackend
     void set_next(SidBackend * next) { next_ = next; }
     SidBackend * next(void) const { return next_; }
 
-    void write(data_t reg, data_t value, uint16_t cycles) override
+    void write(addr_t reg, data_t value, uint16_t cycles) override
     {
       cycle_ += cycles;
       record('w', reg, value, cycles);
       if (next_ != nullptr) next_->write(reg, value, cycles);
     }
-    data_t read(data_t reg, uint16_t cycles) override
+    data_t read(addr_t reg, uint16_t cycles) override
     {
       cycle_ += cycles;
       /* A chained read records what the backend below answered, which is the
@@ -119,11 +119,11 @@ class TraceSidBackend final : public SidBackend
         const Event & e = events_[i];
         switch (e.kind) {
           case 'w':
-            fprintf(out, "[W]$%02x:%02x [C]%5u @%llu\n", e.reg, e.value,
+            fprintf(out, "[W]$%03x:%02x [C]%5u @%llu\n", e.reg, e.value,
                     e.delta, static_cast<unsigned long long>(e.cycle));
             break;
           case 'r':
-            fprintf(out, "[R]$%02x    [C]%5u @%llu\n", e.reg, e.delta,
+            fprintf(out, "[R]$%03x    [C]%5u @%llu\n", e.reg, e.delta,
                     static_cast<unsigned long long>(e.cycle));
             break;
           case 'i':
@@ -139,7 +139,7 @@ class TraceSidBackend final : public SidBackend
     }
 
   private:
-    void record(char kind, data_t reg, data_t value, uint16_t delta)
+    void record(char kind, addr_t reg, data_t value, uint16_t delta)
     {
       if (count_ >= capacity_) { ++dropped_; return; }
       events_[count_++] = Event{ cycle_, delta, reg, value, kind };

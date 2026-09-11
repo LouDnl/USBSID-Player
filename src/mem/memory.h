@@ -4,7 +4,7 @@
  *
  * memory.h
  * What the CPU sees of the world: one read and one write per bus cycle.
- * Step 2.4 plugs the MMU in here, the CPU never learns the difference.
+ * The MMU plugs in behind this interface; the CPU never learns the difference.
  *
  * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD

@@ -39,6 +39,7 @@
 #include "prgfile.h"
 #include "sid_trace.h"
 #include "sid_usbsid.h"
+#include "sid_netdevice.h"
 #include "sidfile.h"
 #include "console.h"
 #include "audio_out.h"
@@ -110,6 +111,40 @@ void print_voice_mask(const char * label, const uint8_t mask[4])
   printf("%s\n", first ? "nothing" : "");
 }
 
+/**
+ * @brief Read a `--select-sids` list into an ordered array of tune SID numbers.
+ *
+ * `3,4,5` sends the tune's third SID to the board's first socket, its fourth
+ * to the second and its fifth to the third - see
+ * UsbSidBackend::set_sid_select(). Comma separated, counting from 1, the same
+ * convention as --mute/--solo.
+ *
+ * @param spec   the argument as given
+ * @param out    out, up to kMaxSids entries
+ * @param count  out, how many entries were read
+ * @returns true if the whole string parsed, false on the first thing that did
+ *          not, with count left as far as it got
+ */
+bool parse_sid_select(const char * spec, uint8_t out[kMaxSids], uint8_t & count)
+{
+  count = 0;
+  if (spec == nullptr || *spec == '\0') return false;
+  const char * p = spec;
+  while (*p != '\0') {
+    if (*p < '0' || *p > '9') return false;
+    long n = 0;
+    while (*p >= '0' && *p <= '9') {
+      n = n * 10 + (*p++ - '0');
+      if (n > kMaxSids) return false;
+    }
+    if (n < 1 || count >= kMaxSids) return false;
+    out[count++] = static_cast<uint8_t>(n);
+    if (*p == ',') { p++; continue; }
+    if (*p != '\0') return false;
+  }
+  return count > 0;
+}
+
 void usage(const char * argv0)
 {
   printf(
@@ -124,12 +159,18 @@ void usage(const char * argv0)
     "  -n, --no-device   run without hardware, useful for checking a tune\n"
     "\n"
     "  sound:\n"
-    "      --output M    usbsid (default), audio, or wav. usbsid falls back to\n"
-    "                    audio when no board is found\n"
+    "      --output M    usbsid (default), audio, wav, or netdevice. usbsid\n"
+    "                    falls back to audio when no board is found\n"
     "      --wav FILE    write a WAV instead of playing, implies --output=wav\n"
+    "      --net-host H  Network SID Device server to connect to for\n"
+    "                    --output=netdevice (default 127.0.0.1)\n"
+    "      --net-port P  its TCP port (default 6581)\n"
+    "      --net-sids N  SIDs to tell it about (default: the tune's own count)\n"
     "      --rate N      sample rate for audio and wav (default 44100). A device\n"
     "                    may impose its own, which is then what is used\n"
     "      --quality Q   fast (linear) or good (sinc, default)\n"
+    "      --stereo      pan multi-SID tunes per the v5 file's own hint\n"
+    "                    (--output=audio/wav only; off by default, one channel)\n"
     "  -T, --trace FILE  write every SID register event to FILE. Records what\n"
     "                    is played, so it works with a board and with --wav;\n"
     "                    add -n for a silent run that only records\n"
@@ -145,6 +186,14 @@ void usage(const char * argv0)
     "  -rr               read the SID back from the chip, not the mirror\n"
     "  -f                force everything into socket two\n"
     "  -fa XX            force everything to physical base $XX (hex)\n"
+    "      --select-sids SPEC  play only these of the tune's SIDs, on the\n"
+    "                    board's sockets in the order given. SPEC is a comma\n"
+    "                    separated list of tune SID numbers counting from 1,\n"
+    "                    for example 3,4,5 puts the tune's 3rd SID on the\n"
+    "                    board's first socket, its 4th on the second, and its\n"
+    "                    5th on the third. At most 4 entries are used.\n"
+    "                    (--output=usbsid only; default: the tune's first 4\n"
+    "                    SIDs on the board's first 4 sockets, in order)\n"
     "      --overhead N  cycles one hardware access costs (default 1)\n"
     "      --songlengths F  HVSC Songlengths database, to stop when the song ends.\n"
     "                    Found by itself in $SONGLENGTHS, ~/Songlengths.md5,\n"
@@ -196,7 +245,7 @@ const char * play_time(uint64_t frames, double rate)
   return buf;
 }
 
-void print_tune(const SidFile & t)
+void print_tune(const SidFile & t, bool stereo)
 {
   printf("  title    : %s\n", t.name);
   printf("  author   : %s\n", t.author);
@@ -210,7 +259,59 @@ void print_tune(const SidFile & t)
          t.video_known ? vic_timing(t.video_model).name : "unspecified");
   printf("  sids     : %u", t.sid_count);
   for (uint8_t i = 0; i < t.sid_count; i++) printf(" $%04x", t.sid_addr[i]);
+  /* --output=usbsid/webusb plays a real board, which only ever has 4
+   * physical sockets (UsbSidBackend, EmbeddedSidBackend, WebSidBackend all
+   * stay a hard 4 chip placeholder by design - see mos6581_8580.h's own
+   * kMaxSids comment); --output=audio/netdevice synthesises or forwards up
+   * to kMaxSids (15), so this caveat does not apply to them. Which one this
+   * run ends up using is not decided yet at this point in main(), so the
+   * warning names both rather than guessing. */
+  if (t.sid_count > 4) {
+    printf(" (a real board plays the first 4; --output=audio or "
+           "--output=netdevice plays all %u)", t.sid_count);
+  }
   printf("\n");
+
+  if (t.version == 5) {
+    if (t.sid_count > 1) {
+      const char * layout = "standard";
+      switch (t.pan_layout) {
+        case SidPanLayout::LCR:           layout = "L/C/R";           break;
+        case SidPanLayout::CenterFirst:   layout = "center first";    break;
+        case SidPanLayout::FullyCentered: layout = "fully centered";  break;
+        default: break;
+      }
+      const char * mode = "direct";
+      switch (t.pan_mode) {
+        case SidPanMode::Reverse: mode = "reverse"; break;
+        case SidPanMode::Group:   mode = "group";   break;
+        case SidPanMode::Spread:  mode = "spread";  break;
+        default: break;
+      }
+      /* Whether this is actually honoured, not just parsed, depends on
+       * --stereo (ResidFpSidBackend::set_pan(), main()) and on ending up at
+       * --output=audio/wav: a real board is untouched by --stereo and still
+       * plays one channel per chip regardless. Which output this run lands
+       * on is not decided yet at this point in main(), same reasoning as the
+       * sid_count > 4 warning above, so this only reports whether --stereo
+       * was asked for, not whether a board ignored it. */
+      printf("  panning  : %s/%s, %s:", layout, mode,
+             stereo ? "honoured on --output=audio/wav (--stereo)"
+                    : "hint only, this player mixes to one channel");
+      /* t.sid_pan[] is sized kMaxSids (sidfile.h), the same ceiling
+       * t.sid_count is already held to by the parser, so every chip shown
+       * above has a panning entry here too - no separate cap needed. */
+      for (uint8_t i = 0; i < t.sid_count; i++) {
+        printf(" %c", t.sid_pan[i] == SidPan::Left ? 'L' : t.sid_pan[i] == SidPan::Right ? 'R' : 'C');
+      }
+      printf("\n");
+    }
+    if (t.has_fm_opl) printf("  FM/OPL   : yes, SFX Sound Expander / FM YAM compatible\n");
+    if (t.has_embedded_song_lengths) {
+      printf("  lengths  : embedded in the file (%u song%s)\n",
+             t.song_length_table_count, t.song_length_table_count == 1 ? "" : "s");
+    }
+  }
 
   /* The chip the tune was written for. Worth showing because it decides how the
    * filter sounds, and a tune that says nothing is a tune whose author did not
@@ -269,30 +370,33 @@ void print_tune(const SidFile & t)
  * `UsbSid` is the default and is always tried first. With no board it becomes
  * `Audio` rather than playing silently: a machine with no hardware still wants
  * to hear the tune, and silence that needs explaining is worse than a fallback
- * that says what it did.
+ * that says what it did. `NetDevice` gets the same treatment: a server that
+ * cannot be reached falls back to `Audio` rather than playing silently.
  */
-enum class OutputMode { UsbSid, Audio, Wav };
+enum class OutputMode { UsbSid, Audio, Wav, NetDevice };
 
 } /* namespace */
 
-/* What to play when the database has never heard of a song.
- *
- * Five minutes. A tune with no entry used to play until interrupted, which
- * means an unattended run stops at the first such tune for ever and a playlist
- * never reaches the end. Five minutes is longer than most SIDs and short enough
- * that sitting through one is not a punishment; the same figure is used by the
- * browser player, so the two behave alike.
- *
- * Zero when song lengths are switched off altogether, which still means "play
- * until stopped": --no-songlengths is a request for exactly that.
- */
+/* Default song length when the database has no entry: 5 minutes (matches
+ * the browser player). Without a cap, an unattended playlist run stalls
+ * forever on the first unknown tune. 0 (--no-songlengths) means play until
+ * stopped. */
 constexpr uint32_t kDefaultSongMs = 5u * 60u * 1000u;
 
-static uint32_t song_length_ms(const usbsid::SongLengths & lengths,
+/*
+ * The external Songlengths.md5 database is checked first: it is the curated,
+ * widely used source and covers tunes that have no embedded table at all. A
+ * v5 tune's own embedded lengths (bit 10 of flags, see sidfile.h) are the
+ * fallback, used when the database has nothing for this exact file. Either
+ * way, no length known at all still means "play for five minutes" rather
+ * than "play until stopped", per kDefaultSongMs above.
+ */
+static uint32_t song_length_ms(const usbsid::SongLengths & lengths, const SidFile & tune,
                                uint16_t song, bool use_songlengths)
 {
   if (!use_songlengths) return 0;
-  const uint32_t ms = lengths.valid ? lengths.for_song(song) : 0;
+  uint32_t ms = lengths.valid ? lengths.for_song(song) : 0;
+  if (ms == 0 && tune.has_embedded_song_lengths) ms = tune.embedded_song_length_ms(song);
   return (ms > 0) ? ms : kDefaultSongMs;
 }
 
@@ -302,6 +406,7 @@ int main(int argc, char ** argv)
   const char * trace_path = nullptr;
   const char * mute_spec = nullptr;
   const char * solo_spec = nullptr;
+  const char * select_sids_spec = nullptr;
   uint16_t song = 0;
   int seconds = 0;
   bool info_only = false;
@@ -322,6 +427,17 @@ int main(int argc, char ** argv)
   const char * wav_path = nullptr;
   unsigned soft_rate = 44100;
   SoftSidQuality soft_quality = SoftSidQuality::Good;
+  /* Opt in: every existing --output=audio/wav consumer assumed one channel,
+   * so this stays off unless asked for. See ResidFpSidBackend::configure()'s
+   * own comment on why it is a configure()-time choice and not a toggle. */
+  bool soft_stereo = false;
+
+  /* --output=netdevice: a Network SID Device server to send writes to
+   * instead of local hardware. Defaults match the protocol's own stated
+   * defaults (network_sid_device_v4.html), the same ones sid-device uses. */
+  const char * net_host = "127.0.0.1";
+  int net_port = 6581;
+  int net_sids = 0; /* 0 means "use the tune's own SID count" */
 
   for (int i = 1; i < argc; i++) {
     const char * a = argv[i];
@@ -338,6 +454,7 @@ int main(int argc, char ** argv)
       trace_path = argv[++i];
     else if (!strcmp(a, "--mute") && i + 1 < argc) mute_spec = argv[++i];
     else if (!strcmp(a, "--solo") && i + 1 < argc) solo_spec = argv[++i];
+    else if (!strcmp(a, "--select-sids") && i + 1 < argc) select_sids_spec = argv[++i];
     else if (!strcmp(a, "-rr")) real_reads = true;
     else if (!strcmp(a, "-f")) force_socket_two = true;
     else if (!strcmp(a, "-fa") && i + 1 < argc) {
@@ -354,12 +471,16 @@ int main(int argc, char ** argv)
       if (!strcmp(v, "usbsid")) output = OutputMode::UsbSid;
       else if (!strcmp(v, "audio")) output = OutputMode::Audio;
       else if (!strcmp(v, "wav")) output = OutputMode::Wav;
-      else { printf("unknown output '%s': use usbsid, audio or wav\n", v); return 2; }
+      else if (!strcmp(v, "netdevice")) output = OutputMode::NetDevice;
+      else { printf("unknown output '%s': use usbsid, audio, wav or netdevice\n", v); return 2; }
     }
     else if (!strcmp(a, "--wav") && i + 1 < argc) {
       wav_path = argv[++i];
       output = OutputMode::Wav;   /* naming a file is asking for it */
     }
+    else if (!strcmp(a, "--net-host") && i + 1 < argc) net_host = argv[++i];
+    else if (!strcmp(a, "--net-port") && i + 1 < argc) net_port = atoi(argv[++i]);
+    else if (!strcmp(a, "--net-sids") && i + 1 < argc) net_sids = atoi(argv[++i]);
     else if (!strcmp(a, "--rate") && i + 1 < argc)
       soft_rate = static_cast<unsigned>(atoi(argv[++i]));
     else if (!strcmp(a, "--quality") && i + 1 < argc) {
@@ -368,6 +489,7 @@ int main(int argc, char ** argv)
       else if (!strcmp(v, "good")) soft_quality = SoftSidQuality::Good;
       else { printf("unknown quality '%s': use fast or good\n", v); return 2; }
     }
+    else if (!strcmp(a, "--stereo")) soft_stereo = true;
     else if (!strcmp(a, "--songlengths") && i + 1 < argc) songlengths_path = argv[++i];
     else if (!strcmp(a, "--no-songlengths")) use_songlengths = false;
     else if (!strcmp(a, "-srw")) us_log.sid_rw = true;
@@ -409,7 +531,7 @@ int main(int argc, char ** argv)
 
   printf("%s\n", path);
   if (is_sid) {
-    print_tune(info);
+    print_tune(info, soft_stereo);
   } else {
     printf("  program  : %s%s%s\n",
            program.is_p00 ? "P00 container" : "PRG",
@@ -435,6 +557,7 @@ int main(int argc, char ** argv)
   std::vector<TraceSidBackend::Event> trace_buffer;
   TraceSidBackend * trace = nullptr;
   UsbSidBackend usb;
+  NetworkSidBackend net;
 
   /* Where the writes go while fast forwarding: nowhere. See the 'f' key. */
   NullSidBackend ff_null;
@@ -457,10 +580,8 @@ int main(int argc, char ** argv)
   SoftSidModel soft_model = SoftSidModel::Mos6581;
   uint32_t soft_clock = 0;
 
-  /* The trace is built here and chained in below, once it is known what it is
-   * going in front of. It used to be the machine's only backend, which meant a
-   * trace could only ever be taken of a silent run: `-T` with a board attached
-   * recorded nothing that was played. `-n -T file` is the old behaviour. */
+  /* Built here, chained in below once its downstream backend is known, so
+   * `-T` can trace a run that is also actually audible on a device. */
   if (trace_path != nullptr) {
     trace_buffer.resize(4u * 1000u * 1000u);
     trace = new TraceSidBackend(trace_buffer.data(), trace_buffer.size());
@@ -482,13 +603,36 @@ int main(int argc, char ** argv)
     }
   }
 
+  if (output == OutputMode::NetDevice) {
+    if (net.connect(net_host, static_cast<uint16_t>(net_port))) {
+      /* A SID file says how many chips it wants; a program says nothing, so
+       * two are assumed, same reasoning and the same fallback the software
+       * backend below uses for its own chip count. --net-sids overrides
+       * both when the server's own idea of chip count needs to differ. */
+      const uint8_t chips = static_cast<uint8_t>(
+        (net_sids > 0) ? net_sids : (is_sid ? info.sid_count : 2));
+      net.set_sid_count(chips); /* clamped to kMaxSids (15) internally */
+      printf("  device   : Network SID Device at %s:%d, protocol v%d, %u SID%s\n",
+             net_host, net_port, net.protocol_version(), net.sid_count(),
+             net.sid_count() == 1 ? "" : "s");
+      machine.set_sid_backend(net);
+      active_backend = &net;
+    } else {
+      /* Same reasoning as the usbsid fallback above: playing silently is
+       * indistinguishable from a broken tune. */
+      printf("  device   : cannot reach %s:%d, synthesising instead (--output=audio)\n",
+             net_host, net_port);
+      output = OutputMode::Audio;
+    }
+  }
+
   if (output == OutputMode::Audio || output == OutputMode::Wav) {
     /* The device gets to decide the rate. Asking a device fixed at 48000 for
      * 44100 gets a resampler for free whether or not that was wanted, so the
      * synthesis is configured for what the device actually runs at. */
     unsigned rate = soft_rate;
     if (output == OutputMode::Audio) {
-      if (!audio.open(soft_rate)) {
+      if (!audio.open(soft_rate, soft_stereo ? 2 : 1)) {
         printf("  audio    : %s\n", audio.error());
         return 1;
       }
@@ -512,10 +656,25 @@ int main(int argc, char ** argv)
     const uint8_t chips = static_cast<uint8_t>(is_sid ? info.sid_count : 2);
 
     if (!soft.configure(chips, static_cast<double>(clock_hz), rate,
-                        soft_quality, model)) {
+                        soft_quality, model, soft_stereo)) {
       printf("  audio    : reSIDfp would not accept %u Hz at a %u Hz clock\n",
              rate, clock_hz);
       return 1;
+    }
+    /* configure() clamps internally to kMaxSoftSids (15); a tune whose own
+     * header count somehow exceeds even that (kMaxSids itself is the file
+     * format's own ceiling, so this should not happen) still gets whatever
+     * actually got built via soft.chips(), not the raw request above. */
+    const uint8_t real_chips = soft.chips();
+    /* The v5 file's own panning hint (sidfile.cpp's compute_panning(), run
+     * at parse time - see is_sid's own info.sid_pan[]), one call per chip
+     * actually built. No effect at all unless soft_stereo/--stereo, and a
+     * program (not is_sid) has no header to take one from, so it stays the
+     * implicit all-Center configure() already reset to. */
+    if (soft_stereo && is_sid) {
+      for (uint8_t c = 0; c < real_chips; c++) {
+        soft.set_pan(static_cast<uint8_t>(c + 1), info.sid_pan[c]);
+      }
     }
     /* attach() is what sets access_overhead to 0, which a software SID needs and
      * a board does not. Doing it here rather than asking the caller to remember
@@ -524,7 +683,7 @@ int main(int argc, char ** argv)
     active_backend = &soft;
     soft_active = true;
     soft_out_rate = rate;
-    soft_chips = chips;
+    soft_chips = real_chips;
     soft_model = model;
     soft_clock = clock_hz;
     soft_buf.resize(65536);
@@ -532,16 +691,18 @@ int main(int argc, char ** argv)
 
     if (output == OutputMode::Wav) {
       const char * out = (wav_path != nullptr) ? wav_path : "usbsid.wav";
-      if (!wav.open(out, rate, 1)) {
+      if (!wav.open(out, rate, soft_stereo ? 2 : 1)) {
         printf("  audio    : cannot write %s\n", out);
         return 1;
       }
-      printf("  output   : %s, %u Hz, %u chip%s, %s\n", out, rate, chips,
-             chips == 1 ? "" : "s",
+      printf("  output   : %s, %u Hz, %s, %u chip%s, %s\n", out, rate,
+             soft_stereo ? "stereo" : "mono", real_chips,
+             real_chips == 1 ? "" : "s",
              soft_quality == SoftSidQuality::Good ? "sinc" : "linear");
     } else {
-      printf("  output   : reSIDfp to the default audio device, %u Hz, "
-             "%u chip%s, %s\n", rate, chips, chips == 1 ? "" : "s",
+      printf("  output   : reSIDfp to the default audio device, %u Hz, %s, "
+             "%u chip%s, %s\n", rate, soft_stereo ? "stereo" : "mono",
+             real_chips, real_chips == 1 ? "" : "s",
              soft_quality == SoftSidQuality::Good ? "sinc" : "linear");
     }
     /* Also stops the pacer, which is deliberate and not a side effect.
@@ -578,6 +739,42 @@ int main(int argc, char ** argv)
   sid_config.sids_socket_one = usb.sids_socket_one();
   sid_config.sids_socket_two = usb.sids_socket_two();
   sid_config.fmopl_sid = usb.fmopl_sid();
+
+  /* --select-sids picks which of the tune's SIDs land on which board socket,
+   * in place of the default first-4-to-first-4 mapping. Set on `usb` itself
+   * (UsbSidBackend::set_sid_select()) rather than in SidConfig, because it is
+   * purely a board output concern: the emulation still sees, mutes and traces
+   * every one of the tune's SIDs exactly as it always did, only what actually
+   * reaches the hardware changes. Harmless, and silently unused, on any other
+   * --output. */
+  if (select_sids_spec != nullptr) {
+    uint8_t sids[kMaxSids];
+    uint8_t count = 0;
+    if (!parse_sid_select(select_sids_spec, sids, count)) {
+      printf("  cannot read --select-sids %s, expected a comma separated "
+             "list of SID numbers counting from 1, for example 3,4,5\n",
+             select_sids_spec);
+      return 2;
+    }
+    usb.set_sid_select(sids, count);
+    if (output == OutputMode::UsbSid) {
+      printf("  sid select:");
+      for (uint8_t s = 0; s < count && s < 4; s++) {
+        printf(" board %u <- tune SID %u", s + 1, sids[s]);
+      }
+      if (count > 4) printf(" (%u more ignored, only 4 sockets)", count - 4);
+      printf("\n");
+      if (is_sid) {
+        for (uint8_t s = 0; s < count && s < 4; s++) {
+          if (sids[s] > info.sid_count) {
+            printf("  warning  : tune only has %u SID%s, --select-sids asks "
+                   "for SID %u\n", info.sid_count,
+                   info.sid_count == 1 ? "" : "s", sids[s]);
+          }
+        }
+      }
+    }
+  }
 
   Player player(machine);
   if (is_sid) {
@@ -630,10 +827,18 @@ int main(int argc, char ** argv)
    * frame, so reconfiguring here costs one resampler table and no state. */
   if (soft_active && timing.clock_hz != soft_clock) {
     if (!soft.configure(soft_chips, static_cast<double>(timing.clock_hz),
-                        soft_out_rate, soft_quality, soft_model)) {
+                        soft_out_rate, soft_quality, soft_model, soft_stereo)) {
       printf("  audio    : reSIDfp would not accept %u Hz at a %u Hz clock\n",
              soft_out_rate, timing.clock_hz);
       return 1;
+    }
+    /* configure() rebuilds every chip from scratch and resets pan_[] to
+     * Center - see its own comment - so the tune's panning hint has to go
+     * back on too, the same as the first configure() above. */
+    if (soft_stereo && is_sid) {
+      for (uint8_t c = 0; c < soft.chips(); c++) {
+        soft.set_pan(static_cast<uint8_t>(c + 1), info.sid_pan[c]);
+      }
     }
     soft.attach(machine);
     soft_clock = timing.clock_hz;
@@ -695,6 +900,15 @@ int main(int argc, char ** argv)
    * from anything the parser worked out. */
   SongLengths lengths;
   char db_path[1024] = { 0 };
+  /* A v5 tune can carry its own song length table right in the file (see
+   * print_tune()'s "lengths : embedded in the file"). When it does, that is
+   * an authoritative playtime for this song, and song_length_ms() below
+   * already prefers it over kDefaultSongMs the same way it prefers the
+   * external database. So a database miss is not actually a fallback to the
+   * 5 minute timer in that case, and saying so here would be wrong: the
+   * warning is for when nothing at all knows how long the song runs. */
+  const uint32_t embedded_ms = (is_sid && player.tune().has_embedded_song_lengths)
+    ? player.tune().embedded_song_length_ms(player.song()) : 0;
   if (is_sid && use_songlengths &&
       songlengths_find_file(songlengths_path, db_path, sizeof(db_path))) {
     std::vector<char> db;
@@ -716,14 +930,20 @@ int main(int argc, char ** argv)
       const uint32_t ms = lengths.for_song(player.song());
       printf("  length   : %u:%02u.%03u for this song, %u in the database\n",
              ms / 60000u, (ms / 1000u) % 60u, ms % 1000u, lengths.count);
+    } else if (embedded_ms > 0) {
+      printf("  length   : %u:%02u for this song, from the file's own v5 song length table\n",
+             embedded_ms / 60000u, (embedded_ms / 1000u) % 60u);
     } else {
       printf("  length   : not in %s, using %u:%02u\n", db_path,
              kDefaultSongMs / 60000u, (kDefaultSongMs / 1000u) % 60u);
     }
   } else if (is_sid && use_songlengths) {
-    /* A path given on the command line that is not there is a mistake, and
-     * saying "none found" about it would hide which of the two happened. */
-    if (songlengths_path != nullptr) {
+    if (embedded_ms > 0) {
+      printf("  length   : %u:%02u for this song, from the file's own v5 song length table\n",
+             embedded_ms / 60000u, (embedded_ms / 1000u) % 60u);
+    } else if (songlengths_path != nullptr) {
+      /* A path given on the command line that is not there is a mistake, and
+       * saying "none found" about it would hide which of the two happened. */
       printf("  length   : cannot read %s\n", songlengths_path);
     } else {
       printf("  length   : no Songlengths database found. Point --songlengths at "
@@ -813,26 +1033,14 @@ int main(int argc, char ** argv)
           break;
         }
         case 'f':
-          /* Fast forward is a **seek**, and it has to stop pacing to be one.
-           *
-           * It cannot be audible fast playback over USBSID: every write carries
-           * the gap that should precede it and the board sits those gaps out, so
-           * the board cannot be driven faster than the tune's own timing however
-           * quickly the frames are produced.
-           *
-           * Nor is it enough to emulate more frames per wait, which is what this
-           * did first. `wait_for_frame` measures the deadline from a fixed point
-           * as `frame_us * (frame - base)`, so advancing the frame counter four
-           * at a time moves the deadline four frames too: the same wall clock
-           * rate, four times the work per frame of it. On a tune anywhere near
-           * real time that overran, the lag passed the pacer's 250 ms threshold
-           * and it rebased over and over. It was slower, not faster, and LouD
-           * heard exactly that.
-           *
-           * So: no pacing at all while it runs, writes thrown away, chip
-           * silenced going in and caught up from the register file coming out,
-           * and the pacer re-anchored so the schedule afterwards is measured
-           * from where the seek ended rather than from where it began. */
+          /* Fast forward is a **seek**, not audible fast playback: over USBSID
+           * every write carries the gap that precedes it and the board sits
+           * those gaps out, so it cannot be driven faster than the tune's own
+           * timing regardless of frame rate. So: no pacing at all while it
+           * runs, writes thrown away, chip silenced going in and caught up
+           * from the register file coming out, and the pacer re-anchored so
+           * the schedule afterwards is measured from where the seek ended
+           * rather than from where it began. */
           fast = !fast;
           if (fast) {
             silence();
@@ -870,7 +1078,7 @@ int main(int argc, char ** argv)
       if (!no_device) pacer.wait_for_frame(frame);
       else            std::this_thread::sleep_for(std::chrono::milliseconds(10));
       if (status_line) {
-        const uint32_t song_ms = song_length_ms(lengths, player.song(), use_songlengths);
+        const uint32_t song_ms = song_length_ms(lengths, player.tune(), player.song(), use_songlengths);
         if (song_ms > 0) {
           printf("\r  ||  %s / %u:%02u.%u  song %u/%u        ",
                  play_time(frame - song_frame0, pacer.frame_rate()),
@@ -898,8 +1106,17 @@ int main(int argc, char ** argv)
      * dropped samples are a click and a late frame is nothing.
      */
     if (soft_active) {
-      size_t n;
-      while ((n = soft.take(soft_buf.data(), soft_buf.size())) != 0) {
+      /* take()'s own frames param and return are audio frames (1 sample
+       * mono, 2 interleaved stereo - see its header comment), while
+       * wav.write()/audio.push() both want the raw interleaved sample count,
+       * so soft_buf's element capacity has to be divided down to a frame
+       * request going in and the frame count taken back out multiplied by
+       * channels() coming out. Unchanged arithmetic for mono, where
+       * channels() is 1 and the two counts are the same thing. */
+      const size_t ch = soft.channels();
+      size_t frames_got;
+      while ((frames_got = soft.take(soft_buf.data(), soft_buf.size() / ch)) != 0) {
+        const size_t n = frames_got * ch;
         if (output == OutputMode::Wav) {
           wav.write(soft_buf.data(), n);
         } else {
@@ -923,7 +1140,7 @@ int main(int argc, char ** argv)
       status_at = frame;
       /* The song's own length beside the clock when the database knows it, so
        * "how far in" is answerable at a glance rather than by arithmetic. */
-      const uint32_t song_ms = song_length_ms(lengths, player.song(), use_songlengths);
+      const uint32_t song_ms = song_length_ms(lengths, player.tune(), player.song(), use_songlengths);
       char total[24] = { 0 };
       if (song_ms > 0) {
         snprintf(total, sizeof(total), " / %u:%02u.%u",
@@ -967,7 +1184,7 @@ int main(int argc, char ** argv)
      * tune with more songs moves on to the next rather than stopping, which is
      * what a database of every song's length is for. */
     if (use_songlengths && frame_limit == 0) {
-      const uint32_t ms = song_length_ms(lengths, player.song(), use_songlengths);
+      const uint32_t ms = song_length_ms(lengths, player.tune(), player.song(), use_songlengths);
       if (ms > 0) {
         const double played_ms =
           1000.0 * static_cast<double>(frame - song_frame0) / pacer.frame_rate();
@@ -1025,5 +1242,6 @@ int main(int argc, char ** argv)
   }
 
   usb.close();
+  net.disconnect();
   return 0;
 }

@@ -459,19 +459,16 @@ int test_skipping_matches_stepping(void)
 /**
  * @brief Timer A prescaling timer B, scheduled against stepped.
  *
- * The shape `prg/Musik_Run_Stop.prg` runs: timer A free running on phi2 with a
- * latch of two, so it underflows every three cycles, as a prescaler for timer
- * B cascaded off it. Every clock does something, so the scheduler correctly
- * refused to skip and the program walked 97% of its cycles. `cascade_skip()`
- * applies a whole run of timer A underflows as arithmetic instead, which is
- * only sound if that run really is invisible from outside.
+ * Timer A free running on phi2 with a latch of two underflows every three
+ * cycles as a prescaler for timer B cascaded off it. `cascade_skip()` applies
+ * a whole run of those underflows as arithmetic, which is only sound if the
+ * run really is invisible from outside.
  *
  * The chip is driven directly rather than through a Machine, because a Machine
- * runs the KERNAL and the KERNAL reprograms CIA1 out from under the test: the
- * first version of this had timer A on a latch of 16421 and was not testing the
- * cascade at all. One instance is caught up in strides, the other is ticked
- * every clock, and they are compared on a stride that is prime so it never
- * lands in step with the three clock period.
+ * runs the KERNAL and the KERNAL reprograms CIA1 out from under the test. One
+ * instance is caught up in strides, the other is ticked every clock, and they
+ * are compared on a stride that is prime so it never lands in step with the
+ * three clock period.
  */
 struct CascadeRig {
   Bus bus;

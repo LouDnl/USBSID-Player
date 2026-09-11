@@ -105,9 +105,8 @@ void attach_once(void)
 /**
  * @brief Ask the board for the clock the tune was written for.
  *
- * The firmware indexes its clock table rather than taking a frequency, and
- * the table is the one in sid_defs.h. Anything not in it is left alone: a
- * wrong clock is worse than the current one.
+ * The firmware indexes its clock table (sid_defs.h) rather than taking a
+ * frequency; a rate not in it is left alone rather than set wrong.
  */
 void apply_tune_clock(void)
 {
@@ -184,11 +183,9 @@ void usplayer_upload_finish_tune(char subt)
 /**
  * @brief Finish an upload as a program and start it.
  *
- * Unlike a tune, a program has no separate init step in this API: the firmware
- * calls this and then goes straight to loop_sidplayer(). So the boot, the
- * load and the RUN all happen here, which makes this the slow call. The `loop`
- * argument is what the old player restarted a finished program with; nothing
- * here decides that a program has finished, so it is accepted and ignored.
+ * Unlike a tune, a program has no separate init step: boot, load and RUN
+ * all happen here, making this the slow call. `loop` is accepted and
+ * ignored - nothing here decides a program has finished.
  */
 void usplayer_upload_finish_prg(bool loop)
 {
@@ -395,11 +392,9 @@ void usplayer_set_sid_config(uint8_t numsids, uint8_t sids_socket_one,
 /**
  * @brief The machine itself, for a frontend that needs to reach past this API.
  *
- * C++ only and deliberately not part of the C surface. The software audio
- * backend has to be attached to the same machine the player is stepping, and it
- * is a C++ object with a C++ constructor, so there is nothing to be gained by
- * pretending otherwise. `attach_once()` first, so a caller cannot get a machine
- * that has not been set up.
+ * C++ only, not part of the C surface - the software audio backend must
+ * attach to the same machine the player is stepping. attach_once() first,
+ * so the machine is always set up.
  */
 namespace usbsid {
 Machine & usplayer_machine(void)
@@ -473,9 +468,8 @@ bool usplayer_is_pal(void)
 /**
  * @brief Frames per second of the video model the tune asked for.
  *
- * PAL is 50.125, not 50: a frame is 19656 cycles of a 985248 Hz clock. A host
- * pacing playback against its own clock has to use this rather than a round
- * number, or it drifts by a frame every eight seconds.
+ * PAL is 50.125, not 50 (19656 cycles/frame @ 985248 Hz). Pace playback
+ * against this exact value or drift by a frame every ~8 seconds.
  */
 double usplayer_refresh_hz(void)
 {
@@ -527,6 +521,32 @@ uint16_t usplayer_driver_address(void) { return g_player.driver_address(); }
 const char * usplayer_tune_name(void) { return g_player.tune().name; }
 const char * usplayer_tune_author(void) { return g_player.tune().author; }
 const char * usplayer_tune_released(void) { return g_player.tune().released; }
+
+/* v5: the tune's own idea of how many SID chips it wants, and where. Its own
+ * count may run past what this player can actually wire up (4, everywhere);
+ * that cap is applied in Player::load_sid, not here, so this stays the raw,
+ * informational figure a frontend would want to show. */
+uint8_t usplayer_sid_count(void) { return g_player.tune().sid_count; }
+uint16_t usplayer_sid_addr(uint8_t chip)
+{
+  const SidFile & t = g_player.tune();
+  return (chip < t.sid_count) ? t.sid_addr[chip] : 0;
+}
+uint8_t usplayer_sid_pan(uint8_t chip)
+{
+  const SidFile & t = g_player.tune();
+  if (chip >= t.sid_count) return static_cast<uint8_t>(SidPan::Center);
+  return static_cast<uint8_t>(t.sid_pan[chip]);
+}
+uint8_t usplayer_pan_layout(void) { return static_cast<uint8_t>(g_player.tune().pan_layout); }
+uint8_t usplayer_pan_mode(void) { return static_cast<uint8_t>(g_player.tune().pan_mode); }
+bool usplayer_has_fm_opl(void) { return g_player.tune().has_fm_opl; }
+bool usplayer_has_embedded_songlengths(void) { return g_player.tune().has_embedded_song_lengths; }
+uint32_t usplayer_embedded_songlength_ms(uint16_t song)
+{
+  return g_player.tune().embedded_song_length_ms(song);
+}
+
 uint32_t usplayer_sid_writes(void) { return g_machine.sid().writes(); }
 uint64_t usplayer_cycles_waited(void) { return g_backend.cycles_waited(); }
 uint64_t usplayer_cycles_paced(void) { return g_backend.cycles_paced(); }

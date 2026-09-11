@@ -7,8 +7,7 @@
  * through the ordinary PRG boot path (see player/player.cpp Player::init_prg,
  * which already boots the KERNAL, pokes the binary in and types RUN, exactly
  * what Cynthcart's "$0801, 10 SYS2061" stub needs). Embedded only, see
- * docs/EMBEDDED.md and _llm-memory/player-repo/TODO.md #50: nothing here is
- * wanted on desktop.
+ * docs/API_EMBEDDED.md: nothing here is wanted on desktop.
  *
  * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD

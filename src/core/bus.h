@@ -36,9 +36,8 @@ namespace usbsid {
 /**
  * @brief Anything that is clocked once per PHI2 cycle.
  *
- * There is deliberately no cycle argument and no cycle count: a device may
- * never "catch up" over a delta, which is exactly the model this player
- * replaces. One call is one cycle.
+ * No cycle argument or count: a device never "catches up" over a delta,
+ * one call is one cycle.
  */
 class ClockedDevice
 {
@@ -51,15 +50,10 @@ class ClockedDevice
     virtual void reset(void) = 0;
 };
 
-/* The CPU is an ordinary ClockedDevice. It reads the IRQ, NMI and BA lines
- * off the bus itself rather than having them pushed in every cycle: pushing
- * them cost three virtual calls per cycle and measured 45% of the whole
- * emulation budget (see temp/bench/dispatch_bench.cpp, step 2.3).
- *
- * The one cycle sampling delay, the "IRQ is polled on the second to last
- * cycle" rule and the three cycle grace after BA drops all live in the CPU,
- * because they are properties of the instruction sequencer, not of the bus.
- */
+/* The CPU is an ordinary ClockedDevice. It reads IRQ/NMI/BA off the bus
+ * itself rather than having them pushed every cycle: pushing cost three
+ * virtual calls/cycle, measured 45% of the emulation budget. The sampling
+ * delay, poll timing and BA grace period all live in the CPU, not here. */
 
 /* Interrupt sources are wired-or on real hardware, so every source keeps its
  * own bit and the line is asserted while any bit is set. */
@@ -111,22 +105,16 @@ class Bus
     void tick(void) US_RAM_ATTR;
 
     /**
-     * @brief The same four devices, by their real types.
-     *
-     * A machine always attaches the real chips, and knowing their types means
-     * four direct calls a cycle instead of four trips through a vtable. The
-     * generic `attach_*` above stay for the tests, which bring up one chip at
-     * a time and stand in fakes for the rest; `tick()` uses whichever is set.
+     * @brief The same four devices, by their real types - four direct calls
+     * a cycle instead of four vtable trips. `attach_*` above stays for tests
+     * that bring up one chip with fakes for the rest; `tick()` uses whichever
+     * is set.
      */
     void attach_fast(Mos6569 * vic, Mos6526 * cia1, Mos6526 * cia2,
                      Mos6510 * cpu);
 
-    /**
-     * @brief A CIA's schedule changed, ask it again.
-     *
-     * A write to a control register, or an input moving, can bring the next
-     * thing that chip does forward. Whoever caused it says so.
-     */
+    /* A CIA's schedule changed (control register write or input moving
+     * brought its next event forward) - ask it again. */
     void cia_rescheduled(const Mos6526 * who) US_RAM_ATTR;
 
     /** @brief The VIC's schedule changed, ask it again. */
@@ -138,16 +126,11 @@ class Bus
     /* Free running PHI2 cycle counter */
     US_ALWAYS_INLINE cycle_t cycles(void) const { return cycles_; }
 
-    /**
-     * @brief How many ticks a device that has kept up should have run.
-     *
-     * While a cycle is being executed the counter still names that cycle, so a
-     * chip that has kept up has run one tick more than it. Between cycles the
-     * two agree. Devices that are caught up lazily have to know which of the
-     * two they are being asked from: reads and writes arrive from inside the
-     * cycle, the player and the tests from outside it, and being one tick out
-     * moves every interrupt by a cycle.
-     */
+    /* How many ticks a caught-up-lazily device should have run. Mid-cycle,
+     * the counter still names the cycle in progress, so a kept-up chip has
+     * run one tick more than it; between cycles they agree. Reads/writes
+     * arrive mid-cycle, the player/tests from outside it - being one tick
+     * out moves every interrupt by a cycle. */
     US_ALWAYS_INLINE cycle_t catch_up_target(void) const
     {
       return cycles_ + (in_cycle_ ? 1u : 0u);

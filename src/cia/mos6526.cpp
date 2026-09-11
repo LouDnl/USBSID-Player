@@ -346,29 +346,13 @@ void Mos6526::skip(uint32_t n)
 }
 
 /**
- * @brief Timer A prescaling timer B, applied as arithmetic. See the header.
- */
-/**
- * @brief Timer A prescaling timer B, applied as arithmetic. See the header.
- *
- * The shape is checked from the control registers only, not from the timer
- * state machines, because with a latch of two there is no clock on which both
- * timers are settled: timer B is propagating a count on two cycles out of
- * every three. So instead of deriving what a period does, one period is
- * *walked* and the result checked against what a repeat would have to look
- * like. If it comes back to the same states with timer B one lower, the period
- * is a clean repeat and the rest can be multiplied out. That is self checking,
- * which matters here because getting it wrong silently is worse than not doing
- * it at all.
- */
-/**
  * @brief Timer A free running on phi2 as a prescaler, timer B counting it.
  *
  * Checked from the control registers only, never from the timer state
  * machines: with a latch of two there is no clock on which both timers are
- * settled, because timer B is propagating a count on two cycles out of every
- * three. Whether the *state* repeats is established by walking a period, in
- * cascade_skip().
+ * settled, since timer B is propagating a count on two of every three
+ * cycles. Whether the state actually repeats is established separately by
+ * walking a period in cascade_skip().
  */
 bool Mos6526::cascade_shape(void) const
 {

@@ -155,16 +155,12 @@ extern void previous_subtune(void);
  *              tune quietly played song 1.
  *
  * **For a next or previous button, call `next_subtune()` or
- * `previous_subtune()` instead.** They wrap, they re-initialise, and they need no
- * number from the caller, which matters because the player is the only thing that
- * knows which song it is on and how many there are: the firmware has neither
- * until it asks, and arithmetic done in three frontends is arithmetic one of them
- * gets wrong.
+ * `previous_subtune()` instead.** They wrap, they re-initialise, and they need
+ * no number from the caller: the player is the only thing that knows which
+ * song it is on and how many there are.
  *
- * Both go through a full re-initialise. That used to be the expensive option and
- * is not any more: about 19 000 cycles since the boot image, fourteen
- * milliseconds on the RP2350, against a driver side jump that jams the CPU on
- * `psid/Last_Ninja_2.sid` from song 4 onward.
+ * Both go through a full re-initialise, about 14ms on the RP2350 from the
+ * boot image, which is cheap enough to always prefer over a driver side jump.
  */
 extern bool usplayer_restart_song(uint16_t song);
 
@@ -172,8 +168,7 @@ extern bool usplayer_restart_song(uint16_t song);
  * @brief How long the current song has been playing, in milliseconds.
  *
  * Per **song**, not per session: every load and every init resets the frame
- * counter, so a subtune change starts it again. The CLI learned that the hard
- * way, where a session counter showed the wrong time after pressing next.
+ * counter, so a subtune change starts it again.
  *
  * Not the song's *length*, which needs HVSC's Songlengths database, five
  * megabytes that have no business on the device.
@@ -406,6 +401,29 @@ extern uint16_t usplayer_driver_address(void);
 extern const char * usplayer_tune_name(void);
 extern const char * usplayer_tune_author(void);
 extern const char * usplayer_tune_released(void);
+
+/**
+ * @brief The tune's own multi-SID and v5 metadata, informational.
+ *
+ * `usplayer_sid_count()` is the raw count from the file's header, which for
+ * a v5 tune may be more than this player can play (4, everywhere); the
+ * cap is applied where the chips are actually wired up, not here.
+ */
+extern uint8_t usplayer_sid_count(void);
+/** @brief Address of chip `chip`, 0 based, or 0 when out of range. */
+extern uint16_t usplayer_sid_addr(uint8_t chip);
+/** @brief Which way chip `chip` is hinted to pan: 0 left, 1 center, 2 right. */
+extern uint8_t usplayer_sid_pan(uint8_t chip);
+/** @brief v5 SID Panning Layout, flags bits 6-7: 0 standard, 1 L/C/R, 2 center first, 3 fully centered. */
+extern uint8_t usplayer_pan_layout(void);
+/** @brief v5 SID Panning Mode, flags bits 8-9: 0 direct, 1 reverse, 2 group, 3 spread. */
+extern uint8_t usplayer_pan_mode(void);
+/** @brief v5 flags bit 11: the tune uses an FM/OPL chip alongside its SIDs. */
+extern bool usplayer_has_fm_opl(void);
+/** @brief v5 flags bit 10: song lengths are appended to the end of the file. */
+extern bool usplayer_has_embedded_songlengths(void);
+/** @brief One song's length from that embedded table, in ms, or 0 if there is none. */
+extern uint32_t usplayer_embedded_songlength_ms(uint16_t song);
 
 /** @brief SID writes performed since the tune started. */
 extern uint32_t usplayer_sid_writes(void);

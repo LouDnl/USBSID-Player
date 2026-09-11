@@ -350,24 +350,12 @@ bool Mos6510::state_writes(State s)
 
 bool Mos6510::ba_allows_cycle(void)
 {
-  /* A read waits for the bus, a write does not.
-   *
-   * The three cycles a 6510 famously keeps running after BA drops are **not**
-   * counted here, because the VIC has already counted them: it pulls BA low
-   * three cycles before it needs the bus, at cycle 12 of a bad line for
-   * fetches that start at cycle 15, and the sprite windows in
-   * `rebuild_sprite_ba()` start three cycles early for the same reason. Giving
-   * the CPU a second three cycle grace on top of that stole 40 cycles from it
-   * where the hardware steals 43 minus wherever the read happened to land.
-   *
-   * That is not a rounding error, it is the difference between a demo playing
-   * and hanging: `HBFS.sid` spins on
-   *
-   *     LAX $dc04 / SBX #$33 / STA $ff / CPX $dc04 / BNE
-   *
-   * which is nine cycles between two reads of the same timer, and leaves only
-   * when a bad line has put exactly $33 more between them. With the extra
-   * grace the loop sees 9 and 49 and nothing else, for ever. See TODO 33. */
+  /* A read waits for the bus, a write does not. The three cycle grace a 6510
+   * famously keeps running after BA drops is not applied here: the VIC's own
+   * BA timing (rebuild_sprite_ba(), the bad line fetch at cycle 12/15)
+   * already accounts for it, so adding a second grace here double counts it,
+   * turning a rounding error into a hang on tunes that poll a CIA timer in a
+   * tight loop across a bad line. */
   if (US_LIKELY(bus_.ba())) return true;
   return state_writes(state_);
 }

@@ -45,14 +45,9 @@
 #include "sid_backend.h"
 #include "types.h"
 
-/* The same clock pointer the embedded backend uses, and for the same reason it
- * is a pointer: see the note in sid_embedded.h. Nothing in this file needs it,
- * but the C API's benchmark does, and on the web build this is the only header a
- * translation unit sees.
- *
- * This declaration being weak is what stopped `test_web` linking on macOS, which
- * is how the whole problem was found: nothing about the web build needs a weak
- * symbol, it was only being consistent with the embedded one. */
+/* Same clock pointer the embedded backend uses (see sid_embedded.h). Nothing
+ * in this file needs it, but the C API's benchmark does, and on the web
+ * build this is the only header a translation unit sees. */
 #include "sid_embedded.h" /* us_time_us_64 */
 
 namespace usbsid {
@@ -83,8 +78,8 @@ class WebSidBackend final : public SidBackend
 
     WebSidBackend(void) = default;
 
-    void write(data_t reg, data_t value, uint16_t cycles) override;
-    data_t read(data_t reg, uint16_t cycles) override;
+    void write(addr_t reg, data_t value, uint16_t cycles) override;
+    data_t read(addr_t reg, uint16_t cycles) override;
     void wait(uint16_t cycles) override;
     void flush(void) override { ++flushes_; }
     void reset(void) override;

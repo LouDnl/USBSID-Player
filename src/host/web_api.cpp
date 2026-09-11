@@ -73,11 +73,9 @@ extern "C" {
 /**
  * @brief The player asking the board to change its clock.
  *
- * On the device this is the firmware's own function and it really does switch
- * the clock. Here there is no board in this process, so the request is
- * recorded for the page to pass on. It is defined rather than left weak on
- * purpose: an undefined weak function under wasm is not reliably null, and the
- * null check in usplayer.cpp is what decides whether it is called.
+ * No board in this process, so the request is just recorded for the page to
+ * pass on. Defined rather than left weak: an undefined weak under wasm is
+ * not reliably null.
  */
 static void web_apply_clockrate(int n_clock, bool suspend_sids)
 {
@@ -88,14 +86,10 @@ static void web_apply_clockrate(int n_clock, bool suspend_sids)
 /**
  * @brief Microseconds since the page loaded.
  *
- * The C API's benchmark reads the clock through `us_time_us_64`, so this build
- * has to point that at something. `emscripten_get_now()` is `performance.now()`,
- * milliseconds as a double, which is sub microsecond on any browser that
- * matters.
- *
- * Bound below rather than being a weak definition of `time_us_64`, which is what
- * this was and what stopped `test_web` linking on macOS: an undefined weak is an
- * ELF idea and Mach-O refuses it outright.
+ * `emscripten_get_now()` is `performance.now()` (ms, sub-microsecond
+ * precision). Bound below rather than a weak `time_us_64` definition:
+ * undefined weak is an ELF idea, Mach-O refuses to link it (broke
+ * `test_web` on macOS).
  */
 static uint64_t web_time_us_64(void)
 {
@@ -175,17 +169,11 @@ void usp_force_socket_two(void) { force_socktwo(); }
 /**
  * @brief Tell the player what the board is carrying.
  *
- * The command line player reads this off the device at connect and hands it
- * over the same way (see main_cli.cpp). The page has to do it explicitly
- * because a browser has no equivalent of "the driver already asked": the
- * transport reads the socket config over WebUSB and passes it in here.
- *
- * Without it `$df40`/`$df50` reach nothing, so an FM/OPL tune plays its SID
- * voices and none of its OPL, which is the symptom this exists to fix.
- *
- * `numsids` is accepted and ignored, as it is everywhere else: how many chips
- * the emulation decodes is the tune's business. `fmopl` is 1 based, -1 for a
- * board that has no FM/OPL.
+ * The page must call this explicitly (a browser has no "the driver already
+ * asked" equivalent): without it, `$df40`/`$df50` reach nothing and an
+ * FM/OPL tune plays its SID voices only. `numsids` is accepted and ignored,
+ * how many chips the emulation decodes is the tune's own business. `fmopl`
+ * is 1-based, -1 for a board with no FM/OPL.
  */
 void usp_set_sid_config(int numsids, int socket_one, int socket_two, int fmopl)
 {
@@ -215,25 +203,12 @@ int usp_song(void) { return usplayer_song(); }
 int usp_songs(void) { return usplayer_songs(); }
 uint32_t usp_frames(void) { return usplayer_frames(); }
 uint32_t usp_sid_writes(void) { return usplayer_sid_writes(); }
-/*
- * The tune's own strings, re-encoded as UTF-8.
- *
- * A PSID header's name, author and release fields are ISO 8859-1, and the page
- * reads them with `UTF8ToString`. A byte such as 0xFC, the u umlaut in
- * "Hans Jurgen", is not valid UTF-8 on its own, so the decoder produced a
- * replacement character and the page showed a question mark in the transport
- * line and in every log entry that named the tune.
- *
- * Unicode's first 256 code points are ISO 8859-1, so the conversion is the
- * textbook two byte encoding and nothing needs a table. Doing it here rather
- * than in the parser leaves the command line player writing the file's own
- * bytes to the terminal, which is what it has always done.
- *
- * The buffers are static because the ABI hands out a pointer the caller reads
- * before the next call, which is how the rest of this file already works. Two
- * bytes per input byte plus a terminator is the worst case, so 33 in and 96 out
- * cannot overflow.
- */
+/* The tune's own strings, re-encoded as UTF-8. PSID header name/author/
+ * release fields are ISO 8859-1; the page reads them with `UTF8ToString`,
+ * so a byte like 0xFC (u-umlaut) produced a replacement character/question
+ * mark without this. ISO 8859-1 maps directly to Unicode's first 256 code
+ * points, so it's the textbook 2-byte encoding, no table needed. Static
+ * buffers sized 192 = 2x kMetaFieldSize (96) + terminator, the worst case. */
 static const char * latin1_to_utf8(const char * src, char * dst, size_t cap)
 {
   size_t o = 0;
@@ -251,9 +226,9 @@ static const char * latin1_to_utf8(const char * src, char * dst, size_t cap)
   return dst;
 }
 
-static char g_utf8_name[96];
-static char g_utf8_author[96];
-static char g_utf8_released[96];
+static char g_utf8_name[192];
+static char g_utf8_author[192];
+static char g_utf8_released[192];
 
 const char * usp_tune_name(void)
 {
@@ -268,6 +243,29 @@ const char * usp_tune_released(void)
   return latin1_to_utf8(usplayer_tune_released(), g_utf8_released, sizeof(g_utf8_released));
 }
 uint32_t usp_benchmark(uint32_t cycles) { return usplayer_benchmark(cycles); }
+
+/* ---- v5: multi-SID, panning, FM/OPL, embedded song lengths ---------------
+ *
+ * All informational: usplayer_sid_count() may be more than this player wires
+ * up (4, everywhere), the panning hint is not rendered (the audio path stays
+ * one channel, see sid_residfp.cpp), and FM/OPL is a flag to show, not a
+ * request this file acts on. A page that wants to display any of this reads
+ * it after usp_load_sidtune()/usp_init_sidplayer().
+ */
+int usp_sid_count(void) { return usplayer_sid_count(); }
+int usp_sid_addr(int chip) { return usplayer_sid_addr(static_cast<uint8_t>(chip)); }
+/** @brief 0 left, 1 center, 2 right. */
+int usp_sid_pan(int chip) { return usplayer_sid_pan(static_cast<uint8_t>(chip)); }
+/** @brief 0 standard, 1 L/C/R, 2 center first, 3 fully centered. */
+int usp_pan_layout(void) { return usplayer_pan_layout(); }
+/** @brief 0 direct, 1 reverse, 2 group, 3 spread. */
+int usp_pan_mode(void) { return usplayer_pan_mode(); }
+int usp_has_fm_opl(void) { return usplayer_has_fm_opl() ? 1 : 0; }
+int usp_has_embedded_songlengths(void) { return usplayer_has_embedded_songlengths() ? 1 : 0; }
+int usp_embedded_songlength_ms(int song)
+{
+  return static_cast<int>(usplayer_embedded_songlength_ms(static_cast<uint16_t>(song)));
+}
 
 /** @brief Which interrupt sources the tune has armed. See USP_IRQ_*. */
 uint32_t usp_irq_sources(void) { return usplayer_irq_sources(); }
@@ -331,11 +329,9 @@ int usp_voice_mute(int chip)
  * @param chip  1 to 4
  * @param muted non zero to silence
  *
- * Not three voice mutes. A voice mute masks the gate and the sustain on the way
- * out and lets every other write through, which is right for a voice the tune
- * keeps playing. A chip mute drops the chip's writes, and that is the only one of
- * the two that reaches $18: a tune playing samples through the volume register
- * carries on regardless of any number of voice mutes.
+ * Not three voice mutes: a voice mute only masks gate/sustain, letting
+ * everything else through, so digi playback via $18 (volume) keeps sounding
+ * regardless. A chip mute drops the chip's writes outright.
  */
 void usp_set_chip_mute(int chip, int muted)
 {
@@ -351,19 +347,11 @@ int usp_chip_mute(void)
 /**
  * @brief The last value written to a SID register, from the emulation's mirror.
  *
- * A page showing a register grid, a piano or an oscilloscope needs to know what
- * the tune has put in the chip. Watching the writes go past works only while
- * they leave the wasm: in software audio the reSIDfp backend takes them inside
- * `advance()` and nothing reaches the page at all, so a host counting writes
- * would show a chip that never changes while the tune plays.
- *
- * The emulation keeps its own mirror of every write for exactly this reason, and
- * that mirror is the same one `ResidFpSidBackend::attach()` replays into a
- * freshly built chip. Reading it costs an array index and has no side effects,
- * which a register read of the real chip would not: SID registers are write only
- * on hardware, and $1b/$1c (oscillator three and its envelope) are the only ones
- * that read back at all. So this answers what was written, which for a display
- * is what "the state of the chip" means.
+ * In software audio, reSIDfp's `advance()` consumes writes internally with
+ * nothing reaching the page, so watching writes go by doesn't work there.
+ * The emulation's own write mirror (also what `ResidFpSidBackend::attach()`
+ * replays into a rebuilt chip) is a side-effect-free array read; real SID
+ * registers are write-only except $1b/$1c.
  *
  * @param chip 1 to 4
  * @param reg  0 to 31, so $d400 relative
@@ -379,13 +367,11 @@ int usp_sid_register(int chip, int reg)
 /**
  * @brief One byte of the emulated C64's RAM.
  *
- * Straight at the RAM, through no banking and with no side effects, which is
- * what a page showing a memory dump wants and is the only kind of read that is
- * safe to do from outside the emulation. Reading through the PLA instead
- * (`emu_read_byte()`) would hand an address in $d000-$dfff to the chip that
- * lives there, and reading a CIA's interrupt register acknowledges its pending
- * interrupts: a page redrawing a memory view would quietly break the tune it is
- * displaying. So an address under I/O answers with the RAM beneath it.
+ * Straight RAM read, no banking, no side effects - reading through the PLA
+ * instead (`emu_read_byte()`) could hit a CIA's interrupt register and
+ * acknowledge a pending interrupt, quietly breaking playback just from a
+ * page redrawing a memory view. An I/O address answers with the RAM
+ * beneath it instead.
  *
  * @param address 0 to 65535, masked
  */
@@ -397,14 +383,10 @@ int usp_read_memory(int address)
 /**
  * @brief A CIA timer's latch, the value it reloads from.
  *
- * For a page that wants to say how fast a CIA driven tune is being called: the
- * usual figure is the PAL cycles in a frame divided by this, so a latch of about
- * 19654 is one call a frame and half of that is two.
- *
- * The latch and not the counter: the counter is wherever the timer happens to
- * have got to, which is a different number every time it is asked and no use for
- * a display. Latch reads are free of side effects, unlike reading the chip's
- * registers at $dc04.
+ * For estimating a CIA-driven tune's call rate: PAL cycles/frame divided by
+ * this (~19654 = once a frame). The latch, not the live counter, which
+ * changes every time it's read; latch reads are also side-effect free
+ * unlike reading $dc04 directly.
  *
  * @param cia    1 or 2
  * @param timer  0 for A, 1 for B
@@ -466,17 +448,10 @@ int usp_songlength_count(const char * db, int db_len, const char * key)
 }
 
 /* ------------------------------------------------------------------------ *
- * software audio
- *
- * The page can make its own sound instead of, or as well as, driving a board.
- * The same `ResidFpSidBackend` the command line player uses, compiled to wasm
- * with the vendored reSIDfp.
- *
- * The samples are pulled rather than pushed, because an AudioWorklet **cannot
- * call into this module**: it runs on the audio thread and the module lives on
- * the main thread or in the worker. So the page takes samples here, posts them
- * to the worklet, and the worklet plays what it was given. That is the whole
- * reason `usp_audio_take` exists rather than a callback.
+ * software audio: same `ResidFpSidBackend` the CLI player uses, compiled to
+ * wasm. Samples are pulled (usp_audio_take), not pushed, because an
+ * AudioWorklet cannot call into this module - it runs on the audio thread,
+ * this lives on the main thread or in a worker.
  * ------------------------------------------------------------------------ */
 
 static usbsid::ResidFpSidBackend g_soft;
@@ -540,15 +515,9 @@ void usp_audio_discard(void) { if (g_soft_on) g_soft.discard(); }
 /**
  * @brief Run the emulation without synthesising anything.
  *
- * For the page running through a tune's silent lead-in, which can be a minute
- * of a loader filling memory before a note is played. A frame costs about a
- * tenth as much with this off, because the synthesis is nearly all of it, and
- * the audio was going to be thrown away regardless.
- *
- * Register writes still land, so the chips are current the moment it goes back
- * on; they are simply not clocked meanwhile. Only for stretches that are known
- * to be silent: see UsPlayerAudio._skipSilence(), which turns the synthesis
- * back on every so often precisely to find out whether that is still true.
+ * For running through a tune's silent lead-in fast (~1/10th the cost per
+ * frame; synthesis is nearly all of it). Writes still land, chips just
+ * aren't clocked, so state is current the moment this goes back on.
  *
  * @param on 1 to synthesise, 0 to run silently
  */
@@ -561,10 +530,9 @@ int usp_audio_rendering(void) { return g_soft.rendering() ? 1 : 0; }
 /**
  * @brief Samples that came out past full scale and were clamped.
  *
- * Chips are summed with no headroom, so N chips can reach N times full scale
- * and a loud multi SID tune distorts where the same tune on one chip does not.
- * It is heard as a ripple or a buzz on the loud parts rather than as an
- * obvious fault, which is exactly why it needs a number rather than an ear.
+ * Chips sum with no headroom, so N chips can reach N times full scale and
+ * clip as a ripple/buzz rather than an obvious fault - hence a number
+ * instead of relying on an ear.
  */
 int usp_audio_clipped(void)
 {

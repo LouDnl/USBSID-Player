@@ -429,6 +429,12 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
   add_executable(${EXECUTABLE}
     ${CMAKE_CURRENT_LIST_DIR}/src/host/main_cli.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sid/sid_usbsid.cpp
+    ### Network SID Device client backend (--output netdevice). POSIX sockets
+    ### only, so this is desktop only: not WEB (no BSD sockets under
+    ### Emscripten, the browser's own transport is WebUSB/WebSerial) and not
+    ### EMBEDDED (the firmware build already is a device something else
+    ### connects to, not a client of a peer one).
+    ${CMAKE_CURRENT_LIST_DIR}/src/sid/sid_netdevice.cpp
     ${US_DRIVER_DIR}/USBSID.cpp
     ${US_SOFTSID_SOURCES}
   )
@@ -439,10 +445,14 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
     ${US_RESIDFP_INCLUDE_DIRS}
     ${US_FM_INCLUDE_DIRS})
   target_compile_definitions(${EXECUTABLE} PRIVATE US_SOFTSID=${US_HAVE_RESIDFP})
+  ### std::thread (sid_netdevice.cpp's sender thread) needs this on every
+  ### platform, reSIDfp or not - it used to ride in on reSIDfp's own Linux
+  ### only need for it, which left it unlinked on a build with neither.
+  find_package(Threads REQUIRED)
+  target_link_libraries(${EXECUTABLE} PRIVATE Threads::Threads)
   ### miniaudio needs these on Linux and they are harmless elsewhere
   if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND US_HAVE_RESIDFP)
-    find_package(Threads REQUIRED)
-    target_link_libraries(${EXECUTABLE} PRIVATE Threads::Threads ${CMAKE_DL_LIBS} m)
+    target_link_libraries(${EXECUTABLE} PRIVATE ${CMAKE_DL_LIBS} m)
   endif()
   ### the driver is third party and predates these warning settings
   target_compile_options(${EXECUTABLE} PRIVATE -Wall -fno-rtti)
@@ -483,6 +493,9 @@ if(${WEB} EQUAL 1)
     _usp_clock_id _usp_clock_hz _usp_refresh_hz
     _usp_song _usp_songs _usp_frames _usp_sid_writes
     _usp_tune_name _usp_tune_author _usp_tune_released
+    _usp_sid_count _usp_sid_addr _usp_sid_pan
+    _usp_pan_layout _usp_pan_mode
+    _usp_has_fm_opl _usp_has_embedded_songlengths _usp_embedded_songlength_ms
     _usp_benchmark
     _usp_irq_sources _usp_start_mode _usp_driver_address
     _usp_read_memory _usp_cia_latch _usp_sid_register
@@ -523,11 +536,11 @@ if(${WEB} EQUAL 1)
   target_link_options(${EXECUTABLE}_esm PRIVATE ${US_WEB_LINK_OPTS} "-sEXPORT_ES6=1")
 
   ### The two targets emit the *same* ${EXECUTABLE}.wasm beside their wrapper,
-  ### so linking them at once is two writers on one file. A parallel
-  ### incremental rebuild caught it: the wasm came out eight bytes long, an
-  ### empty module, while everything still linked and reported success.
-  ### Ordering them costs nothing, the link takes seconds, and the bytes are
-  ### the same either way, which is what `web_smoke.mjs --esm` checks.
+  ### so linking them at once is two writers on one file: a parallel
+  ### incremental rebuild can produce an empty (eight byte) module while both
+  ### still report link success. Ordering them costs nothing, the link takes
+  ### seconds, and the bytes are the same either way, which is what
+  ### `web_smoke.mjs --esm` checks.
   add_dependencies(${EXECUTABLE}_esm ${EXECUTABLE})
 
   ### Put the artefacts next to the page that loads them.
@@ -549,11 +562,10 @@ if(${WEB} EQUAL 1)
   ###
   ### `.mjs` is the conventional extension and plenty of servers do not know
   ### it: nginx's stock mime.types has no entry, so it is served as
-  ### application/octet-stream. A module script is strictly MIME checked, so an
-  ### `import()` of it is refused outright, which is what stopped the audio
-  ### worker loading the wasm on usbsid.loudai.nl. The same bytes under a `.js`
-  ### name are served as JavaScript everywhere, and the module locates its wasm
-  ### relative to its own URL either way.
+  ### application/octet-stream. A module script is strictly MIME checked, so
+  ### an `import()` of it is refused outright. The same bytes under a `.js`
+  ### name are served as JavaScript everywhere, and the module locates its
+  ### wasm relative to its own URL either way.
   add_custom_command(TARGET ${EXECUTABLE}_esm POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
       $<TARGET_FILE:${EXECUTABLE}_esm> ${US_WEB_OUT}/

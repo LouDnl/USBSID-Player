@@ -57,7 +57,9 @@ void us_audio_callback(ma_device * dev, void * output, const void * input,
   if (dev == nullptr || output == nullptr) return;
   AudioOut * self = static_cast<AudioOut *>(dev->pUserData);
   if (self == nullptr) return;
-  self->fill(static_cast<int16_t *>(output), frames);
+  /* miniaudio's `frames` is audio frames; fill() (and the ring underneath)
+   * wants raw interleaved samples - see push()'s own note. */
+  self->fill(static_cast<int16_t *>(output), frames * self->channels());
 }
 
 } /* namespace */
@@ -80,14 +82,15 @@ void AudioOut::fill(int16_t * out, size_t frames)
   }
 }
 
-bool AudioOut::open(unsigned rate, unsigned buffer_ms)
+bool AudioOut::open(unsigned rate, unsigned channels, unsigned buffer_ms)
 {
   close();
   if (rate == 0) { error_ = "sample rate of zero"; return false; }
+  if (channels < 1 || channels > 2) { error_ = "channels must be 1 or 2"; return false; }
 
   ma_device_config cfg = ma_device_config_init(ma_device_type_playback);
   cfg.playback.format = ma_format_s16;
-  cfg.playback.channels = 1;
+  cfg.playback.channels = channels;
   cfg.sampleRate = rate;
   cfg.dataCallback = &us_audio_callback;
   cfg.pUserData = this;
@@ -104,11 +107,14 @@ bool AudioOut::open(unsigned rate, unsigned buffer_ms)
    * configured for this and not for the request. */
   rate_ = dev->sampleRate;
   if (rate_ == 0) rate_ = rate;
+  channels_ = channels;
 
   const size_t ms = (buffer_ms < 20u) ? 20u : buffer_ms;
+  /* Ring is raw interleaved samples (see push()'s own note), so this many
+   * frames of buffering is `* channels_` that many samples. */
   size_t frames = (static_cast<size_t>(rate_) * ms) / 1000u;
   if (frames < 1024) frames = 1024;
-  ring_.assign(frames + 1, 0);   /* one spare, so full and empty differ */
+  ring_.assign(frames * channels_ + 1, 0);   /* one spare, so full and empty differ */
   head_.store(0, std::memory_order_relaxed);
   tail_.store(0, std::memory_order_relaxed);
   underruns_.store(0, std::memory_order_relaxed);
@@ -130,9 +136,16 @@ void AudioOut::close(void)
 {
   if (device_ != nullptr) {
     ma_device * dev = static_cast<ma_device *>(device_);
-    ma_device_uninit(dev);
-    delete dev;
     device_ = nullptr;
+    /* ma_device_uninit() has no timeout and can block forever on at least
+     * one real backend (PipeWire/PulseAudio, a corked stream on a suspended
+     * sink), so teardown runs on its own detached thread instead of
+     * blocking this call. Leaked if it never finishes; process exit tears
+     * it down regardless. */
+    std::thread([dev] {
+      ma_device_uninit(dev);
+      delete dev;
+    }).detach();
   }
   open_ = false;
   ring_.clear();

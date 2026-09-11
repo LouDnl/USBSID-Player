@@ -46,14 +46,21 @@ class SidBackend
      * @brief One register write.
      *
      * @param reg     physical register, chip number already folded in:
-     *                $00-$1f is the first SID, $20-$3f the second, and so on
+     *                $00-$1f is the first SID, $20-$3f the second, and so on,
+     *                up to kMaxSids (15, see sidfile.h) chips at $1c0-$1df.
+     *                addr_t (16 bit), not data_t: 15 chips no longer fit the
+     *                top 3 bits of an 8 bit register byte the way 8 did. A
+     *                backend that only ever talks to a real board (at most 4
+     *                sockets) still gets a value under $80 for those and can
+     *                drop anything at or above it exactly as before - see
+     *                UsbSidBackend::write() and EmbeddedSidBackend::write().
      * @param value   the byte written
      * @param cycles  cycles since the previous event, never more than $ffff
      */
-    virtual void write(data_t reg, data_t value, uint16_t cycles) = 0;
+    virtual void write(addr_t reg, data_t value, uint16_t cycles) = 0;
 
     /** @brief One register read. Backends without real hardware may guess. */
-    virtual data_t read(data_t reg, uint16_t cycles) { (void)reg; (void)cycles; return 0; }
+    virtual data_t read(addr_t reg, uint16_t cycles) { (void)reg; (void)cycles; return 0; }
 
     /** @brief More than $ffff cycles passed with nothing to write. */
     virtual void wait(uint16_t cycles) { (void)cycles; }
@@ -68,7 +75,7 @@ class SidBackend
 class NullSidBackend final : public SidBackend
 {
   public:
-    void write(data_t reg, data_t value, uint16_t cycles) override
+    void write(addr_t reg, data_t value, uint16_t cycles) override
     {
       (void)reg; (void)value; (void)cycles;
       ++writes;

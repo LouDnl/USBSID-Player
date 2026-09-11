@@ -99,14 +99,19 @@ set(USPLAYER_INCLUDE_DIRS
   ${USPLAYER_ROOT}/src/mem/roms
   ${USPLAYER_ROOT}/src/player
   ${USPLAYER_ROOT}/src/sid
-  ${USPLAYER_ROOT}/src/util
   ${USPLAYER_ROOT}/src/vic
 )
+### src/util (logging.h, md5.h, profile.h) is deliberately NOT added here.
+### Every reference in this codebase already uses the qualified "util/md5.h"
+### form, resolved fine via src above; exposing src/util as a bare global
+### include directory risks colliding with another library on the same
+### firmware target that has its own same-named header (confirmed real with
+### BTstack's md5.h on a combined ONBOARD_EMULATOR+ENABLE_NET build). Do not
+### add this back without namespacing (e.g. move these three headers under a
+### `usplayer/` subdirectory instead).
 
-### Optional: Cynthcart (MC68B50 ACIA on IO1, $de00-$deff). Off unless the
-### firmware turns on ONBOARD_CYNTHCART=1. Kept out of USPLAYER_SOURCES so a
-### plain tune-playback build never pays for it. Embedded only, see
-### src/cart/cynthcart_embedded.cpp.
+### Cynthcart (MC68B50 ACIA on IO1, $de00-$deff).
+### Embedded only, see src/cart/cynthcart_embedded.cpp.
 set(USPLAYER_CYNTHCART_SOURCES
   ${USPLAYER_ROOT}/src/cart/MC68B50.cpp
   ${USPLAYER_ROOT}/src/cart/cynthcart_embedded.cpp

@@ -6,12 +6,8 @@
  * Counters for finding out which chip is costing the time.
  *
  * Off unless US_PROFILE is 1, in which case they are plain increments on the
- * per cycle path. They exist because "the emulation is too slow" is not an
- * actionable statement and the answer turned out to be different for every
- * tune: measured with these, `rsid/Microsleep_tune_10.sid` wakes the VIC on
- * 31.6% of cycles and barely touches the CIAs, while `prg/Musik_Run_Stop.prg`
- * wakes CIA1 on 81.6% and barely touches the VIC. Guessing from one tune got
- * that wrong.
+ * per cycle path: where the time goes differs a lot per tune, so a single
+ * profiled tune is not representative.
  *
  * Build with -DPROFILE=1 (see CMakeLists.txt) and read them with
  * `usbsid::profile`. Nothing in a shipping build refers to them.

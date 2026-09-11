@@ -347,11 +347,8 @@ int test_tune_sweep(void)
   US_CHECK(total > 0, "the sweep found tunes to run");
   if (total == 0) return us_test_failures;
   US_CHECK_EQ_U(parsed, total, "every tune in the collection parses");
-  /* Every tune in the collection plays. The bar used to be eight in ten,
-   * because fourteen of them were silent; the three faults behind that are
-   * fixed (the CBM80 backup, entering the driver through a reset, and voice
-   * three being readable), so the bar is where it belongs. A single tune
-   * dropping out of this is a regression worth stopping for. */
+  /* Every tune in the collection plays. A single tune dropping out of this
+   * is a regression worth stopping for. */
   US_CHECK_EQ_U(played, total, "every tune plays");
 
   return 0;

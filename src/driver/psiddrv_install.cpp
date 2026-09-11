@@ -89,21 +89,12 @@ bool psiddrv_install(Ram & ram, const SidFile & tune, uint16_t song,
   if (!tune.valid || tune.data == nullptr) return false;
 
   /* Where the driver may live. A file that declares a free page is believed;
-   * one that says nothing gets the page straight after its own image.
-   *
-   * Page 4 was the fallback, and page 4 is screen memory. Anything that writes
-   * to the screen writes through the driver, and the KERNAL's own interrupt
-   * blinks a cursor there, so a tune that leaves the KERNAL interrupt running
-   * eats its own player. `rsid/Thats_All_Folks.sid` did exactly that: it ran
-   * for 33 frames, the driver was overwritten underneath it, and the CPU
-   * walked out of the wreckage into BASIC ROM. old player puts the driver
-   * after the image, and plays it.
-   *
-   * Straight after the image, not "anywhere free". Relocating *high*, towards
-   * $cf00, was tried once and broke 141 of 160 tunes with a crash into the
-   * stack page. Whatever the driver assumes about where it lives, it is not
-   * that it can live anywhere; the page above the tune is what the reference
-   * player uses and is what this follows. */
+   * one that says nothing gets the page straight after its own image, not
+   * "anywhere free": the KERNAL's own cursor-blink interrupt writes through
+   * screen memory (page 4, the old fallback) and can overwrite a driver
+   * parked there, and relocating high toward $cf00 risks the stack page.
+   * The page directly above the tune's own image is what old player and
+   * psid64 both use. */
   uint8_t start_page = tune.start_page;
   if (start_page == 0 || start_page == 0xff) {
     const addr_t image_end = (tune.load_last_addr != 0)
@@ -118,12 +109,9 @@ bool psiddrv_install(Ram & ram, const SidFile & tune, uint16_t song,
      *   $d0-$ff  I/O and the KERNAL
      *   the tune's own image
      *
-     * The gap this used to miss entirely is **$c0-$cf**: four kilobytes of
-     * plain RAM between BASIC and the I/O, under no ROM at all. A tune that
-     * loads high, like `demos/Combustible_Psychic_Mushrooms.sid` at
-     * $0801-$a238, leaves nothing above $9f and was therefore given page $04,
-     * which is the screen. See TODO 1 for what that costs.
-     */
+     * $c0-$cf (plain RAM between BASIC and I/O, under no ROM) is deliberately
+     * left free: a tune that loads high enough to leave nothing above $9f
+     * still has this gap rather than falling back to the screen page. */
     bool used[0x100];
     for (unsigned i = 0; i < 0x100; i++) used[i] = false;
     const auto mark = [&used](unsigned lo, unsigned hi) {

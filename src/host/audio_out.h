@@ -53,7 +53,7 @@
 namespace usbsid {
 
 /**
- * @brief A mono 16 bit output device, fed from the main thread.
+ * @brief A 16 bit output device, fed from the main thread. Mono by default.
  */
 class AudioOut
 {
@@ -70,13 +70,28 @@ class AudioOut
      * @param rate         sample rate to ask for. The device may not give it;
      *                     `rate()` afterwards is what it actually runs at, and
      *                     that is what the synthesis has to be configured for.
+     * @param channels     1 or 2. Must match what the caller will push()/
+     *                     fill() as: this class treats its ring as a flat
+     *                     interleaved sample stream and has no channel
+     *                     awareness of its own, so mismatching this against
+     *                     ResidFpSidBackend::channels() interleaves garbage.
      * @param buffer_ms    how much to keep between the emulation and the device.
      *                     Bigger is more latency and fewer underruns.
      * @returns false if no device could be opened, with `error()` set
      */
-    bool open(unsigned rate, unsigned buffer_ms = 120);
+    bool open(unsigned rate, unsigned channels = 1, unsigned buffer_ms = 120);
 
-    /** @brief Stop and close. Safe to call twice. */
+    /** @brief Channels the device was opened with. */
+    unsigned channels(void) const { return channels_; }
+
+    /**
+     * @brief Stop and close. Safe to call twice.
+     *
+     * Returns as soon as the request is handed off, not once the device is
+     * actually torn down: the underlying `ma_device_uninit()` has been seen to
+     * block indefinitely on a backend bug (see the .cpp), so the real teardown
+     * happens on its own thread instead of this call's.
+     */
     void close(void);
 
     bool is_open(void) const { return open_; }
@@ -90,16 +105,23 @@ class AudioOut
     /**
      * @brief Push samples for the device to play. Main thread only.
      *
+     * `samples`/`n` are raw interleaved samples, not frames: `n` for one
+     * stereo frame is 2, matching ResidFpSidBackend::take()'s own output
+     * shape when channels() is 2, so a caller already sizing by that can
+     * hand this whatever take() filled in unchanged.
+     *
      * @returns how many were accepted. Fewer than `n` means the ring is full,
      *          which is the signal to stop emulating for a moment rather than to
      *          drop audio: the caller should retry rather than discard.
      */
     size_t push(const int16_t * samples, size_t n);
 
-    /** @brief Room for this many more samples right now. */
+    /** @brief Room for this many more raw samples right now (see push()'s
+     * own note on samples vs frames). */
     size_t space(void) const;
 
-    /** @brief Samples queued and not yet played. */
+    /** @brief Raw samples queued and not yet played (see push()'s own note
+     * on samples vs frames). */
     size_t queued(void) const;
 
     /** @brief How many samples of silence the device had to invent. */
@@ -130,6 +152,7 @@ class AudioOut
     void * device_ = nullptr;
     bool open_ = false;
     unsigned rate_ = 0;
+    unsigned channels_ = 1;
     const char * error_ = "";
 
     std::vector<int16_t> ring_;

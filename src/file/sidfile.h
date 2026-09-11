@@ -3,10 +3,23 @@
  * line playback and for embedding on RP2350 (Pico2).
  *
  * sidfile.h
- * PSID and RSID file parsing, versions 1 to 4.
+ * PSID and RSID file parsing, versions 1 to 5.
  *
  * Header layout per the HVSC SID file format documentation, and matching
  * old player ~ src/psid so both players read the same tunes the same way.
+ *
+ * Version 5 adds: variable length metadata strings (with a fallback to the
+ * fixed 32 byte layout when the variable one does not parse), a multi-SID
+ * address configuration that can describe up to 15 chips, a stereo panning
+ * hint per chip, an embedded song length table, and an FM/OPL flag. This
+ * player's emulation and every backend (mos6581_8580.h's SidConfig, the
+ * network SID device client) are hard capped at 4 chips, so a v5 tune asking
+ * for more plays its first 4 addresses, in the order the file's own address
+ * configuration generates them, and the rest are exposed here for display
+ * only. Panning is likewise exposed as data rather than rendered: the audio
+ * path is deliberately one channel (see sid_residfp.cpp), and the spec
+ * itself allows a player to ignore the hint and fall back to its native
+ * output.
  *
  * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
@@ -38,6 +51,18 @@ namespace usbsid {
 
 enum class SidModel : uint8_t { Unknown = 0, Mos6581, Mos8580, Any };
 
+/** @brief The most SID addresses a v5 header's multiSidConfig can describe. */
+inline constexpr uint8_t kMaxSids = 15;
+
+/** @brief v5 SID Panning Layout, flags bits 6-7. */
+enum class SidPanLayout : uint8_t { Standard = 0, LCR = 1, CenterFirst = 2, FullyCentered = 3 };
+
+/** @brief v5 SID Panning Mode, flags bits 8-9. */
+enum class SidPanMode : uint8_t { Direct = 0, Reverse = 1, Group = 2, Spread = 3 };
+
+/** @brief Where one chip's output is hinted to go. */
+enum class SidPan : uint8_t { Left, Center, Right };
+
 /**
  * @brief A parsed SID file.
  *
@@ -59,9 +84,14 @@ struct SidFile {
   uint16_t start_song = 1;
   uint32_t speed = 0;       /* one bit per song: 0 = raster, 1 = CIA */
 
-  char name[33] = { 0 };
-  char author[33] = { 0 };
-  char released[33] = { 0 };
+  /* Versions 1 to 4 fill at most 32 characters here. Version 5 allows a
+   * variable length string that, in the extreme, uses almost the whole 96
+   * byte metadata area for one field, so the buffer is sized for that
+   * worst case rather than the historical 32+1. */
+  static constexpr size_t kMetaFieldSize = 96;
+  char name[kMetaFieldSize] = { 0 };
+  char author[kMetaFieldSize] = { 0 };
+  char released[kMetaFieldSize] = { 0 };
 
   uint16_t flags = 0;
 
@@ -80,7 +110,7 @@ struct SidFile {
   bool is_basic = false;
   uint8_t start_page = 0;   /* where the driver may be relocated to */
   uint8_t max_pages = 0;
-  uint16_t reserved = 0;    /* holds the second and third SID addresses */
+  uint16_t reserved = 0;    /* holds the second and third SID addresses, v3/v4 only */
 
   const data_t * data = nullptr;
   size_t data_size = 0;
@@ -89,8 +119,26 @@ struct SidFile {
   VideoModel video_model = VideoModel::Pal6569;
   bool video_known = false;
   SidModel sid_model = SidModel::Unknown;
-  addr_t sid_addr[4] = { 0xd400, 0, 0, 0 };
+  addr_t sid_addr[kMaxSids] = { 0xd400 };
   uint8_t sid_count = 1;
+
+  /* v5 specific: flags bits 6-9 (SID panning), 10 (embedded song lengths) and
+   * 11 (FM OPL). Panning is computed for every version, not just v5: a tune
+   * with no opinion is Standard/Direct, which for one chip is Center and for
+   * several alternates L/R, and that default is worth having uniformly
+   * rather than leaving callers to special case "no panning data". */
+  SidPanLayout pan_layout = SidPanLayout::Standard;
+  SidPanMode pan_mode = SidPanMode::Direct;
+  SidPan sid_pan[kMaxSids] = { SidPan::Center };
+
+  bool has_fm_opl = false;
+  bool has_embedded_song_lengths = false;
+
+  /* Set only when has_embedded_song_lengths and the trailer was actually
+   * found at the end of the file. Points into the caller's bytes, same as
+   * `data` above: nothing here is copied. */
+  const data_t * song_length_table = nullptr;
+  uint16_t song_length_table_count = 0;
 
   /** @brief True when this song is driven by a CIA timer rather than the raster */
   bool song_uses_cia(uint16_t song) const
@@ -99,6 +147,15 @@ struct SidFile {
     const uint16_t bit = static_cast<uint16_t>((song > 32) ? 32 : song);
     return (speed & (1u << (bit - 1))) != 0;
   }
+
+  /**
+   * @brief One song's length from the file's own embedded table, in
+   * milliseconds, or 0 when there is none (has_embedded_song_lengths is
+   * false, the trailer did not fit, or `song` is out of range).
+   *
+   * @param song  1 based, as everywhere else in this struct
+   */
+  uint32_t embedded_song_length_ms(uint16_t song) const;
 };
 
 /**

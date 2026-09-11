@@ -130,27 +130,19 @@ struct DeviceSim {
   /* Cycles the bus operation costs on top of its pre delay. One: the delay
    * loop in bus_control.pio counts `delay_word + 1` PHI periods and the write
    * lands on the edge after it, so two writes with a pre delay of zero are one
-   * PHI apart. This was two, which charged every write a cycle it does not
-   * cost, and on a digi burst with gaps of one and two cycles that is a third
-   * to a half of the budget. See TODO 7 for the same cycle counted twice on
-   * the wire. */
+   * PHI apart. See TODO 7 for the same cycle counted twice on the wire. */
   static constexpr uint32_t kAccess = 1;
 
   bool active = false;
   uint32_t clock_hz = 985248;
   /* What the board manages for *this tune*, in thousands of emulated cycles
-   * per second of host time.
-   *
-   * This used to be a single constant, 1336, and that was the whole reason
-   * this harness said 0.99x while the board audibly dragged. 1336 is what
-   * `usplayer_benchmark()` reports at idle; a tune that drives its digi from a
-   * CIA timer costs the emulation nearly twice as much per cycle, so its real
-   * rate is nowhere near it. One constant cannot express that. It is now
-   * measured per tune, on this machine, and scaled onto the board by the
-   * reference below. That measurement is wall clock, so it is noisy, so it is
-   * opt in: `USP_CALIBRATE=1`. The default is a real tune's board figure
-   * rather than the idle one, so the suite stays deterministic and is not
-   * flattered by a number no tune ever achieves. */
+   * per second of host time. A single idle-benchmark constant cannot express
+   * this: a tune driving its digi from a CIA timer costs the emulation
+   * nearly twice as much per cycle as idle, so it is measured per tune, on
+   * this machine, and scaled onto the board by the reference below. That
+   * measurement is wall clock and therefore noisy, so it is opt in via
+   * `USP_CALIBRATE=1`; the default here is a real tune's board figure rather
+   * than the idle one, so the suite stays deterministic. */
   uint32_t host_kcycles = 1457;  /* Krakout.sid, RP2350 @ 200 MHz */
 
   uint64_t queue[kFifo] = { 0 };
@@ -417,13 +409,13 @@ struct SimBackend final : public SidBackend {
   /* The gap the SID layer reports has already had the access overhead taken
    * off it, so the cycles the emulation actually ran is one more. That same
    * untouched gap is the tune's timeline, which the landing error is against. */
-  void write(data_t reg, data_t value, uint16_t cycles) override
+  void write(addr_t reg, data_t value, uint16_t cycles) override
   {
     g_sim.ideal_cycles += static_cast<uint32_t>(cycles) + 1u;
     g_sim.emulate(static_cast<uint32_t>(cycles) + 1u);
     inner.write(reg, value, cycles);
   }
-  data_t read(data_t reg, uint16_t cycles) override
+  data_t read(addr_t reg, uint16_t cycles) override
   { g_sim.emulate(static_cast<uint32_t>(cycles) + 1u); return inner.read(reg, cycles); }
   void wait(uint16_t cycles) override
   { g_sim.ideal_cycles += cycles; g_sim.emulate(cycles); inner.wait(cycles); }
@@ -641,15 +633,9 @@ int test_device_tempo(void)
  * queue has drained that time is spent twice: once by the core, and again by
  * the board sitting out the full gap from a standing start.
  *
- * Nothing used to give it back. The pacer had only a floor, `wait_until_due()`,
- * which holds the emulation when it runs *ahead*, and it only runs at all on
- * gaps wider than kPacedGap. A dense digi has no such gaps, so on a digi the
- * lateness accumulated with no correction whatsoever and the tune simply played
- * slow by whatever fraction of the frame the housekeeping cost.
- *
- * `trim_to_now()` is the missing ceiling: it takes the time already lost off
- * the next pre delay. With 800 us a frame of housekeeping, which is 4% of a PAL
- * frame, this test measures 0.97x without it and 1.00x with it.
+ * `trim_to_now()` is the ceiling for that: it takes the time already lost off
+ * the next pre delay, correcting on every write rather than only on gaps wide
+ * enough for `wait_until_due()`'s floor to fire, which a dense digi never hits.
  *
  * The per gap figure is reported alongside because it is the thing a digi
  * actually hears, but it is not what discriminates here: with the bus queue

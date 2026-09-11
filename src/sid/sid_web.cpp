@@ -27,23 +27,32 @@
 
 namespace usbsid {
 
-void WebSidBackend::write(data_t reg, data_t value, uint16_t cycles)
+void WebSidBackend::write(addr_t reg, data_t value, uint16_t cycles)
 {
   ++writes_;
+
+  /* $80 and above never reach this board: real chip 5 and up (this backend
+   * only ever has 4 real sockets over WebUSB - "board or emulated" stay a
+   * hard 4 chip placeholder, see mos6581_8580.h's own kMaxSids comment) and
+   * the FM/OPL "unclaimed" park (kFmOplParkBase, well past $80 too) both
+   * land here, and neither is something this board can use. Dropped here
+   * rather than truncated into `entry[0]`, which is one byte, the CYCLED_WRITE
+   * wire format's own register field: silently wrapping a chip 8+ register
+   * into some other chip's byte would corrupt the stream instead of just
+   * dropping the write, which is what UsbSidBackend and EmbeddedSidBackend do
+   * for the same reg range. */
+  if (reg >= 0x80) return;
 
   if (pending() >= kRingEntries) { /* the page has stopped draining */
     ++drops_;
     return;
   }
 
-  /* The gap goes on the ring as it arrives. The cycle the access itself costs
-   * was already taken off upstream by SidConfig::access_overhead, and the page
-   * sends these as CYCLED_WRITE, the same firmware command libusb sends, so
-   * what is on the ring is exactly the pre-delay the board sits out. This used
-   * to subtract a second cycle, which put every write a cycle early. */
+  /* The gap goes on the ring as it arrives - access_overhead is already
+   * subtracted upstream, no second subtraction here. */
   const uint16_t delay = cycles;
   uint8_t * entry = &ring_[(head_ & (kRingEntries - 1)) * kEntryBytes];
-  entry[0] = reg;
+  entry[0] = static_cast<uint8_t>(reg);
   entry[1] = value;
   entry[2] = static_cast<uint8_t>(delay >> 8);
   entry[3] = static_cast<uint8_t>(delay & 0xff);
@@ -62,7 +71,7 @@ void WebSidBackend::write(data_t reg, data_t value, uint16_t cycles)
  * is on, and it is off. `$d41b` and `$d41c`, the registers tunes actually
  * poll, are answered by the emulated voice three instead.
  */
-data_t WebSidBackend::read(data_t reg, uint16_t cycles)
+data_t WebSidBackend::read(addr_t reg, uint16_t cycles)
 {
   (void)reg;
   (void)cycles;

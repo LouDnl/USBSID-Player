@@ -76,12 +76,9 @@ class Mos6526 final : public ClockedDevice, public IoDevice
     /**
      * @brief Run up to the given tick count, in as few steps as it can.
      *
-     * The bus does not clock a CIA every cycle. It asks how long the chip can
-     * be left alone and then leaves it alone, which is most of the time: a
-     * timer counting down from a thousand does nothing but subtract for nine
-     * hundred and ninety nine of them. Anything that looks at the chip in the
-     * meantime, a read, a write or an input changing, catches it up first, so
-     * what it sees is what it would have seen if every cycle had been walked.
+     * The bus asks how long the chip can be left alone rather than clocking
+     * it every cycle. Any access (read/write/input change) catches it up
+     * first, so it always reads as if every cycle had been walked.
      */
     void catch_up(cycle_t target_ticks) US_RAM_ATTR;
 
@@ -91,20 +88,11 @@ class Mos6526 final : public ClockedDevice, public IoDevice
     /**
      * @brief Apply a run of timer A underflows in one go, or do nothing.
      *
-     * The one shape `cycles_to_event()` cannot help with: timer A free running
-     * on phi2 with a tiny latch as a prescaler, and timer B counting its
-     * underflows. The chip genuinely does something every few cycles, so
-     * refusing to skip is correct, and `prg/Musik_Run_Stop.prg` (latch of two,
-     * an underflow every three cycles) walked 97% of its cycles for it.
-     *
-     * Nothing in that run is visible from outside until timer B underflows:
-     * timer A's own interrupt is masked, it drives no port and no shift
-     * register, and timer B only counts. So the whole run can be applied as
-     * arithmetic and the chip left standing one underflow short of timer B's,
-     * which is where the walking has to start again.
-     *
-     * Returns the number of clocks applied, or zero when the shape does not
-     * hold, which is every other tune.
+     * Handles the shape cycles_to_event() cannot: timer A free-running on
+     * phi2 as a prescaler, timer B counting its underflows. Nothing in that
+     * run is externally visible until timer B underflows, so the whole run
+     * can be applied as arithmetic. Returns clocks applied, or zero when the
+     * shape does not hold.
      */
     uint32_t cascade_skip(cycle_t behind) US_RAM_ATTR;
 

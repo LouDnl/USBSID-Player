@@ -44,6 +44,13 @@ namespace {
  * memory and removes a whole class of question. */
 constexpr size_t kMaxDelta = 0x10000;
 
+/* Anything at or above this is not a real chip's register: it is
+ * kFmOplParkBase's block (mos6581_8580.cpp), reached when a tune writes
+ * $df40/$df50 and no SID claims them. kMaxSids * 0x20 is exactly
+ * kFmOplParkBase itself - real chips never reach it, so this is an exact
+ * boundary, not a guess. */
+constexpr addr_t kFmOplRange = static_cast<addr_t>(kMaxSids * 0x20);
+
 } /* namespace */
 
 ResidFpSidBackend::ResidFpSidBackend(void) = default;
@@ -58,7 +65,7 @@ ResidFpSidBackend::~ResidFpSidBackend(void)
 
 bool ResidFpSidBackend::configure(uint8_t chips, double clock_hz,
                                   unsigned sample_rate, SoftSidQuality quality,
-                                  SoftSidModel model)
+                                  SoftSidModel model, bool stereo)
 {
   ready_ = false;
   if (chips < 1) chips = 1;
@@ -91,8 +98,16 @@ bool ResidFpSidBackend::configure(uint8_t chips, double clock_hz,
 
   chips_ = chips;
   sample_rate_ = sample_rate;
+  stereo_ = stereo;
+  /* Every chip starts Center - see set_pan()'s own comment - so a
+   * stereo-configured backend nobody calls set_pan() on still plays as an
+   * ordinary center mix on both channels, not silence on one of them. */
+  for (uint8_t i = 0; i < kMaxSoftSids; i++) pan_[i] = SidPan::Center;
+  recompute_pan_headroom();
   scratch_.assign(kMaxDelta, 0);
   mix_.assign(kMaxDelta, 0);
+  mix_r_.assign(stereo_ ? kMaxDelta : 0, 0);
+  fm_scratch_.assign(stereo_ ? kMaxDelta : 0, 0);
   out_.clear();
   taken_ = 0;
   produced_ = 0;
@@ -100,6 +115,24 @@ bool ResidFpSidBackend::configure(uint8_t chips, double clock_hz,
   fm_writes_ = 0;
   ready_ = true;
   return true;
+}
+
+void ResidFpSidBackend::set_pan(uint8_t chip, SidPan pan)
+{
+  if (chip < 1 || chip > kMaxSoftSids) return;
+  pan_[chip - 1] = pan;
+  recompute_pan_headroom();
+}
+
+void ResidFpSidBackend::recompute_pan_headroom(void)
+{
+  uint8_t l = 0, r = 0;
+  for (uint8_t i = 0; i < chips_; i++) {
+    if (pan_[i] != SidPan::Right)  l++; /* Left or Center */
+    if (pan_[i] != SidPan::Left)   r++; /* Right or Center */
+  }
+  pan_count_l_ = (l > 0) ? l : 1;
+  pan_count_r_ = (r > 0) ? r : 1;
 }
 
 void ResidFpSidBackend::attach(Machine & machine)
@@ -114,26 +147,16 @@ void ResidFpSidBackend::attach(Machine & machine)
    * rather than as silence. See SidConfig::render_idle. */
   machine.sid().config().render_idle = true;
 
-  /* Inherit the chips as the tune has already programmed them.
-   *
-   * This backend is often attached **after** something has been playing: the
-   * browser loads a tune, which for an RSID holding a BASIC program boots the
-   * machine and RUNs it, and only then configures software audio. reSIDfp is
-   * built fresh with every register at zero, so everything the tune set once and
-   * never set again is lost, starting with the master volume at $18. A tune
-   * whose play routine rewrites its registers every frame recovers within a
-   * frame and never showed this; a program that sets the chip up once and then
-   * only writes notes is silent for ever.
-   *
-   * That is exactly what `Beisikki_Demo_BASIC.sid` did: identical register
-   * writes to the command line player, which sounds, and nothing audible here.
-   *
-   * The emulation keeps a mirror of every write, so the fix is to replay it.
-   * Ascending order, `$00` to `$18` per chip, which is the order a driver writes
-   * them in anyway: a control register carrying a gate that was already on stays
-   * on, which is what "inherit" means. What cannot be inherited is where each
-   * envelope had got to, and nothing can carry that across a chip that did not
-   * exist a moment ago. */
+  /* Inherit the chips as the tune has already programmed them. This backend
+   * is often attached **after** something has been playing (the browser
+   * boots and RUNs a BASIC RSID, then configures software audio afterward),
+   * and reSIDfp is built fresh with every register at zero, so anything the
+   * tune set once and never repeats - starting with the master volume at
+   * $18 - is otherwise silently lost. Fixed by replaying the emulation's own
+   * write mirror, ascending `$00` to `$18` per chip (the order a driver
+   * writes them in anyway, so a gate that was already on stays on). What
+   * cannot be inherited is where each envelope had got to, since nothing
+   * carries that across a chip that did not exist a moment ago. */
   Mos6581_8580 & sid = machine.sid();
   for (uint8_t chip = 0; chip < chips_; chip++) {
     if (sid_[chip] == nullptr) continue;
@@ -162,103 +185,151 @@ void ResidFpSidBackend::advance(uint32_t cycles)
     left -= step;
 
     /* Chip one sets how many samples this step produced, and the rest are
-     * summed onto it. They are clocked identically and configured identically,
-     * so they agree; taking the minimum rather than trusting that would hide a
-     * configuration mistake instead of showing it. */
-    /* **Every chip is clocked on every step, whatever came out of the first
-     * one.** An earlier version skipped the rest when chip one produced no
-     * samples, and most steps produce none: the sample rate is a fortieth of the
-     * clock rate, so a short gap between writes yields nothing at all. The other
-     * chips then only advanced on the steps where chip one happened to emit,
-     * fell steadily behind, and a two or three SID tune played as one. Harmless
-     * with a single chip, which is why it survived being tested. */
+     * summed onto it rather than trusted to agree, since a differing count
+     * would hide a configuration mistake instead of showing it.
+     *
+     * Stereo (opt in, see configure()): each chip's own samples go into mix_
+     * (left), mix_r_ (right), or both, per pan_[] - hard panning, the same
+     * three positions a v5 tune's own panning hint can ask for (set_pan()'s
+     * own comment). Mono (the default): summed into mix_ only. */
     const int n = sid_[0]->clock(step, scratch_.data());
-    for (int s = 0; s < n; s++) mix_[static_cast<size_t>(s)] = scratch_[static_cast<size_t>(s)];
+    if (stereo_) {
+      const bool l0 = (pan_[0] != SidPan::Right);
+      const bool r0 = (pan_[0] != SidPan::Left);
+      for (int s = 0; s < n; s++) {
+        mix_[static_cast<size_t>(s)]   = l0 ? scratch_[static_cast<size_t>(s)] : 0;
+        mix_r_[static_cast<size_t>(s)] = r0 ? scratch_[static_cast<size_t>(s)] : 0;
+      }
+    } else {
+      for (int s = 0; s < n; s++) mix_[static_cast<size_t>(s)] = scratch_[static_cast<size_t>(s)];
+    }
 
+    /* Every chip is clocked on every step regardless of what chip one
+     * produced: most steps produce no samples at all (the sample rate is a
+     * fortieth of the clock rate), and skipping a chip on those steps would
+     * let it fall behind the others over time. */
     for (uint8_t c = 1; c < chips_; c++) {
       if (sid_[c] == nullptr) continue;
       const int m = sid_[c]->clock(step, scratch_.data());
       const int k = (m < n) ? m : n;
-      for (int s = 0; s < k; s++) {
-        mix_[static_cast<size_t>(s)] += scratch_[static_cast<size_t>(s)];
+      if (stereo_) {
+        const bool lc = (pan_[c] != SidPan::Right);
+        const bool rc = (pan_[c] != SidPan::Left);
+        if (lc) for (int s = 0; s < k; s++) mix_[static_cast<size_t>(s)]   += scratch_[static_cast<size_t>(s)];
+        if (rc) for (int s = 0; s < k; s++) mix_r_[static_cast<size_t>(s)] += scratch_[static_cast<size_t>(s)];
+      } else {
+        for (int s = 0; s < k; s++) mix_[static_cast<size_t>(s)] += scratch_[static_cast<size_t>(s)];
       }
     }
 
     if (n <= 0) continue;
 
-    /* Mixed down to mono by summing. Panning multi SID tunes is a real decision
-     * and not an obvious default (the board does it in hardware, and the older
-     * players pan), so it is deliberately not made here: one channel, and the
-     * frontend can be given stereo later without this file changing shape.
-     *
-     * Divided by the number of chips, which is the headroom. Each reSIDfp
-     * instance uses the whole of the sixteen bit range on its own, so two of
-     * them summed reach twice full scale and three reach three times, and what
-     * came out before was a clamp: `Industrial_Underwear_2SID.sid` pinned at
-     * 32767 for 98 samples in thirty seconds and was heard as a ripple on the
-     * loud parts. A clamp is distortion, and distortion that only appears on
-     * multi SID tunes reads as "multi SID is broken".
-     *
-     * Deterministic attenuation rather than a limiter: a limiter is level
-     * dependent, so the same tune would sound different depending on how loud
-     * the moment before it was. The clamp stays as a guard with its counter,
-     * and should now never fire. */
+    /* Divided by the per-channel headroom (chips_ itself, mono; pan_count_l_/
+     * pan_count_r_, stereo - see recompute_pan_headroom()). Each reSIDfp
+     * instance uses the whole sixteen bit range on its own, so N chips summed
+     * reach N times full scale; dividing rather than clamping avoids the
+     * audible distortion a clamp produces on loud multi-chip passages.
+     * Deterministic attenuation rather than a limiter, since a limiter is
+     * level dependent and would make the same tune sound different depending
+     * on how loud the moment before it was. The clamp below stays as a guard
+     * with its own counter, and should now never fire. */
     const size_t before = out_.size();
-    for (int s = 0; s < n; s++) {
-      int32_t v = mix_[static_cast<size_t>(s)];
-      if (chips_ > 1) v /= static_cast<int32_t>(chips_);
-      if (v > 32767) { v = 32767; clipped_++; }
-      else if (v < -32768) { v = -32768; clipped_++; }
-      out_.push_back(static_cast<int16_t>(v));
+    if (stereo_) {
+      for (int s = 0; s < n; s++) {
+        int32_t l = mix_[static_cast<size_t>(s)];
+        int32_t r = mix_r_[static_cast<size_t>(s)];
+        if (pan_count_l_ > 1) l /= static_cast<int32_t>(pan_count_l_);
+        if (pan_count_r_ > 1) r /= static_cast<int32_t>(pan_count_r_);
+        if (l > 32767) { l = 32767; clipped_++; } else if (l < -32768) { l = -32768; clipped_++; }
+        if (r > 32767) { r = 32767; clipped_++; } else if (r < -32768) { r = -32768; clipped_++; }
+        out_.push_back(static_cast<int16_t>(l));
+        out_.push_back(static_cast<int16_t>(r));
+      }
+      /* FM has no pan of its own yet (always center): rendered once - it is
+       * stateful, generating new OPL samples on every call, so this must not
+       * run once per channel - into fm_scratch_ (zeroed first, so what comes
+       * back is the attenuated FM signal alone), then that one mono result
+       * added onto both already-mixed channels by hand, since mix_into()
+       * itself only knows how to add onto one contiguous buffer. */
+      if (fm_.ready()) {
+        std::fill(fm_scratch_.begin(), fm_scratch_.begin() + n, 0);
+        fm_.mix_into(fm_scratch_.data(), static_cast<size_t>(n));
+        for (int s = 0; s < n; s++) {
+          const size_t li = before + static_cast<size_t>(s) * 2;
+          const int32_t add = fm_scratch_[static_cast<size_t>(s)];
+          int32_t l = static_cast<int32_t>(out_[li]) + add;
+          int32_t r = static_cast<int32_t>(out_[li + 1]) + add;
+          if (l > 32767) { l = 32767; clipped_++; } else if (l < -32768) { l = -32768; clipped_++; }
+          if (r > 32767) { r = 32767; clipped_++; } else if (r < -32768) { r = -32768; clipped_++; }
+          out_[li]     = static_cast<int16_t>(l);
+          out_[li + 1] = static_cast<int16_t>(r);
+        }
+      }
+    } else {
+      for (int s = 0; s < n; s++) {
+        int32_t v = mix_[static_cast<size_t>(s)];
+        if (chips_ > 1) v /= static_cast<int32_t>(chips_);
+        if (v > 32767) { v = 32767; clipped_++; }
+        else if (v < -32768) { v = -32768; clipped_++; }
+        out_.push_back(static_cast<int16_t>(v));
+      }
+      /* The FM voices onto the SID voices, the way the two chips are summed on
+       * a machine that has both. Nothing to do for the tunes that have no FM:
+       * the chip is only built once one writes to it. */
+      if (fm_.ready()) fm_.mix_into(out_.data() + before, static_cast<size_t>(n));
     }
-    /* The FM voices onto the SID voices, the way the two chips are summed on a
-     * machine that has both. Nothing to do for the tunes that have no FM: the
-     * chip is only built once one writes to it. */
-    if (fm_.ready()) fm_.mix_into(out_.data() + before, static_cast<size_t>(n));
     produced_ += static_cast<uint64_t>(n);
   }
 
   /* Reclaim the space already handed out, once it is worth the move. Keeps the
    * vector from growing for the length of a tune without memmoving on every
-   * take(). */
-  if (taken_ > 0 && taken_ >= out_.size() / 2 && taken_ > 4096) {
-    out_.erase(out_.begin(), out_.begin() + static_cast<long>(taken_));
+   * take(). taken_ counts frames (see take()'s own comment); out_ is
+   * elements, so it takes channels() of them per frame taken. */
+  const size_t taken_elems = taken_ * channels();
+  if (taken_ > 0 && taken_elems >= out_.size() / 2 && taken_ > 4096) {
+    out_.erase(out_.begin(), out_.begin() + static_cast<long>(taken_elems));
     taken_ = 0;
   }
 }
 
-void ResidFpSidBackend::write(data_t reg, data_t value, uint16_t cycles)
+void ResidFpSidBackend::write(addr_t reg, data_t value, uint16_t cycles)
 {
   if (!ready_) return;
 
-  /* $80 and $90 are $df40/$df50 with no SID claiming them. reSIDfp has no FM,
-   * so the gap is still honoured (the tune's timeline does not care what the
-   * write was for) and the write itself is counted and dropped. */
-  if (reg >= 0x80) {
+  /* kFmOplRange and up is $df40/$df50 with no SID claiming them (see
+   * kFmOplRange above). reSIDfp has no FM, so the gap is still honoured (the
+   * tune's timeline does not care what the write was for) and the write
+   * itself is counted and dropped. */
+  if (reg >= kFmOplRange) {
     advance(cycles);
     fm_writes_++;
     /* The gap first, above, so the write lands after the samples that came
-     * before it, exactly as a SID write does. */
+     * before it, exactly as a SID write does. `reg`'s local offset within
+     * kFmOplParkBase's block is 0 for $df40 (the index port) or 0x10 for
+     * $df50 (the data port) - see translate(), mos6581_8580.cpp - which is
+     * mapped back onto the kFmAddressReg/kFmDataReg pair OplChip::bus_write()
+     * actually wants. */
     if (!fm_.ready()) fm_.configure(sample_rate_);
-    fm_.bus_write(reg, value);
+    const uint8_t opl_reg = ((reg & 0x1f) == 0x10) ? kFmDataReg : kFmAddressReg;
+    fm_.bus_write(opl_reg, value);
     return;
   }
 
   /* The gap first, then the write: this is the ordering difference. */
   advance(cycles);
 
-  const uint8_t chip = static_cast<uint8_t>((reg >> 5) & 0x03);
+  const uint8_t chip = static_cast<uint8_t>(reg >> 5);
   if (chip >= chips_ || sid_[chip] == nullptr) return;
   sid_[chip]->write(static_cast<int>(reg & 0x1f), value);
 }
 
-data_t ResidFpSidBackend::read(data_t reg, uint16_t cycles)
+data_t ResidFpSidBackend::read(addr_t reg, uint16_t cycles)
 {
   if (!ready_) return 0xff;
   advance(cycles);
 
-  if (reg >= 0x80) return 0xff;
-  const uint8_t chip = static_cast<uint8_t>((reg >> 5) & 0x03);
+  if (reg >= kFmOplRange) return 0xff;
+  const uint8_t chip = static_cast<uint8_t>(reg >> 5);
   if (chip >= chips_ || sid_[chip] == nullptr) return 0xff;
   return static_cast<data_t>(sid_[chip]->read(static_cast<int>(reg & 0x1f)));
 }
@@ -287,11 +358,16 @@ void ResidFpSidBackend::reset(void)
 size_t ResidFpSidBackend::take(int16_t * out, size_t frames)
 {
   if (out == nullptr || frames == 0) return 0;
-  const size_t have = out_.size() - taken_;
+  const unsigned ch = channels();
+  /* taken_ counts frames, out_ counts elements (interleaved L/R when stereo)
+   * - see the header's own take()/channels() comments. */
+  const size_t have = (out_.size() / ch) - taken_;
   const size_t n = (frames < have) ? frames : have;
   if (n != 0) {
-    std::copy(out_.begin() + static_cast<long>(taken_),
-              out_.begin() + static_cast<long>(taken_ + n), out);
+    const size_t from = taken_ * ch;
+    const size_t count = n * ch;
+    std::copy(out_.begin() + static_cast<long>(from),
+              out_.begin() + static_cast<long>(from + count), out);
     taken_ += n;
   }
   return n;

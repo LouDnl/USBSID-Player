@@ -38,6 +38,10 @@ constexpr uint32_t kMaxDelta = 0xffff;
 constexpr addr_t kFmOplAddrA = 0xdf40;
 constexpr addr_t kFmOplAddrB = 0xdf50;
 
+/* Where an unclaimed FM/OPL write is parked: one 32 byte block past the
+ * last real chip (kMaxSids * 0x20 = 0x1e0), inside regs_[]'s own 0x200. */
+constexpr addr_t kFmOplParkBase = 0x01e0;
+
 /* The PLA decodes the whole of this range to the SID */
 constexpr addr_t kSidPageFirst = 0xd400;
 constexpr addr_t kSidPageLast  = 0xd7ff;
@@ -51,9 +55,9 @@ Mos6581_8580::Mos6581_8580(Bus & bus, SidBackend & backend)
 
 void Mos6581_8580::reset(void)
 {
-  for (uint8_t i = 0; i < 0x80; i++) regs_[i] = 0;
+  for (size_t i = 0; i < kRegsSize; i++) regs_[i] = 0;
   last_event_ = bus_.cycles();
-  for (uint8_t i = 0; i < 4; i++) {
+  for (uint8_t i = 0; i < kMaxSids; i++) {
     voice3_[i].reset();
     voice3_[i].resync(last_event_);
   }
@@ -65,14 +69,9 @@ void Mos6581_8580::reset(void)
 /**
  * @brief The addresses a chip answers beyond its own base.
  *
- * A single SID is decoded by the PLA across the whole of $d400-$d7ff, so the
- * chip answers all thirty two mirrors of itself. That is not a convenience:
- * $d7ff really is register $1f on a real machine, which is why the test
- * suites use it as a scratch address.
- *
- * With more than one chip configured the bases claim their own ranges, and
- * the spare addresses tunes like to write to are folded onto the first chip,
- * which is what the existing player does.
+ * A single SID is decoded across all of $d400-$d7ff (32 mirrors); $d7ff is
+ * really register $1f, hence its use as a test scratch address. With
+ * multiple chips, spare addresses fold onto the first chip.
  */
 bool Mos6581_8580::custom_address(addr_t addr) const
 {
@@ -82,7 +81,7 @@ bool Mos6581_8580::custom_address(addr_t addr) const
          (page >= 0xd5c0 && page <= 0xd5df);
 }
 
-data_t Mos6581_8580::translate(addr_t addr, uint8_t & chip) const
+addr_t Mos6581_8580::translate(addr_t addr, uint8_t & chip) const
 {
   chip = 0;
 
@@ -100,30 +99,34 @@ data_t Mos6581_8580::translate(addr_t addr, uint8_t & chip) const
   if (addr == kFmOplAddrA || addr == kFmOplAddrB) {
     if (config_.fmopl_sid >= 1 && config_.fmopl_sid <= 4) {
       chip = static_cast<uint8_t>(config_.fmopl_sid);
-      return static_cast<data_t>(((chip - 1) * 0x20) + (addr & 0x1f));
+      return static_cast<addr_t>(((chip - 1) * 0x20) + (addr & 0x1f));
     }
-    chip = 5; /* nothing claims it, park it out of the way */
-    return static_cast<data_t>(0x80 + (addr & 0x1f));
+    /* Nothing claims it: park past every real chip's range so a backend
+     * seeing more than 8 chips can still tell a real chip 5+ write apart
+     * from this one. `chip` is one past the last real chip for the same
+     * reason. */
+    chip = static_cast<uint8_t>(kMaxSids + 1);
+    return static_cast<addr_t>(kFmOplParkBase + (addr & 0x1f));
   }
 
   const uint8_t count = (config_.count == 0) ? 1
-                      : (config_.count > 4)  ? 4 : config_.count;
+                      : (config_.count > kMaxSids) ? kMaxSids : config_.count;
 
   for (uint8_t n = 0; n < count; n++) {
     const addr_t base = config_.base[n];
     if (base == 0) continue;
     if (addr >= base && addr < static_cast<addr_t>(base + 0x20)) {
       chip = static_cast<uint8_t>(n + 1);
-      const data_t reg = static_cast<data_t>((n * 0x20) + (addr & 0x1f));
+      const addr_t reg = static_cast<addr_t>((n * 0x20) + (addr & 0x1f));
       /* only the first chip can be pushed into the other socket */
-      return (n == 0) ? static_cast<data_t>(socket_offset + (addr & 0x1f)) : reg;
+      return (n == 0) ? static_cast<addr_t>(socket_offset + (addr & 0x1f)) : reg;
     }
   }
 
   /* anything else inside the SID page belongs to the first chip */
   if (custom_address(addr)) {
     chip = 1;
-    return static_cast<data_t>(socket_offset + (addr & 0x1f));
+    return static_cast<addr_t>(socket_offset + (addr & 0x1f));
   }
 
   return kSidNotMapped;
@@ -132,21 +135,12 @@ data_t Mos6581_8580::translate(addr_t addr, uint8_t & chip) const
 /**
  * @brief Cycles since the previous SID event, as the hardware wants them.
  *
- * Two adjustments to the raw gap:
- *
- * Anything longer than sixteen bits is handed to the backend as a wait first,
- * so the remainder always fits alongside the write.
- *
- * And one cycle is taken off, because performing the access on USBSID-Pico
- * costs a cycle of its own. Sending the full gap makes every write one cycle
- * late, and the error accumulates across a frame.
- *
- * It is called only for accesses that actually reach the hardware. An access
- * that stops here, a read served from the register mirror or a write to an
- * address no chip claims, must leave the base where it is: consuming the gap
- * without sending it anywhere loses that time for good. Tunes read $d41b and
- * $d41c constantly for their random numbers, and on the device, where these
- * deltas are the only clock there is, that leak alone ran playback fast.
+ * Gaps over 16 bits are sent as an explicit wait() first. One cycle is
+ * subtracted (the access itself costs a cycle of hardware time). Only
+ * called for accesses that actually reach the hardware - a read served
+ * from the mirror or a write to an unclaimed address must not call this,
+ * since consuming the gap without sending it anywhere loses that time and
+ * runs playback fast.
  */
 uint16_t Mos6581_8580::cycles_since_last_event(void)
 {
@@ -167,7 +161,7 @@ uint16_t Mos6581_8580::cycles_since_last_event(void)
 namespace {
 
 /* Which voice a chip local control register belongs to, or 0 for none. */
-inline uint8_t control_reg_voice(data_t local)
+inline uint8_t control_reg_voice(addr_t local)
 {
   switch (local & 0x1f) {
     case 0x04: return 1;
@@ -180,7 +174,7 @@ inline uint8_t control_reg_voice(data_t local)
 /* Which voice a chip local sustain/release register belongs to, or 0 for none.
  * Together with the control register above, these are the only two registers a
  * mute touches. */
-inline uint8_t sr_reg_voice(data_t local)
+inline uint8_t sr_reg_voice(addr_t local)
 {
   switch (local & 0x1f) {
     case 0x06: return 1;
@@ -200,24 +194,17 @@ constexpr data_t kSustainMask = 0xf0;
 /**
  * @brief The value the hardware should see, which is not always what was written.
  *
- * Two bits' worth of change, on two registers of a muted voice:
- *
- *   control ($04/$0b/$12)  the gate bit is forced to 0
- *   sustain ($06/$0d/$14)  the sustain nibble is forced to 0
- *
- * The gate alone is not enough. Clearing it starts the release phase, and
- * release can be up to 24 seconds, so a voice muted mid note stays audible for
- * as long as the tune happens to have asked for. Holding sustain at 0 as well
- * takes the envelope's floor away, so the voice goes quiet and stays quiet
- * however the tune re-gates it.
- *
- * Everything else is passed through: the release nibble, the waveform, ring
- * modulation and sync, and every other register. So a muted voice keeps
- * following the tune and comes back exactly where the tune has got to.
+ * For a muted voice: control ($04/$0b/$12) gets its gate bit forced to 0,
+ * sustain ($06/$0d/$14) gets its sustain nibble forced to 0. Gate alone
+ * isn't enough (release can run up to 24s audible); everything else
+ * passes through unchanged.
  */
-data_t Mos6581_8580::mask_for_output(data_t reg, data_t value) const
+data_t Mos6581_8580::mask_for_output(addr_t reg, data_t value) const
 {
-  const uint8_t chip = static_cast<uint8_t>((reg >> 5) & 0x03);
+  /* Only ever called with a reg translate() put inside a real chip's own
+   * range (io_write()'s `chip >= 1 && chip <= kMaxSids` guard), so no mask
+   * is needed here to stay inside voice_mute[]'s own kMaxSids entries. */
+  const uint8_t chip = static_cast<uint8_t>(reg >> 5);
   const uint8_t mask = config_.voice_mute[chip];
   if (mask == 0) return value;
 
@@ -238,43 +225,29 @@ data_t Mos6581_8580::mask_for_output(data_t reg, data_t value) const
 
 void Mos6581_8580::set_voice_mute(uint8_t chip, uint8_t voice, bool muted)
 {
-  if (chip < 1 || chip > 4 || voice < 1 || voice > 3) return;
+  if (chip < 1 || chip > kMaxSids || voice < 1 || voice > 3) return;
   const uint8_t bit = static_cast<uint8_t>(1u << (voice - 1));
   uint8_t & mask = config_.voice_mute[chip - 1];
   const bool was = (mask & bit) != 0;
   if (was == muted) return;
   mask = static_cast<uint8_t>(muted ? (mask | bit) : (mask & ~bit));
 
-  /* Setting the mask does not silence a note that is already sounding: the chip
-   * holds its gate until something writes to that register, and a long sustain
-   * may not be written again for seconds. So push both registers now, and on the
-   * way back too, so the voice returns without waiting for the tune.
-   *
-   * Sustain goes first, both directions, and the order is not arbitrary.
-   *
-   * Muting: dropping sustain to 0 while the voice is still gated makes the
-   * envelope fall to zero at the decay rate, and clearing the gate then releases
-   * from zero. The other order releases from whatever level the note was holding,
-   * at the release rate, which is the long tail this is meant to avoid.
-   *
-   * Unmuting: putting the tune's sustain back before the gate goes high means a
-   * restarted note has the right level from its first cycle rather than climbing
-   * to it after the fact.
-   *
-   * `regs_[]` is the save slot for the sustain nibble, and no separate copy is
-   * needed: the mirror is written before the mask is applied, so it always holds
-   * what the tune last wrote, whether that write happened before the mute or
-   * during it. */
-  static const data_t kSustainRelease[3] = { 0x06, 0x0d, 0x14 };
-  static const data_t kControl[3]        = { 0x04, 0x0b, 0x12 };
+  /* Setting the mask alone doesn't silence an already-sounding note (gate
+   * holds until next write), so push both registers now and on the way
+   * back. Sustain goes first both directions: muting drops sustain to 0
+   * while still gated so the envelope falls at decay rate, then clears
+   * the gate (releases from zero, not from whatever level it held).
+   * Unmuting restores sustain before the gate goes high. */
+  static const addr_t kSustainRelease[3] = { 0x06, 0x0d, 0x14 };
+  static const addr_t kControl[3]        = { 0x04, 0x0b, 0x12 };
   if (backend_ != nullptr) {
-    const data_t base = static_cast<data_t>((chip - 1) * 0x20);
-    const data_t order[2] = {
-      static_cast<data_t>(base + kSustainRelease[voice - 1]),
-      static_cast<data_t>(base + kControl[voice - 1]),
+    const addr_t base = static_cast<addr_t>((chip - 1) * 0x20);
+    const addr_t order[2] = {
+      static_cast<addr_t>(base + kSustainRelease[voice - 1]),
+      static_cast<addr_t>(base + kControl[voice - 1]),
     };
-    for (const data_t reg : order) {
-      backend_->write(reg, mask_for_output(reg, regs_[reg & 0x7f]),
+    for (const addr_t reg : order) {
+      backend_->write(reg, mask_for_output(reg, regs_[reg & (kRegsSize - 1)]),
                       cycles_since_last_event());
       ++writes_;
     }
@@ -284,83 +257,65 @@ void Mos6581_8580::set_voice_mute(uint8_t chip, uint8_t voice, bool muted)
 /**
  * @brief Hold a whole chip silent, dropping its writes.
  *
- * Dropping writes freezes a chip, it does not quiet it: whatever it was last told
- * to play keeps sounding. So the volume goes to zero first and the drop starts
- * after, and on the way back the chip is written out of `regs_[]` before the mask
- * is lifted, so it resumes as the tune believes it to be rather than wherever it
- * happened to be frozen.
- *
- * The volume register carries the filter mode in its high nibble, so only the low
- * nibble is cleared: restoring it later then puts back a filter setting the tune
- * may have changed while muted.
+ * Dropping writes freezes a chip, doesn't quiet it, so volume goes to
+ * zero first and the drop starts after. Only $18's low nibble is cleared
+ * (high nibble is filter mode). Actual work happens in
+ * apply_chip_mute_pending() on the emulating core - see its comment.
  */
 void Mos6581_8580::set_chip_mute(uint8_t chip, bool muted)
 {
-  if (chip < 1 || chip > 4) return;
-  const uint8_t bit = static_cast<uint8_t>(1u << (chip - 1));
+  if (chip < 1 || chip > kMaxSids) return;
+  const uint16_t bit = static_cast<uint16_t>(1u << (chip - 1));
   const bool was = (config_.chip_mute & bit) != 0;
   if (was == muted) return;
 
-  /* The mask, and a note that this chip's registers need attention. Nothing else:
-   * see chip_mute_pending_ for why this must not write to the backend. */
-  config_.chip_mute = static_cast<uint8_t>(muted ? (config_.chip_mute | bit)
-                                                 : (config_.chip_mute & ~bit));
-  chip_mute_pending_ = static_cast<uint8_t>(chip_mute_pending_ | bit);
+  config_.chip_mute = static_cast<uint16_t>(muted ? (config_.chip_mute | bit)
+                                                  : (config_.chip_mute & ~bit));
+  chip_mute_pending_ = static_cast<uint16_t>(chip_mute_pending_ | bit);
 }
 
 /**
  * @brief Do what set_chip_mute() could not, on the core that owns the backend.
  *
- * Muting: silence the chip. Dropping its writes only freezes it, so whatever it
- * was last told to play would carry on sounding. Only the low nibble of $18 goes,
- * because the high nibble is the filter mode.
- *
- * Unmuting: put back everything the tune wrote while it was silent, in register
- * order with the volume last, so the chip resumes as the tune believes it to be
- * rather than wherever it froze. Voice mutes still apply on the way out.
+ * Unmuting replays everything the tune wrote while silent, register order
+ * with volume last, so the chip resumes as the tune believes it to be.
+ * Voice mutes still apply on the way out.
  */
 void Mos6581_8580::apply_chip_mute_pending(void)
 {
-  const uint8_t pending = chip_mute_pending_;
+  const uint16_t pending = chip_mute_pending_;
   chip_mute_pending_ = 0;
   if (backend_ == nullptr) return;
 
-  /* Start counting from now, not from the last write that reached the backend.
-   *
-   * A muted chip's writes are dropped before the cycle accounting, so on a tune
-   * whose only SID is muted nothing advances `last_event_` for as long as the mute
-   * lasts. The first write after it would then carry a delta covering the whole
-   * silent stretch, and cycles_since_last_event() turns a delta that large into a
-   * run of `wait()` calls: the board would sit out the mute a second time. Heard
-   * as the play time freezing for exactly as long as the chip had been muted, then
-   * carrying on.
-   *
-   * The board has already lived through that silence in real time, so there is
-   * nothing to wait out. Anywhere another chip kept writing this is a no-op,
-   * because `last_event_` is already now. */
+  /* Reset last_event_ to now: a muted chip's writes are dropped before
+   * cycle accounting, so the first write after unmute would otherwise
+   * carry a delta covering the whole silent stretch and turn into a flood
+   * of wait() calls, freezing playback for as long as it had been muted.
+   * The board already lived through that silence in real time. No-op if
+   * another chip kept writing (last_event_ is already now). */
   last_event_ = bus_.cycles();
 
-  for (uint8_t chip = 1; chip <= 4; ++chip) {
-    const uint8_t bit = static_cast<uint8_t>(1u << (chip - 1));
+  for (uint8_t chip = 1; chip <= kMaxSids; ++chip) {
+    const uint16_t bit = static_cast<uint16_t>(1u << (chip - 1));
     if ((pending & bit) == 0) continue;
 
-    const data_t base = static_cast<data_t>((chip - 1) * 0x20);
-    const data_t vol = static_cast<data_t>(base + 0x18);
+    const addr_t base = static_cast<addr_t>((chip - 1) * 0x20);
+    const addr_t vol = static_cast<addr_t>(base + 0x18);
 
     if ((config_.chip_mute & bit) != 0) {
-      backend_->write(vol, static_cast<data_t>(regs_[vol & 0x7f] & 0xf0),
+      backend_->write(vol, static_cast<data_t>(regs_[vol & (kRegsSize - 1)] & 0xf0),
                       cycles_since_last_event());
       ++writes_;
       continue;
     }
 
-    for (data_t r = 0; r <= 0x17; ++r) {
-      const data_t reg = static_cast<data_t>(base + r);
-      backend_->write(reg, mask_for_output(reg, regs_[reg & 0x7f]),
+    for (addr_t r = 0; r <= 0x17; ++r) {
+      const addr_t reg = static_cast<addr_t>(base + r);
+      backend_->write(reg, mask_for_output(reg, regs_[reg & (kRegsSize - 1)]),
                       cycles_since_last_event());
       ++writes_;
     }
-    backend_->write(vol, regs_[vol & 0x7f], cycles_since_last_event());
+    backend_->write(vol, regs_[vol & (kRegsSize - 1)], cycles_since_last_event());
     ++writes_;
   }
 }
@@ -368,55 +323,41 @@ void Mos6581_8580::apply_chip_mute_pending(void)
 void Mos6581_8580::io_write(addr_t addr, data_t value)
 {
   uint8_t chip = 0;
-  const data_t reg = translate(addr, chip);
+  const addr_t reg = translate(addr, chip);
 
   if (reg == kSidNotMapped) return;
 
-  /* A mute changed since the last write. Serviced here because this runs on the
-   * core that owns the backend and the cycle accounting, and the caller does not.
-   * Before the write below, so a chip coming back is already itself when the
-   * tune's next write lands on it. */
+  /* A mute changed since the last write; serviced here since this runs on
+   * the core that owns the backend and cycle accounting. Before the write
+   * below, so a chip coming back is already itself for the next write. */
   if (chip_mute_pending_ != 0) apply_chip_mute_pending();
 
-  regs_[reg & 0x7f] = value;
+  regs_[reg & (kRegsSize - 1)] = value;
 
-  /* The FM/OPL addresses when no SID claims them, chip 5 out of translate().
-   *
-   * On a board that is the end of it: nothing can play them, so nothing is sent.
-   * Over ASID it is not, because ASID carries FM itself, in its own SysEx, and a
-   * receiver that has an OPL can play it whatever the board does. So they go to
-   * the backend as $80 for $df40 and $90 for $df50, out of the 0..$7f range any
-   * SID register lives in, and a backend that cannot use them drops them.
-   *
-   * That is why the three hardware transports guard on `reg >= 0x80`: they never
-   * used to be handed these and sending them to a board would be junk. */
-  if (chip == 5) {
+  /* Unclaimed FM/OPL addresses (kMaxSids + 1 from translate()) go to the
+   * backend as reg values out of any real chip's range; a backend that
+   * can't use them drops them (UsbSidBackend/EmbeddedSidBackend both
+   * guard on reg >= 0x80, well below kFmOplParkBase). */
+  if (chip == kMaxSids + 1) {
     backend_->write(reg, value, cycles_since_last_event());
     ++writes_;
     return;
   }
 
-  if (chip >= 1 && chip <= 4) {
-    US_LOG_IF(sid_rw, "[W SID%u] $%04x $%02x:%02x [C]%5u\n", chip, addr, reg,
+  if (chip >= 1 && chip <= kMaxSids) {
+    US_LOG_IF(sid_rw, "[W SID%u] $%04x $%03x:%02x [C]%5u\n", chip, addr, reg,
               value, static_cast<unsigned>(bus_.cycles() - last_event_));
-    /* Voice three follows along, so $d41b and $d41c can answer. It is fed the
-     * register within the chip and the cycle the write happens on, which is
-     * what lets it be caught up lazily and still come out exact. */
+    /* Voice three follows along so $d41b/$d41c can answer, fed the
+     * register and cycle so it can be caught up lazily and stay exact. */
     voice3_[chip - 1].write(static_cast<reg_t>(addr & 0x1f), value,
                             bus_.cycles());
-    /* A muted chip's writes are dropped here, and only here.
-     *
-     * After the mirror and voice three, never before: `regs_[]` has to hold what
-     * the tune wrote so unmuting can put the chip back the way the tune believes
-     * it is, and voice three has to keep running or $d41b and $d41c would answer
-     * differently muted than not, which changes what a tune *does* rather than
-     * what it sounds like. Tunes poll those as a timer and as a random source. */
+    /* A muted chip's writes are dropped here, and only here (after the
+     * mirror and voice three, so $d41b/$d41c answer the same muted or
+     * not - tunes poll those as a timer and random source). */
     if ((config_.chip_mute & (1u << (chip - 1))) != 0) return;
 
-    /* The only place a voice mute is applied: on the way out, after the mirror and
-     * voice three have both seen what the tune actually wrote. */
+    /* Voice mute is applied only here, on the way out. */
     backend_->write(reg, mask_for_output(reg, value), cycles_since_last_event());
-    // backend_->write(reg, value, cycles_since_last_event());
     ++writes_;
   }
 }
@@ -424,59 +365,45 @@ void Mos6581_8580::io_write(addr_t addr, data_t value)
 data_t Mos6581_8580::io_read(addr_t addr)
 {
   uint8_t chip = 0;
-  const data_t reg = translate(addr, chip);
+  const addr_t reg = translate(addr, chip);
 
   if (reg == kSidNotMapped) return 0xff;
 
   ++reads_;
 
-  /* Only two registers of a SID can be read: voice three's oscillator and its
-   * envelope. With `real_reads` the answer comes from the chip itself, which
-   * is the most faithful thing available and costs a bus turnaround. Without
-   * it, voice three is emulated, and that is not a nicety: tunes poll $d41b
-   * for a random number, as a timer, and to wait until the oscillator has
-   * moved, and one that never moves is a tune that never starts. */
+  /* Only voice three's oscillator/envelope registers are readable. With
+   * real_reads the answer comes from the chip itself; otherwise voice
+   * three is emulated so $d41b/$d41c (timer, random source) still move. */
   const reg_t local = static_cast<reg_t>(addr & 0x1f);
 
-  if (config_.real_reads && chip >= 1 && chip <= 4) {
+  if (config_.real_reads && chip >= 1 && chip <= kMaxSids) {
     return backend_->read(reg, cycles_since_last_event());
   }
 
-  if (chip >= 1 && chip <= 4) {
+  if (chip >= 1 && chip <= kMaxSids) {
     if (local == kSidRegOsc3 || local == kSidRegEnv3) {
       const data_t value = (local == kSidRegOsc3)
         ? voice3_[chip - 1].osc3(bus_.cycles())
         : voice3_[chip - 1].env3(bus_.cycles());
-      US_LOG_IF(sid_rw, "[R SID%u] $%04x $%02x:%02x\n", chip, addr, reg, value);
+      US_LOG_IF(sid_rw, "[R SID%u] $%04x $%03x:%02x\n", chip, addr, reg, value);
       return value;
     }
   }
-  US_LOG_IF(sid_rw, "[R SID%u] $%04x $%02x:%02x (mirror)\n", chip, addr, reg,
-            regs_[reg & 0x7f]);
+  US_LOG_IF(sid_rw, "[R SID%u] $%04x $%03x:%02x (mirror)\n", chip, addr, reg,
+            regs_[reg & (kRegsSize - 1)]);
 
-  /* Everything else floats on real hardware. The mirror is the most useful
-   * thing to hand back for it. */
-  return regs_[reg & 0x7f];
+  /* Everything else floats on real hardware; the mirror is the most
+   * useful thing to hand back. */
+  return regs_[reg & (kRegsSize - 1)];
 }
 
 void Mos6581_8580::vic_frame_ended(void)
 {
-  /* A software SID renders only when it is told that time has passed, and it is
-   * told by the gap carried on an access. A tune that writes nothing for a
-   * while therefore produces no audio at all for that while, and a player that
-   * paces itself by "emulate until the ring has enough samples" reads that as
-   * "not enough yet" and emulates flat out. Vicious_SID_2-Greets writes once in
-   * its first fifty frames and 47 672 times by frame 150; c64_mp3 writes nothing
-   * at all for its first three hundred. Both raced.
-   *
-   * So for a software SID the outstanding time goes out here, at the frame
-   * boundary, in the same kMaxDelta chunks an access would have used. The delta
-   * base moves with it, which is safe precisely because the time has been
-   * delivered rather than dropped.
-   *
-   * Hardware keeps the old behaviour, and must: there the deltas are the clock,
-   * the board idles when it has no work, and handing it idle time to wait out
-   * would be inventing work. See cycles_since_last_event(). */
+  /* Software SID render_idle: pushes outstanding time at the frame
+   * boundary, same kMaxDelta chunking an access would use, so a tune that
+   * writes nothing for many frames still renders silence instead of
+   * racing ahead. Hardware skips this - there the deltas are the clock
+   * and handing it idle time would invent work. */
   if (config_.render_idle) {
     const cycle_t now = bus_.cycles();
     uint32_t delta = static_cast<uint32_t>(now - last_event_);
@@ -488,17 +415,9 @@ void Mos6581_8580::vic_frame_ended(void)
     last_event_ = now;
   }
 
-  /* A flush is a transport event, not a timing one, so the delta base is left
-   * alone: the first write of the next frame carries the whole gap since the
-   * last write, across the frame boundary.
-   *
-   * It used to be reset here, and that was wrong. Tunes stop writing part way
-   * into a frame, so resetting threw away everything between the last write
-   * and the end of the frame: around 3700 cycles a frame for a typical tune,
-   * which is nearly a fifth of the frame. On the desktop the pacer hides it,
-   * because real time is kept by the host and the device simply idles when it
-   * runs out of work. On the device there is no pacer at all: the cycle
-   * deltas *are* the clock, and playback ran that fifth too fast. */
+  /* A flush is a transport event, not a timing one - the delta base is
+   * left alone so the next frame's first write carries the whole gap
+   * since the last write, across the frame boundary. */
   backend_->flush();
 }
 

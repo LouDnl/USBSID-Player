@@ -121,27 +121,10 @@ void EmbeddedSidBackend::wait_until_due(void)
 /**
  * @brief Shorten a pre delay by however much of it has already gone by.
  *
- * The other half of the pacer, and the half it was missing. `wait_until_due()`
- * is a floor: when the emulation is ahead it holds it back. Nothing was a
- * ceiling. When the emulation is behind, the write is issued late *and* still
- * asks the board for the whole gap, so the lateness is served twice and the
- * write lands late for good. The board cannot give it back: a pre delay starts
- * when the DMA fires, not when the previous write finished, so once the state
- * machine's queue has drained the gap is measured from a standing start.
- *
- * That is the difference between this player and the desktop one. Over USB the
- * firmware's own buffer keeps the board a long way ahead, the queue never
- * drains, and the delays chain exactly. Here the emulation feeds the bus just
- * in time from the same core that runs the rest of usbsid.c, so anything that
- * takes the core away, a frame boundary or a dense burst the emulation cannot
- * keep up with, empties the queue. Measured on the simulated board that is six
- * or seven times a frame, each one putting a write about 130 cycles late. The
- * tempo survives, because the floor still holds the average; the individual
- * writes do not, and a digi made of individually late writes is a crackle.
- *
- * So take the lost time off the next pre delay instead. Bounded by the delay
- * itself: this only ever gives back time already spent, never asks the board
- * to write in the past.
+ * Ceiling half of the pacer (wait_until_due() is the floor): when a write is
+ * issued late, take the lag off its own pre delay instead of also asking
+ * the board for the full gap on top of the lateness. Bounded so this only
+ * ever gives back time already spent.
  */
 uint16_t EmbeddedSidBackend::trim_to_now(uint16_t hw)
 {
@@ -212,39 +195,34 @@ uint16_t EmbeddedSidBackend::schedule(uint16_t cycles)
   return kPacedResidual;
 }
 
-void EmbeddedSidBackend::write(data_t reg, data_t value, uint16_t cycles)
+void EmbeddedSidBackend::write(addr_t reg, data_t value, uint16_t cycles)
 {
   ++writes_;
   const uint16_t hw = schedule(cycles);
-  /* $80 and above are not SID registers: they are the FM/OPL addresses that no
-   * chip claimed, and only a transport that carries FM itself can use them. This
-   * one talks to a board, so it drops them, which is what happened before they
-   * were forwarded at all. */
+  /* $80 and above never reach this board: chip 5+ (4 real sockets, see
+   * kMaxSids) and the FM/OPL "unclaimed" park (kFmOplParkBase) both land
+   * here and are dropped, same as the old
+   * fixed $80/$90 FM markers. */
   if (reg >= 0x80) return;
   if (us_cycled_write == nullptr) return;
-  us_cycled_write(reg, value, hw);
+  us_cycled_write(static_cast<uint8_t>(reg), value, hw);
 }
 
-data_t EmbeddedSidBackend::read(data_t reg, uint16_t cycles)
+data_t EmbeddedSidBackend::read(addr_t reg, uint16_t cycles)
 {
   ++reads_;
   const uint16_t hw = schedule(cycles);
-  if (us_cycled_read == nullptr) return 0xff;
-  return us_cycled_read(reg, hw);
+  if (us_cycled_read == nullptr || reg >= 0x80) return 0xff;
+  return us_cycled_read(static_cast<uint8_t>(reg), hw);
 }
 
 /**
  * @brief A gap too long to fit in the sixteen bits a write carries.
  *
- * There is no "wait and do nothing" bus operation to send, so the time goes
- * to the pacer, the same as any other gap too wide for the hardware queue to
- * hide. Which means the wait is for the time that has not already been spent
- * emulating the gap, not for the whole of it: sitting out the full sixty five
- * milliseconds on top of the host time it took to produce them is how a tune
- * ends up playing at half speed.
- *
- * With no clock available, which is every build that is not the firmware, the
- * gap is counted and dropped.
+ * No "wait and do nothing" bus operation exists, so the time goes to the
+ * pacer instead - waiting for the whole gap on top of the host time already
+ * spent emulating it would halve playback speed. Counted and dropped if no
+ * clock is available (every non-firmware build).
  */
 void EmbeddedSidBackend::wait(uint16_t cycles)
 {

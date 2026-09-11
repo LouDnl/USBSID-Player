@@ -141,8 +141,8 @@ void Mos6569::check_badline(void)
 /**
  * @brief Work out the BA low cycles, and the next change from each of them.
  *
- * Called when a sprite's DMA changes, which is at cycle 55 and cycle 15, and
- * nowhere else. Everything that used to derive this per tick now reads it.
+ * Called only when a sprite's DMA changes (cycle 55 or cycle 15); the
+ * per-tick path just reads the precomputed result.
  */
 void Mos6569::rebuild_sprite_ba(void)
 {
@@ -244,24 +244,12 @@ uint32_t Mos6569::cycles_to_event(void) const
    * the frame, tells the SID layer to flush. */
   uint16_t next = timing_->cycles_per_line;
 
-  /* Sprites.
-   *
-   * This used to walk every cycle of every line as soon as one sprite was
-   * enabled, on the grounds that the fetch windows overlap and wrap into the
-   * next line. They do, but the cost of that shortcut is not small: a single
-   * enabled sprite took the VIC from walking 1.8% of cycles to walking all of
-   * them, which is two and a half times the emulation cost and the difference
-   * between a program playing and a program dragging on the device. Almost
-   * every PRG has a sprite somewhere.
-   *
-   * What actually happens on a line is bounded. Cycle 55 is where DMA is
-   * switched on for a sprite whose Y matches, so a line with any sprite
-   * *enabled* has to be visited there. Cycle 15 is where the line counter
-   * runs, which only matters if some DMA is already *active*. And an active
-   * sprite pulls BA low across five cycles of its own, so the cycles where
-   * that starts and stops have to be visited too. Everything between is
-   * quiet, and on the 291 lines of 312 where a 21 line sprite is not being
-   * fetched at all, the whole line is quiet bar cycle 55. */
+  /* Sprites. What matters on a line is bounded, not every cycle: cycle 55
+   * (DMA switch-on for a sprite whose Y matches), cycle 15 (line counter,
+   * only matters once DMA is active), and the start/stop edges of each
+   * active sprite's 5-cycle BA pull. Walking every cycle once any sprite is
+   * enabled instead measured 2.5x the emulation cost (1.8% of cycles walked
+   * vs all of them) - almost every PRG has a sprite somewhere. */
   if (regs_[kRegSprEnable] != 0 && kSpriteDmaCycle >= cycle_ &&
       kSpriteDmaCycle < next) {
     next = kSpriteDmaCycle;
@@ -273,12 +261,10 @@ uint32_t Mos6569::cycles_to_event(void) const
       next = kSpriteCountCycle;
     }
 
-    /* Where BA changes. Ticking every individual window edge, which is what
-     * this used to do, meant stopping every two cycles once a few sprites were
-     * active: the windows are five cycles wide and two apart, so they merge,
-     * and most of those edges are inside the merged run and change nothing.
-     * `sprite_ba_edges_` is the union's own edges and nothing else, tested the
-     * same way the individual edges were. */
+    /* Where BA changes. `sprite_ba_edges_` holds the union's own edges, not
+     * every individual sprite window edge - windows are 5 cycles wide and 2
+     * apart, so with several sprites active they merge and most edges land
+     * inside the merged run, changing nothing. */
     for (uint8_t i = 0; i < sprite_ba_nedges_; i++) {
       const uint16_t at = sprite_ba_edges_[i];
       if (at >= cycle_ && at < next) next = at;

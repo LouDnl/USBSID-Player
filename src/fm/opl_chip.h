@@ -110,17 +110,12 @@ class OplChip
     /**
      * @brief Add `count` mono samples of OPL onto what is already in `out`.
      *
-     * In place, into the buffer the SID mix has just filled, because the two
-     * chips are summed on a machine that has both and because it avoids a
-     * second buffer to keep in step.
-     *
-     * Halved before summing. Both chips use the whole of the sixteen bit range,
-     * and the OPL is the louder in practice: measured over six seconds of
-     * `Casu_Quo` it peaks at 50269 peak to peak against the SID's 10525, and
-     * summing them straight clamped 371 samples. Deterministic attenuation and
-     * not a limiter, for the same reason the multi SID mix divides by chip
-     * count: a limiter is level dependent, so the same tune would sound
-     * different depending on how loud the moment before it was.
+     * In place, into the buffer the SID mix has just filled - both chips are
+     * summed on a machine that has both, with no second buffer to keep in
+     * step. Halved before summing (kFmAttenuation): the OPL is the louder of
+     * the two in practice, and this is deterministic attenuation rather than
+     * a level-dependent limiter, same reasoning as the multi-SID mix
+     * dividing by chip count.
      *
      * @param out    where the SID samples already are
      * @param count  how many to add

@@ -209,7 +209,12 @@ jobs:
           # assigns self.onmessage at the top level, which is a ReferenceError
           # under node without it. Loading the module rather than only parsing
           # it is worth the shim: it catches a bad import path too.
+          # usplayer-adapter-deepsid.js is excluded: it imports
+          # './usbsid-driver.js', which by design lives only in DeepSID's own
+          # deployed tree (see the file's own header comment), never in this
+          # repo's web/, so it can never resolve here.
           for f in web/usplayer-*.js web/usbsid-*.js web/asid-midi.js; do
+            [ "$(basename "$f")" = "usplayer-adapter-deepsid.js" ] && continue
             node --input-type=module \
               -e "globalThis.self = globalThis; await import('./$f')" \
               || { echo "::error file=$f::this module does not load"; exit 1; }

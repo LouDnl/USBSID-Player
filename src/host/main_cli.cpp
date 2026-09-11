@@ -39,7 +39,9 @@
 #include "prgfile.h"
 #include "sid_trace.h"
 #include "sid_usbsid.h"
+#if US_HAVE_NETDEVICE
 #include "sid_netdevice.h"
+#endif
 #include "sidfile.h"
 #include "console.h"
 #include "audio_out.h"
@@ -159,13 +161,20 @@ void usage(const char * argv0)
     "  -n, --no-device   run without hardware, useful for checking a tune\n"
     "\n"
     "  sound:\n"
-    "      --output M    usbsid (default), audio, wav, or netdevice. usbsid\n"
+#if US_HAVE_NETDEVICE
+    "      --output M    usbsid (default), audio, wav, or nsd. usbsid\n"
     "                    falls back to audio when no board is found\n"
+#else
+    "      --output M    usbsid (default), audio, or wav. usbsid falls back\n"
+    "                    to audio when no board is found\n"
+#endif
     "      --wav FILE    write a WAV instead of playing, implies --output=wav\n"
+#if US_HAVE_NETDEVICE
     "      --net-host H  Network SID Device server to connect to for\n"
-    "                    --output=netdevice (default 127.0.0.1)\n"
+    "                    --output=nsd (default 127.0.0.1)\n"
     "      --net-port P  its TCP port (default 6581)\n"
     "      --net-sids N  SIDs to tell it about (default: the tune's own count)\n"
+#endif
     "      --rate N      sample rate for audio and wav (default 44100). A device\n"
     "                    may impose its own, which is then what is used\n"
     "      --quality Q   fast (linear) or good (sinc, default)\n"
@@ -262,13 +271,13 @@ void print_tune(const SidFile & t, bool stereo)
   /* --output=usbsid/webusb plays a real board, which only ever has 4
    * physical sockets (UsbSidBackend, EmbeddedSidBackend, WebSidBackend all
    * stay a hard 4 chip placeholder by design - see mos6581_8580.h's own
-   * kMaxSids comment); --output=audio/netdevice synthesises or forwards up
+   * kMaxSids comment); --output=audio/nsd synthesises or forwards up
    * to kMaxSids (15), so this caveat does not apply to them. Which one this
    * run ends up using is not decided yet at this point in main(), so the
    * warning names both rather than guessing. */
   if (t.sid_count > 4) {
     printf(" (a real board plays the first 4; --output=audio or "
-           "--output=netdevice plays all %u)", t.sid_count);
+           "--output=nsd plays all %u)", t.sid_count);
   }
   printf("\n");
 
@@ -432,12 +441,14 @@ int main(int argc, char ** argv)
    * own comment on why it is a configure()-time choice and not a toggle. */
   bool soft_stereo = false;
 
-  /* --output=netdevice: a Network SID Device server to send writes to
+#if US_HAVE_NETDEVICE
+  /* --output=nsd: a Network SID Device server to send writes to
    * instead of local hardware. Defaults match the protocol's own stated
    * defaults (network_sid_device_v4.html), the same ones sid-device uses. */
   const char * net_host = "127.0.0.1";
   int net_port = 6581;
   int net_sids = 0; /* 0 means "use the tune's own SID count" */
+#endif
 
   for (int i = 1; i < argc; i++) {
     const char * a = argv[i];
@@ -471,16 +482,27 @@ int main(int argc, char ** argv)
       if (!strcmp(v, "usbsid")) output = OutputMode::UsbSid;
       else if (!strcmp(v, "audio")) output = OutputMode::Audio;
       else if (!strcmp(v, "wav")) output = OutputMode::Wav;
-      else if (!strcmp(v, "netdevice")) output = OutputMode::NetDevice;
-      else { printf("unknown output '%s': use usbsid, audio, wav or netdevice\n", v); return 2; }
+      else if (!strcmp(v, "nsd")) {
+#if US_HAVE_NETDEVICE
+        output = OutputMode::NetDevice;
+#else
+        /* No Winsock port of sid_netdevice.cpp yet; it uses BSD sockets
+         * directly. See US_HAVE_NETDEVICE in CMakeLists.txt. */
+        printf("--output=nsd: not available in this build (no Windows port yet)\n");
+        return 2;
+#endif
+      }
+      else { printf("unknown output '%s': use usbsid, audio, wav or nsd\n", v); return 2; }
     }
     else if (!strcmp(a, "--wav") && i + 1 < argc) {
       wav_path = argv[++i];
       output = OutputMode::Wav;   /* naming a file is asking for it */
     }
+#if US_HAVE_NETDEVICE
     else if (!strcmp(a, "--net-host") && i + 1 < argc) net_host = argv[++i];
     else if (!strcmp(a, "--net-port") && i + 1 < argc) net_port = atoi(argv[++i]);
     else if (!strcmp(a, "--net-sids") && i + 1 < argc) net_sids = atoi(argv[++i]);
+#endif
     else if (!strcmp(a, "--rate") && i + 1 < argc)
       soft_rate = static_cast<unsigned>(atoi(argv[++i]));
     else if (!strcmp(a, "--quality") && i + 1 < argc) {
@@ -557,7 +579,9 @@ int main(int argc, char ** argv)
   std::vector<TraceSidBackend::Event> trace_buffer;
   TraceSidBackend * trace = nullptr;
   UsbSidBackend usb;
+#if US_HAVE_NETDEVICE
   NetworkSidBackend net;
+#endif
 
   /* Where the writes go while fast forwarding: nowhere. See the 'f' key. */
   NullSidBackend ff_null;
@@ -603,6 +627,7 @@ int main(int argc, char ** argv)
     }
   }
 
+#if US_HAVE_NETDEVICE
   if (output == OutputMode::NetDevice) {
     if (net.connect(net_host, static_cast<uint16_t>(net_port))) {
       /* A SID file says how many chips it wants; a program says nothing, so
@@ -625,6 +650,7 @@ int main(int argc, char ** argv)
       output = OutputMode::Audio;
     }
   }
+#endif
 
   if (output == OutputMode::Audio || output == OutputMode::Wav) {
     /* The device gets to decide the rate. Asking a device fixed at 48000 for
@@ -1242,6 +1268,8 @@ int main(int argc, char ** argv)
   }
 
   usb.close();
+#if US_HAVE_NETDEVICE
   net.disconnect();
+#endif
   return 0;
 }

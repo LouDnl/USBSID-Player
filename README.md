@@ -16,6 +16,7 @@ USBSID-Player is a Cycle Exact Commodore64 emulating PSID/RSID & PRG tune player
 
 
 # Usage
+Output `nsd` and `--net-*` options are only available on Linux and MacOs.
 ```shell
 usage: usbsid [options] <file.sid|file.prg|file.p00>
 
@@ -28,11 +29,11 @@ usage: usbsid [options] <file.sid|file.prg|file.p00>
   -n, --no-device   run without hardware, useful for checking a tune
 
   sound:
-      --output M    usbsid (default), audio, wav, or netdevice. usbsid
+      --output M    usbsid (default), audio, wav, or nsd. usbsid
                     falls back to audio when no board is found
       --wav FILE    write a WAV instead of playing, implies --output=wav
       --net-host H  Network SID Device server to connect to for
-                    --output=netdevice (default 127.0.0.1)
+                    --output=nsd (default 127.0.0.1)
       --net-port P  its TCP port (default 6581)
       --net-sids N  SIDs to tell it about (default: the tune's own count)
       --rate N      sample rate for audio and wav (default 44100). A device
@@ -106,7 +107,7 @@ Linux example.
 ```bash
 ./usbsid --song 1 tune.sid          # play from a subtune
 ./usbsid --output wav --wav out.wav tune.sid
-./usbsid --output netdevice --net-host 192.168.1.42 tune.sid  # play over a Network SID Device server
+./usbsid --output nsd --net-host 192.168.1.42 tune.sid  # play over a Network SID Device server
 ./usbsid -i tune.sid                # print the tune's own info and exit
 ./usbsid -h                         # the full option list
 ```

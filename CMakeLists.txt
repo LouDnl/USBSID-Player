@@ -426,15 +426,22 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
     )
   endif()
 
+  ### Network SID Device client backend (--output netdevice). Uses BSD
+  ### sockets directly (netdb.h, sys/socket.h, ...) with no Winsock port, so
+  ### it is off on Windows for now rather than failing the MinGW build; see
+  ### US_HAVE_NETDEVICE below and its guards in main_cli.cpp.
+  set(US_NETDEVICE_SOURCES "")
+  if(WIN32)
+    set(US_HAVE_NETDEVICE 0)
+  else()
+    set(US_HAVE_NETDEVICE 1)
+    set(US_NETDEVICE_SOURCES ${CMAKE_CURRENT_LIST_DIR}/src/sid/sid_netdevice.cpp)
+  endif()
+
   add_executable(${EXECUTABLE}
     ${CMAKE_CURRENT_LIST_DIR}/src/host/main_cli.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sid/sid_usbsid.cpp
-    ### Network SID Device client backend (--output netdevice). POSIX sockets
-    ### only, so this is desktop only: not WEB (no BSD sockets under
-    ### Emscripten, the browser's own transport is WebUSB/WebSerial) and not
-    ### EMBEDDED (the firmware build already is a device something else
-    ### connects to, not a client of a peer one).
-    ${CMAKE_CURRENT_LIST_DIR}/src/sid/sid_netdevice.cpp
+    ${US_NETDEVICE_SOURCES}
     ${US_DRIVER_DIR}/USBSID.cpp
     ${US_SOFTSID_SOURCES}
   )
@@ -445,6 +452,7 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
     ${US_RESIDFP_INCLUDE_DIRS}
     ${US_FM_INCLUDE_DIRS})
   target_compile_definitions(${EXECUTABLE} PRIVATE US_SOFTSID=${US_HAVE_RESIDFP})
+  target_compile_definitions(${EXECUTABLE} PRIVATE US_HAVE_NETDEVICE=${US_HAVE_NETDEVICE})
   ### std::thread (sid_netdevice.cpp's sender thread) needs this on every
   ### platform, reSIDfp or not - it used to ride in on reSIDfp's own Linux
   ### only need for it, which left it unlinked on a build with neither.

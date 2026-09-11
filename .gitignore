@@ -12,6 +12,8 @@
 !usplayer.code-workspace
 !psiddrv.a65
 !Makefile
+!API_EMBEDDED.md
+!API_WEB.md
 
 # File types to un-ignore
 !*.cmake
@@ -33,6 +35,7 @@
 !assets/tests
 !assets/tests/**
 !cmake
+!docs
 !src
 !src/**
 !lib

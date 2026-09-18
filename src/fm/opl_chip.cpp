@@ -35,16 +35,30 @@ namespace {
  * worth of stereo pairs on the stack of the vector rather than growing it to
  * whatever the longest mix happens to be. */
 constexpr size_t kBlock = 1024;
+
+/* FM-YAM digi mode - see the class comment in opl_chip.h. */
+constexpr uint8_t kFmTestReg   = 0x01; /**< arms/disarms digi mode */
+constexpr uint8_t kDigiArmValue = 0x04; /**< the value that arms it */
+constexpr uint8_t kFmDigiAddrA = 0xa0;  /**< channel A's PCM port (normally F-Num-lo) */
+constexpr uint8_t kFmDigiAddrB = 0xa1;  /**< channel B's PCM port */
+/* Centers the incoming byte on 128 (standard unsigned 8-bit PCM) and scales
+ * it to sit alongside a normal SID/FM peak, rather than SIDKick-pico's own
+ * reference implementation, which sums the raw unsigned byte straight in and
+ * relies on a later stage to remove the resulting DC bias - this mix has no
+ * such stage, so centering happens here instead. */
+constexpr int32_t kDigiScale = 32;
 } /* namespace */
 
 void OplChip::configure(unsigned sample_rate)
 {
   if (sample_rate == 0) return;
-  OPL3_Reset(&chip_, static_cast<Bit32u>(sample_rate));
+  OPL3_Reset(&chip_, static_cast<uint32_t>(sample_rate));
   sample_rate_ = sample_rate;
   address_ = 0;
   writes_ = 0;
   clipped_ = 0;
+  digi_armed_ = false;
+  digi_value_[0] = digi_value_[1] = 0;
   /* Stereo pairs: Nuked writes two shorts per sample and they are summed to
    * mono in mix_into(). */
   scratch_.assign(kBlock * 2, 0);
@@ -56,6 +70,16 @@ void OplChip::bus_write(uint8_t reg, uint8_t value)
   if (!ready_) return;
   if (reg == kFmAddressReg) { address_ = value; return; }
   if (reg != kFmDataReg) return;
+
+  if (address_ == kFmTestReg) digi_armed_ = (value == kDigiArmValue);
+
+  if (digi_armed_ && (address_ == kFmDigiAddrA || address_ == kFmDigiAddrB)) {
+    const int32_t centered = static_cast<int32_t>(value) - 128;
+    digi_value_[address_ - kFmDigiAddrA] = static_cast<int16_t>(centered * kDigiScale);
+    writes_++;
+    return;
+  }
+
   OPL3_WriteRegBuffered(&chip_, address_, value);
   writes_++;
 }
@@ -64,16 +88,35 @@ void OplChip::mix_into(int16_t * out, size_t count)
 {
   if (!ready_ || out == nullptr || count == 0) return;
 
+  if (digi_armed_) {
+    /* Held flat between real writes (sample-and-hold, same as the real DAC
+     * between register writes - this tune's stream runs at roughly 2.5kHz,
+     * well under the audio rate). Synthesis is skipped entirely while armed:
+     * SIDKick-pico's own reference implementation discards the OPL's
+     * synthesized output the same way once this mode is active. */
+    const int32_t sample = static_cast<int32_t>(digi_value_[0]) +
+                            static_cast<int32_t>(digi_value_[1]);
+    const int32_t scaled = static_cast<int32_t>(std::lround(sample * gain_));
+    for (size_t i = 0; i < count; i++) {
+      int32_t v = static_cast<int32_t>(out[i]) + scaled;
+      if (v > 32767) { v = 32767; clipped_++; }
+      else if (v < -32768) { v = -32768; clipped_++; }
+      out[i] = static_cast<int16_t>(v);
+    }
+    return;
+  }
+
   size_t done = 0;
   while (done < count) {
     const size_t n = ((count - done) > kBlock) ? kBlock : (count - done);
-    OPL3_GenerateStream(&chip_, scratch_.data(), static_cast<Bit32u>(n));
+    OPL3_GenerateStream(&chip_, scratch_.data(), static_cast<uint32_t>(n));
     for (size_t i = 0; i < n; i++) {
       /* Mono by summing the pair and halving it, which is the same mixdown the
-       * SID side does, and then the FM attenuation on top. */
+       * SID side does, and then gain_ on top. */
       const int32_t mono = (static_cast<int32_t>(scratch_[i * 2]) +
                             static_cast<int32_t>(scratch_[i * 2 + 1])) / 2;
-      int32_t v = static_cast<int32_t>(out[done + i]) + (mono >> kFmAttenuation);
+      const int32_t scaled = static_cast<int32_t>(std::lround(mono * gain_));
+      int32_t v = static_cast<int32_t>(out[done + i]) + scaled;
       if (v > 32767) { v = 32767; clipped_++; }
       else if (v < -32768) { v = -32768; clipped_++; }
       out[done + i] = static_cast<int16_t>(v);
@@ -88,10 +131,12 @@ void OplChip::reset(void)
   /* A full re-reset rather than keying everything off by hand: it is the same
    * few hundred microseconds of table setup and it cannot leave a register
    * behind, which silencing by hand can. */
-  OPL3_Reset(&chip_, static_cast<Bit32u>(sample_rate_));
+  OPL3_Reset(&chip_, static_cast<uint32_t>(sample_rate_));
   address_ = 0;
   writes_ = 0;
   clipped_ = 0;
+  digi_armed_ = false;
+  digi_value_[0] = digi_value_[1] = 0;
 }
 
 } /* namespace usbsid */

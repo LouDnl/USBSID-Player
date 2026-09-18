@@ -150,6 +150,30 @@ class OplChip
     uint8_t address_ = 0;      /**< the register $df40 last selected */
     uint64_t writes_ = 0;
     uint64_t clipped_ = 0;
+
+    /**
+     * @brief FM-YAM's "digi" mode: raw 8-bit PCM through the F-Number ports.
+     *
+     * Real, documented FM-YAM/SFX-Sound-Expander-compatible cartridge
+     * behavior (not part of the OPL2 spec, and not something Nuked knows
+     * about): Mr.Mouse's Digi Organizer arms it by writing $04 to OPL
+     * register 0x01, then streams 8-bit PCM through what is normally the
+     * F-Number-low port ($a0, or $a1 for a second channel) instead of ever
+     * touching pitch. Confirmed against a real tune built with it and
+     * against SIDKick-pico's own fmopl.c, which special-cases the identical
+     * register-0x01-equals-4 trigger for the same reason. Left unhandled,
+     * every PCM byte lands on Nuked as a literal frequency update instead,
+     * producing a rapidly warbling, aliased high-pitched tone rather than
+     * the sample that was meant to play. */
+    bool digi_armed_ = false;
+    /** Held between writes (sample-and-hold, same as the real DAC between
+     * register writes); index 0 is $a0, index 1 is $a1. Already centered and
+     * scaled - see bus_write(). */
+    int16_t digi_value_[2] = { 0, 0 };
+    /** See set_gain(). Not reset by configure()/reset(): a host sets this
+     * once and it should survive a tune change same as the SID mix's own
+     * gain does. */
+    float gain_ = 0.5f;
     /** Nuked renders stereo pairs; this is where they land before the mix. */
     std::vector<int16_t> scratch_;
 };

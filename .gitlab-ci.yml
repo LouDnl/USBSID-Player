@@ -1,0 +1,509 @@
+# USBSID-Player GitLab CI/CD configuration
+#
+# Mirrors the GitHub Actions workflows in .github/workflows/:
+#   build.yml   -> build:*, web            builds and tests on every branch push
+#   release.yml -> release:*, package:release, create:release   v* tags
+#
+# Supports two GitLab instances:
+#   - gitlab.loudai.nl (private): Linux runner only
+#   - gitlab.com (public): Linux, macOS and Windows runners
+#
+# macOS x86_64 (macos-15-intel on GitHub) is not built here: gitlab.com SaaS
+# has no Intel macOS runner.
+
+variables:
+  BUILD_TYPE: "Release"
+  # The driver is developed alongside this repository, so like on GitHub it is
+  # checked out into lib/driver instead of being pinned as a submodule.
+  # Override in the CI/CD variables to use the GitLab mirror.
+  USBSID_DRIVER_REPO: "https://github.com/LouDnl/USBSID-Pico-driver.git"
+  # Instance without macOS and Windows runners
+  PRIVATE_HOST: "gitlab.loudai.nl"
+  EMSDK_IMAGE: "emscripten/emsdk:4.0.12"
+  DEBIAN_FRONTEND: noninteractive
+
+# Pipeline runs on:
+# - branch pushes touching the player sources (build.yml)
+# - v* tags: release (release.yml)
+# - manual web trigger, or FORCE_RUN=true (workflow_dispatch)
+workflow:
+  rules:
+    - if: $CI_COMMIT_BRANCH && $CI_PIPELINE_SOURCE == "push"
+      changes:
+        - CMakeLists.txt
+        - cmake/**/*
+        - src/**/*
+        - lib/**/*
+        - tests/**/*
+        # The browser player is JavaScript around the same emulation, and the
+        # web job builds and loads it.
+        - web/**/*
+        - .gitlab-ci.yml
+      variables:
+        PIPELINE_TYPE: "dev"
+    - if: $CI_COMMIT_TAG =~ /^v.+$/
+      variables:
+        PIPELINE_TYPE: "release"
+    - if: $CI_PIPELINE_SOURCE == "web" || $FORCE_RUN == "true"
+      variables:
+        PIPELINE_TYPE: "manual"
+
+stages:
+  - build
+  - package
+  - release
+
+default:
+  interruptible: true
+
+# ============================================================================
+# RULE SETS
+# ============================================================================
+
+.rules_dev:
+  rules:
+    - if: $PIPELINE_TYPE == "manual"
+    - if: $PIPELINE_TYPE == "dev"
+      changes:
+        - CMakeLists.txt
+        - cmake/**/*
+        - src/**/*
+        - lib/**/*
+        - tests/**/*
+        - web/**/*
+        - .gitlab-ci.yml
+
+# Windows and macOS runners only exist on gitlab.com
+.rules_dev_public:
+  rules:
+    - if: $PIPELINE_TYPE == "manual" && $CI_SERVER_HOST != $PRIVATE_HOST
+    - if: $PIPELINE_TYPE == "dev" && $CI_SERVER_HOST != $PRIVATE_HOST
+      changes:
+        - CMakeLists.txt
+        - cmake/**/*
+        - src/**/*
+        - lib/**/*
+        - tests/**/*
+        - web/**/*
+        - .gitlab-ci.yml
+
+.rules_release:
+  rules:
+    - if: $PIPELINE_TYPE == "release"
+
+.rules_release_public:
+  rules:
+    - if: $PIPELINE_TYPE == "release" && $CI_SERVER_HOST != $PRIVATE_HOST
+
+# ============================================================================
+# SHARED PIECES
+# ============================================================================
+
+.driver_clone:
+  script:
+    - rm -rf lib/driver
+    - git clone -q --depth 1 "$USBSID_DRIVER_REPO" lib/driver
+
+# Same dependency set as the GitHub jobs. Native jobs need libusb and libudev.
+.player_linux_setup:
+  image: ubuntu:latest
+  before_script:
+    - apt-get update
+    - apt-get install -y git pkg-config cmake build-essential libusb-1.0-0 libusb-1.0-0-dev libudev1 libudev-dev
+    - !reference [.driver_clone, script]
+
+.player_macos_setup:
+  tags:
+    - saas-macos-medium-m1
+  image: macos-14-xcode-15
+  before_script:
+    - brew update
+    - brew install pkg-config cmake libusb
+    - !reference [.driver_clone, script]
+
+# gitlab.com SaaS Windows runner. MinGW64 through msys2, like the GitHub job.
+# The runner shell is PowerShell, so the bash parts are written to a file and
+# run through the msys2 login shell. CHERE_INVOKING keeps that shell in the
+# project directory, and only environment variables (not PowerShell variables)
+# reach it.
+.player_windows_setup:
+  tags:
+    - saas-windows-medium-amd64
+  before_script:
+    - choco install msys2 -y --no-progress
+    - C:\tools\msys64\usr\bin\bash -lc "pacman -Syu --noconfirm"
+    - C:\tools\msys64\usr\bin\bash -lc "pacman -S --noconfirm --needed mingw-w64-x86_64-gcc mingw-w64-x86_64-libusb mingw-w64-x86_64-cmake mingw-w64-x86_64-pkg-config mingw-w64-x86_64-ninja zip"
+    - |
+      if (Test-Path lib/driver) { Remove-Item -Recurse -Force lib/driver }
+      git clone -q --depth 1 $env:USBSID_DRIVER_REPO lib/driver
+
+# ============================================================================
+# DEV BUILDS (build.yml)
+# The suite is built and run on every platform: it is the check that the
+# emulation still sends what it always sent, and that the embedded backend
+# links on macOS and Windows too.
+# REQUIRE_AUDIO=1 turns "Software audio: OFF, lib/residfp is empty" from a
+# STATUS line into a configure error.
+# The test binary is called usbsid-test whatever -DEXECUTABLE says.
+# ============================================================================
+
+.player_dev_unix:
+  stage: build
+  script:
+    - |
+      JOBS=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
+      cmake -S . -B build -DDESKTOP=1 -DEMBEDDED=0 -DWEB=0 \
+        -DBUILD_TESTS=1 -DPROFILE=0 -DSTRICT=1 -DREQUIRE_AUDIO=1 \
+        -DEXECUTABLE=usbsid
+      cmake --build build -j "$JOBS"
+      ls -lh build/usbsid* || true
+    - |
+      BIN=build/usbsid-test
+      [ -f "$BIN.exe" ] && BIN="$BIN.exe"
+      if [ ! -f "$BIN" ]; then
+        echo "ERROR: no test binary at $BIN"; ls -l build; exit 1
+      fi
+      "./$BIN"
+  artifacts:
+    # Exactly the player, a usbsid* glob would also pick up usbsid-test
+    paths:
+      - build/usbsid
+    expire_in: 1 week
+
+build:linux:
+  extends:
+    - .player_dev_unix
+    - .player_linux_setup
+    - .rules_dev
+  artifacts:
+    name: "usbsid-linux-${CI_COMMIT_REF_SLUG}-${CI_PIPELINE_IID}"
+
+build:macos:
+  extends:
+    - .player_dev_unix
+    - .player_macos_setup
+    - .rules_dev_public
+  artifacts:
+    name: "usbsid-macos-arm64-${CI_COMMIT_REF_SLUG}-${CI_PIPELINE_IID}"
+
+build:windows:
+  extends:
+    - .player_windows_setup
+    - .rules_dev_public
+  stage: build
+  script:
+    - |
+      $script = @'
+      set -eu
+      JOBS=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
+      cmake -S . -B build -DDESKTOP=1 -DEMBEDDED=0 -DWEB=0 \
+        -DBUILD_TESTS=1 -DPROFILE=0 -DSTRICT=1 -DREQUIRE_AUDIO=1 \
+        -DEXECUTABLE=usbsid
+      cmake --build build -j "$JOBS"
+      ls -lh build/usbsid* || true
+      BIN=build/usbsid-test
+      [ -f "$BIN.exe" ] && BIN="$BIN.exe"
+      if [ ! -f "$BIN" ]; then
+        echo "ERROR: no test binary at $BIN"; ls -l build; exit 1
+      fi
+      "./$BIN"
+      '@
+      [IO.File]::WriteAllText("$PWD/ci-step.sh", ($script -replace "`r`n", "`n"))
+      $env:MSYSTEM = "MINGW64"
+      $env:CHERE_INVOKING = "1"
+      C:\tools\msys64\usr\bin\bash -lc "./ci-step.sh"
+  artifacts:
+    name: "usbsid-windows-${CI_COMMIT_REF_SLUG}-${CI_PIPELINE_IID}"
+    paths:
+      - build/usbsid.exe
+    expire_in: 1 week
+
+# The browser player. Without a job here a web only change could break the
+# wasm build without anything noticing until a release.
+web:
+  extends: .rules_dev
+  stage: build
+  image: ${EMSDK_IMAGE}
+  script:
+    # build-web/ is the same directory ./build.sh uses
+    - emcmake cmake -S . -B build-web -DWEB=1 -DREQUIRE_AUDIO=1
+    - cmake --build build-web -j "$(getconf _NPROCESSORS_ONLN)"
+    # The WEB build links with an explicit EXPORTED_FUNCTIONS list, so a
+    # function can compile and still not be reachable from JavaScript, which
+    # looks to a page exactly like a browser that cannot do audio. Loading it
+    # under node is the cheapest way to ask.
+    - |
+      node --input-type=module -e "
+        import Module from './web/usbsid.mjs';
+        const M = await Module();
+        const want = ['_usp_audio_configure', '_usp_audio_take',
+                      '_usp_audio_discard', '_usp_audio_clipped',
+                      '_usp_audio_fm_writes'];
+        const missing = want.filter((f) => typeof M[f] !== 'function');
+        if (missing.length) {
+          console.error('missing from the wasm:', missing.join(', '));
+          process.exit(1);
+        }
+        console.log('the audio API is exported:', want.length, 'functions');
+      "
+    # Nothing else compiles the JavaScript, so a syntax error in it is only
+    # found by loading a page. The worklet is a template literal inside
+    # usplayer-audio.js and is not covered by importing the module, so it is
+    # checked on its own: a stray backtick in a comment there silently ends the
+    # string. `self` is shimmed because usplayer-worker.js assigns self.onmessage
+    # at the top level. usplayer-adapter-deepsid.js is excluded: it imports
+    # './usbsid-driver.js', which by design lives only in DeepSID's own tree.
+    - |
+      for f in web/usplayer-*.js web/usbsid-*.js web/asid-midi.js; do
+        [ "$(basename "$f")" = "usplayer-adapter-deepsid.js" ] && continue
+        node --input-type=module \
+          -e "globalThis.self = globalThis; await import('./$f')" \
+          || { echo "ERROR: $f does not load"; exit 1; }
+        echo "ok $f"
+      done
+      node -e "
+        const fs = require('fs'), vm = require('vm');
+        const src = fs.readFileSync('web/usplayer-audio.js', 'utf8');
+        const m = src.match(/const PROCESSOR_SRC = \`([\s\S]*?)\n\`;/);
+        if (!m) { console.error('PROCESSOR_SRC not found'); process.exit(1); }
+        new vm.Script('function registerProcessor(){};' +
+                      m[1].replace('extends AudioWorkletProcessor', 'extends Object'));
+        console.log('ok the AudioWorklet processor source parses');
+      "
+
+# ============================================================================
+# RELEASE BUILDS (release.yml)
+# One archive per platform: a zip for Windows, a tarball elsewhere.
+# REQUIRE_AUDIO=1 refuses to configure when lib/residfp is missing instead of
+# shipping a player with no --output=audio and no --output=wav.
+# The binary has reSIDfp and miniaudio compiled in, so their licences ship
+# with it. A MinGW build needs its runtime DLLs beside it or it will not start
+# on a machine without MSYS2, so the ones it links against are copied too.
+# ============================================================================
+
+.player_release_unix:
+  stage: build
+  script:
+    - |
+      set -eu
+      JOBS=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
+      cmake -S . -B build \
+        -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+        -DDESKTOP=1 -DEMBEDDED=0 -DWEB=0 \
+        -DBUILD_TESTS=0 -DPROFILE=0 -DSTRICT=1 -DREQUIRE_AUDIO=1 \
+        -DEXECUTABLE=usbsid
+      cmake --build build -j "$JOBS"
+      SRC=build/usbsid
+      if [ ! -f "$SRC" ]; then
+        echo "no binary at $SRC"; ls -R build | head -40; exit 1
+      fi
+      mkdir -p stage/licenses
+      cp "$SRC" stage/
+      cp README.md LICENSE stage/ 2>/dev/null || true
+      cp lib/residfp/COPYING stage/licenses/reSIDfp-COPYING 2>/dev/null || true
+      cp lib/miniaudio/LICENSE stage/licenses/miniaudio-LICENSE 2>/dev/null || true
+      ls -l stage
+      (cd stage && tar -czf "../usbsid-${ASSET}.tar.gz" ./*)
+      ls -l "usbsid-${ASSET}.tar.gz"
+  artifacts:
+    name: "releasebuild-usbsid-${ASSET}"
+    paths:
+      - usbsid-*.tar.gz
+    expire_in: 4 weeks
+
+release:linux:
+  extends:
+    - .player_release_unix
+    - .player_linux_setup
+    - .rules_release
+  variables:
+    ASSET: "linux-x86_64"
+
+release:macos:
+  extends:
+    - .player_release_unix
+    - .player_macos_setup
+    - .rules_release_public
+  variables:
+    ASSET: "macos-arm64"
+
+release:windows:
+  extends:
+    - .player_windows_setup
+    - .rules_release_public
+  stage: build
+  variables:
+    ASSET: "windows-x86_64"
+  script:
+    - |
+      $script = @'
+      set -eu
+      JOBS=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
+      cmake -S . -B build \
+        -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+        -DDESKTOP=1 -DEMBEDDED=0 -DWEB=0 \
+        -DBUILD_TESTS=0 -DPROFILE=0 -DSTRICT=1 -DREQUIRE_AUDIO=1 \
+        -DEXECUTABLE=usbsid
+      cmake --build build -j "$JOBS"
+      SRC=build/usbsid.exe
+      if [ ! -f "$SRC" ]; then
+        echo "no binary at $SRC"; ls -R build | head -40; exit 1
+      fi
+      mkdir -p stage/licenses
+      cp "$SRC" stage/
+      cp README.md LICENSE stage/ 2>/dev/null || true
+      cp lib/residfp/COPYING stage/licenses/reSIDfp-COPYING 2>/dev/null || true
+      cp lib/miniaudio/LICENSE stage/licenses/miniaudio-LICENSE 2>/dev/null || true
+      ldd "$SRC" | awk '/mingw64/ {print $3}' | while read -r dll; do
+        if [ -f "$dll" ]; then cp "$dll" stage/; fi
+      done
+      ls -l stage
+      (cd stage && zip -r "../usbsid-${ASSET}.zip" .)
+      ls -l "usbsid-${ASSET}.zip"
+      '@
+      [IO.File]::WriteAllText("$PWD/ci-step.sh", ($script -replace "`r`n", "`n"))
+      $env:MSYSTEM = "MINGW64"
+      $env:CHERE_INVOKING = "1"
+      C:\tools\msys64\usr\bin\bash -lc "./ci-step.sh"
+  artifacts:
+    name: "releasebuild-usbsid-${ASSET}"
+    paths:
+      - usbsid-*.zip
+    expire_in: 4 weeks
+
+# The browser player: the WASM and the JavaScript that drives it, as one bundle
+# a page can be pointed at. See docs/WEB.md.
+release:web:
+  extends: .rules_release
+  stage: build
+  image: ${EMSDK_IMAGE}
+  before_script:
+    # The wasm needs no driver, but the native suite below links usbsidcore,
+    # which carries it. Without it the job fails at that step with "No USBSID
+    # driver found" long after the wasm built fine. The suite is a DESKTOP=1
+    # build and needs libusb.
+    - apt-get update
+    - apt-get install -y git pkg-config cmake build-essential libusb-1.0-0 libusb-1.0-0-dev libudev1 libudev-dev
+    - !reference [.driver_clone, script]
+  script:
+    - emcmake cmake -S . -B build-web -DWEB=1 -DREQUIRE_AUDIO=1
+    - cmake --build build-web -j "$(getconf _NPROCESSORS_ONLN)"
+    - |
+      node --input-type=module -e "
+        import Module from './web/usbsid.mjs';
+        const M = await Module();
+        const want = ['_usp_audio_configure', '_usp_audio_take',
+                      '_usp_audio_discard', '_usp_audio_clipped',
+                      '_usp_audio_fm_writes'];
+        const missing = want.filter((f) => typeof M[f] !== 'function');
+        if (missing.length) {
+          console.error('missing from the wasm:', missing.join(', '));
+          process.exit(1);
+        }
+        console.log('the audio API is exported:', want.length, 'functions');
+      "
+    # The pinned write stream hash, from the committed suite. A release that
+    # fails here is shipping a different emulation. build/ and not build-web/:
+    # this is a native build in the same checkout and the two toolchains must
+    # not share a cache.
+    - cmake -S . -B build -DDESKTOP=1 -DWEB=0 -DBUILD_TESTS=1 -DSTRICT=1 -DREQUIRE_AUDIO=1
+    - cmake --build build --target usbsid-test -j "$(getconf _NPROCESSORS_ONLN)"
+    - ./build/usbsid-test
+    # The build copies usbsid.js, .mjs and .wasm into web/, so the directory is
+    # already the deliverable. web/README.md is the bundle's own.
+    - cp docs/WEB.md web/ 2>/dev/null || true
+    - mkdir -p web/licenses
+    - cp lib/residfp/COPYING web/licenses/reSIDfp-COPYING
+    # The bundle must be able to make a sound on its own, usplayer-audio.js is
+    # what does it. Named rather than trusted to the glob.
+    - |
+      for f in usbsid.js usbsid.mjs usbsid.wasm usplayer-web.js \
+               usplayer-audio.js usplayer-adapter.js demo.html; do
+        [ -f "web/$f" ] || { echo "ERROR: web/$f is missing from the bundle"; exit 1; }
+      done
+    - ls -l web
+    - tar -czf usbsid-web.tar.gz web
+  artifacts:
+    name: "releasebuild-usbsid-web"
+    paths:
+      - usbsid-web.tar.gz
+    expire_in: 4 weeks
+
+# ============================================================================
+# PACKAGE AND RELEASE (release.yml "Create release files")
+# ============================================================================
+
+# Everything above in one place. Windows and macOS only exist on gitlab.com.
+package:release:
+  stage: package
+  image: alpine:latest
+  variables:
+    GIT_STRATEGY: none
+  script:
+    - mkdir -p release
+    - cp -v usbsid-*.tar.gz usbsid-*.zip release/ || true
+    - ls -la release
+  artifacts:
+    name: "releasebuild-usbsid"
+    paths:
+      - release/
+    expire_in: never
+  needs:
+    - job: release:linux
+    - job: release:macos
+      optional: true
+    - job: release:windows
+      optional: true
+    - job: release:web
+  rules:
+    - if: $PIPELINE_TYPE == "release"
+
+# Commits since the previous tag, or the whole history the first time round
+release:notes:
+  stage: package
+  image: alpine:latest
+  variables:
+    GIT_DEPTH: "0"
+  before_script:
+    - apk add --no-cache git
+    - git config --global --add safe.directory "${CI_PROJECT_DIR}"
+  script:
+    - |
+      echo "**Commits in this release:**" > release_notes.md
+      PREV=$(git tag --sort=-version:refname | grep -v "^${CI_COMMIT_TAG}\$" | head -n 1 || true)
+      if [ -n "$PREV" ]; then
+        git log "${PREV}..HEAD" --oneline >> release_notes.md
+      else
+        git log --oneline >> release_notes.md
+      fi
+      cat release_notes.md
+  artifacts:
+    paths:
+      - release_notes.md
+    expire_in: 4 weeks
+  rules:
+    - if: $PIPELINE_TYPE == "release"
+
+create:release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  script:
+    - echo "Creating release for ${CI_COMMIT_TAG}"
+  release:
+    tag_name: ${CI_COMMIT_TAG}
+    name: "${CI_COMMIT_TAG}"
+    description: release_notes.md
+    assets:
+      links:
+        - name: "Release files, browse"
+          url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/browse/release?job=package:release"
+          link_type: "package"
+        - name: "Release files, download all"
+          url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/download?job=package:release"
+          link_type: "package"
+  needs:
+    - job: package:release
+      artifacts: false
+    - job: release:notes
+  rules:
+    - if: $PIPELINE_TYPE == "release"

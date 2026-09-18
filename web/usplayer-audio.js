@@ -287,6 +287,8 @@ export class UsPlayerAudio {
     this.node = null;
     this.gain = null;      /* the volume stage, built with the graph */
     this._volume = 1;      /* survives a host setting it before there is one */
+    this._sidVolume = 100; /* percent, see setSidVolume() */
+    this._fmVolume = 50;   /* percent, see setFmVolume() */
     this._ptr = 0;
     this._max = 8192;
     this.starved = 0;
@@ -434,6 +436,42 @@ export class UsPlayerAudio {
     const v = Math.max(0, Math.min(1, Number(value)));
     this._volume = isNaN(v) ? 1 : v;
     if (this.gain) this.gain.gain.value = this._volume;
+  }
+
+  /**
+   * How loud the reSIDfp (SID) side of the mix is, independent of the FM/OPL
+   * side - see usp_audio_set_sid_volume() (web_api.cpp). Unlike setVolume(),
+   * this scales inside the wasm mix before the two chips are summed, so it
+   * balances one against the other rather than turning both down together;
+   * a post-mix WebAudio GainNode cannot do that.
+   *
+   * Applied straight to the wasm module rather than remembered for a graph
+   * that has to exist first - this._sidVolume just survives a call made
+   * before the module is loaded (typeof guard below), not before a graph.
+   *
+   * @param {number} percent 100 is unity (the default), 0 silences it
+   */
+  setSidVolume(percent) {
+    const v = Number(percent);
+    this._sidVolume = isNaN(v) ? 100 : v;
+    if (typeof this.M._usp_audio_set_sid_volume === 'function') {
+      this.M._usp_audio_set_sid_volume(this._sidVolume | 0);
+    }
+  }
+
+  /**
+   * How loud the FM/OPL side of the mix is, independent of the SID side.
+   * See setSidVolume() - same idea, the other chip. Default 50: the OPL is
+   * the louder of the two in practice - see OplChip::set_gain().
+   *
+   * @param {number} percent 100 is unity, 0 silences it
+   */
+  setFmVolume(percent) {
+    const v = Number(percent);
+    this._fmVolume = isNaN(v) ? 50 : v;
+    if (typeof this.M._usp_audio_set_fm_volume === 'function') {
+      this.M._usp_audio_set_fm_volume(this._fmVolume | 0);
+    }
   }
 
   /**

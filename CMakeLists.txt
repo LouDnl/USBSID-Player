@@ -171,10 +171,12 @@ else()
   message(STATUS "Software audio: OFF, lib/residfp is empty")
 endif()
 
-### Nuked OPL3 1.8, the FM/OPL side of a SID+FM tune. Two self contained C files,
-### GPLv2 or later, vendored in lib/nukedopl for the same reason reSIDfp is: the
-### command line player and the browser have to run the *same* engine or the same
-### tune sounds different depending on where it is played. Only ever built beside
+### Nuked-OPL3-fast (tgies), a bit-exact perf fork of Nuke.YKT's Nuked OPL3
+### pinned to upstream 1.8 (commit cfedb09), the FM/OPL side of a SID+FM tune.
+### Three self contained files (opl3.c, opl3.h, wf_rom.h), LGPL-2.1-or-later,
+### vendored in lib/nukedopl for the same reason reSIDfp is: the command line
+### player and the browser have to run the *same* engine or the same tune
+### sounds different depending on where it is played. Only ever built beside
 ### software audio: with no reSIDfp there is nothing to mix it into, and the
 ### embedded target sends FM writes to a real chip on the board.
 set(US_NUKEDOPL_DIR ${CMAKE_CURRENT_LIST_DIR}/lib/nukedopl)
@@ -186,7 +188,7 @@ if(US_HAVE_RESIDFP AND EXISTS ${US_NUKEDOPL_DIR}/opl3.c)
     ${US_NUKEDOPL_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/src/fm)
   set(US_HAVE_FM 1)
-  message(STATUS "FM/OPL: vendored Nuked OPL3 1.8")
+  message(STATUS "FM/OPL: vendored Nuked-OPL3-fast 1.8-fast.3")
 else()
   set(US_FM_SOURCES "")
   set(US_FM_INCLUDE_DIRS "")
@@ -489,6 +491,8 @@ if(${WEB} EQUAL 1)
     _usp_audio_discard
     _usp_audio_clipped
     _usp_audio_fm_writes
+    _usp_audio_set_sid_volume _usp_audio_sid_volume
+    _usp_audio_set_fm_volume _usp_audio_fm_volume
     _usp_set_voice_mute
     _usp_voice_mute
     _usp_set_chip_mute

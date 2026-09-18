@@ -11,10 +11,11 @@
  * has one; a player synthesising its own audio has to voice them itself, and
  * reSIDfp has no FM at all.
  *
- * So this wraps Nuked OPL3 (lib/nukedopl), which emulates a YMF262. That is an
- * OPL3, and the two chips above are the OPL1 and OPL2 it is register compatible
- * with: an OPL3 left in its default mode *is* an OPL2, which is what every
- * AdLib emulator relies on.
+ * This wraps Nuked-OPL3-fast (lib/nukedopl), a bit-exact perf fork of
+ * Nuke.YKT's Nuked OPL3, which emulates a YMF262. That is an OPL3, and the two
+ * chips above are the OPL1 and OPL2 it is register compatible with: an OPL3
+ * left in its default mode *is* an OPL2, which is what every AdLib emulator
+ * relies on.
  *
  * It renders at the same rate as the SID synthesis and is summed with it in
  * ResidFpSidBackend::advance(), so everything that takes samples from that
@@ -112,15 +113,27 @@ class OplChip
      *
      * In place, into the buffer the SID mix has just filled - both chips are
      * summed on a machine that has both, with no second buffer to keep in
-     * step. Halved before summing (kFmAttenuation): the OPL is the louder of
-     * the two in practice, and this is deterministic attenuation rather than
-     * a level-dependent limiter, same reasoning as the multi-SID mix
-     * dividing by chip count.
+     * step. Scaled by gain() before summing (0.5 by default: the OPL is the
+     * louder of the two in practice), which is deterministic attenuation
+     * rather than a level-dependent limiter, same reasoning as the multi-SID
+     * mix dividing by chip count.
      *
      * @param out    where the SID samples already are
      * @param count  how many to add
      */
     void mix_into(int16_t * out, size_t count);
+
+    /**
+     * @brief How much the OPL is turned down before it is summed.
+     *
+     * A plain multiplier, not a level-dependent limiter: 1.0 is unity, 0.5
+     * (the default) halves it, 0.0 silences it. Negative is clamped to 0.
+     *
+     * @param gain the new multiplier
+     */
+    void set_gain(float gain) { gain_ = (gain < 0.0f) ? 0.0f : gain; }
+    /** @brief The multiplier mix_into() scales the OPL signal by. */
+    float gain(void) const { return gain_; }
 
     /** @brief Writes the chip has taken. */
     uint64_t writes(void) const { return writes_; }
@@ -140,9 +153,6 @@ class OplChip
     /** Nuked renders stereo pairs; this is where they land before the mix. */
     std::vector<int16_t> scratch_;
 };
-
-/** @brief How much the OPL is turned down before it is summed. A right shift. */
-static constexpr int kFmAttenuation = 1;
 
 } /* namespace usbsid */
 

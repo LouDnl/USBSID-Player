@@ -25,6 +25,8 @@
 
 #include "opl_chip.h"
 
+#include <cmath>
+
 namespace usbsid {
 
 namespace {

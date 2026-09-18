@@ -51,8 +51,8 @@ constexpr uint8_t kCmdGetVersion      = 7;
 /* v5: 16-bit register address, used for FM/OPL ($df00-$dfff) and chip 8+
  * (TRY_WRITE's byte-folded register only reaches chip 0-7). */
 constexpr uint8_t kCmdTryWriteEx      = 19;
-/* v5: enable/disable FM OPL on the server, payload {enabled, sidno}
- * (mirrors config.c's BOARD_FMOPL - see set_fm_opl()). */
+/* v5: enable/disable FM OPL on the server for this connection, payload one
+ * byte {0,1} - see set_fm_opl(). */
 constexpr uint8_t kCmdTrySetFmOpl     = 21;
 
 /* Register addresses at or above this are the "unclaimed FM/OPL" park
@@ -68,6 +68,8 @@ constexpr uint8_t kDummyDelayReg = 0x1e;
 
 constexpr uint8_t kRespOk      = 0;
 constexpr uint8_t kRespBusy    = 1;
+constexpr uint8_t kRespError   = 2;
+constexpr uint8_t kRespRead    = 3;
 constexpr uint8_t kRespVersion = 4;
 
 /* ~1ms retry delay per spec guidance, bounded to ~2s total so a server
@@ -98,8 +100,14 @@ void NetworkSidBackend::sender_loop(void)
       queue_.pop_front();
     }
     if (!request_ok(op.cmd, op.sid_number, op.payload.data(),
-                     static_cast<uint16_t>(op.payload.size()))) {
-      return; /* request_ok() already called fail() */
+                     static_cast<uint16_t>(op.payload.size())) && !connected_) {
+      /* request_ok() returns false both when the link actually died (it
+       * called fail(), which cleared connected_) and when the server merely
+       * rejected this one request with ERROR (link still fine - see its own
+       * comment). Only the former should stop this thread; otherwise one
+       * ERROR'd request would silently deafen every request after it while
+       * is_connected() kept reporting true. */
+      return;
     }
   }
 }
@@ -135,6 +143,25 @@ bool NetworkSidBackend::recv_exact(uint8_t * buf, size_t len)
   return true;
 }
 
+void NetworkSidBackend::drain_extra(void)
+{
+  /* Best effort: a compliant server appending bytes to ERROR (or, in
+   * principle, anything past what this client otherwise consumes in full)
+   * sends them as part of the same write() as the status byte, so they are
+   * typically already sitting in the socket's receive buffer by the time
+   * request_ok() gets here. A short non-blocking drain clears them before
+   * the next request is sent, so they can never be misread as the next
+   * response's own header. Not exhaustive against a slow or fragmented
+   * sender, but resolves the desync risk against any server that actually
+   * uses the optional message - this firmware's own (repo/src/nsd.c) never
+   * does, so this path is untested against it. */
+  uint8_t discard[256];
+  for (int i = 0; i < 8; i++) {
+    const ssize_t n = ::recv(sock_, discard, sizeof(discard), MSG_DONTWAIT);
+    if (n <= 0) break;
+  }
+}
+
 bool NetworkSidBackend::request_ok(uint8_t cmd, uint8_t sid_number,
                                     const uint8_t * payload, uint16_t payload_len)
 {
@@ -144,7 +171,17 @@ bool NetworkSidBackend::request_ok(uint8_t cmd, uint8_t sid_number,
     if (!recv_exact(&resp, 1)) { fail(); return false; }
     if (resp == kRespOk) return true;
     if (resp == kRespBusy) { usleep(1000); continue; }
-    /* ERROR, or anything this client does not expect here: the server
+    if (resp == kRespRead) {
+      /* "one byte value follows" (spec) - always exactly one, whether or
+       * not this client asked for it. Discard: this client does not issue
+       * TRY_READ/TRY_READ_EX today, so an unsolicited READ here is not one
+       * of its own requests being answered. */
+      uint8_t discard = 0;
+      recv_exact(&discard, 1);
+    } else if (resp == kRespError) {
+      drain_extra();
+    }
+    /* ERROR, or anything else this client does not expect here: the server
      * rejected this one request outright, not a sign the link is dead. */
     return false;
   }
@@ -347,11 +384,11 @@ void NetworkSidBackend::set_sid_count(uint8_t count)
   enqueue(kCmdTrySetSidCount, wire_count, nullptr, 0);
 }
 
-void NetworkSidBackend::set_fm_opl(bool enable, uint8_t sid)
+void NetworkSidBackend::set_fm_opl(bool enable)
 {
   if (!connected_ || version_ < 5) return;
-  uint8_t payload[2] = { static_cast<uint8_t>(enable ? 1 : 0), sid };
-  enqueue(kCmdTrySetFmOpl, 0, payload, enable ? 2 : 1);
+  const uint8_t payload[1] = { static_cast<uint8_t>(enable ? 1 : 0) };
+  enqueue(kCmdTrySetFmOpl, 0, payload, 1);
 }
 
 void NetworkSidBackend::write(addr_t reg, data_t value, uint16_t cycles)

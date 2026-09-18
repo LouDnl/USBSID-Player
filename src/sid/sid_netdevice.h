@@ -86,11 +86,13 @@ class NetworkSidBackend final : public SidBackend
     uint8_t sid_count(void) const { return sid_count_; }
 
     /**
-     * @brief TRY_SET_FM_OPL (21, v5 only). Enables FM OPL on chip `sid`
-     * (1-4) or disables it when `enable` is false. No-op against a pre-v5
-     * server.
+     * @brief TRY_SET_FM_OPL (21, v5 only). Enables or disables FM OPL for
+     * this connection - one byte, {0,1}, per spec ("sid number is ignored").
+     * Which physical SID answers as FM OPL is the server's own fixed
+     * configuration, not something this command chooses. No-op against a
+     * pre-v5 server.
      */
-    void set_fm_opl(bool enable, uint8_t sid);
+    void set_fm_opl(bool enable);
 
     void write(addr_t reg, data_t value, uint16_t cycles) override;
     void wait(uint16_t cycles) override;
@@ -128,6 +130,15 @@ class NetworkSidBackend final : public SidBackend
     bool send_request(uint8_t cmd, uint8_t sid_number,
                        const uint8_t * payload, uint16_t payload_len);
     bool recv_exact(uint8_t * buf, size_t len);
+    /**
+     * @brief Best-effort drain of whatever a response appended past the
+     * status byte this client did not otherwise read in full (an ERROR's
+     * optional message, or a READ this client did not ask for). Without a
+     * length prefix on these, a compliant server's own follow-up bytes
+     * would otherwise sit in the socket buffer and be misread as the next
+     * response's header - see request_ok()'s call site.
+     */
+    void drain_extra(void);
     /** @brief Send one request, retrying on BUSY. */
     bool request_ok(uint8_t cmd, uint8_t sid_number,
                      const uint8_t * payload, uint16_t payload_len);

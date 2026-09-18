@@ -7,7 +7,7 @@ USBSID-Player is a Cycle Exact Commodore64 emulating PSID/RSID & PRG tune player
 - Plays PSID, RSID and PRG/P00, tunes skip the boot and start in milliseconds, programs boot to BASIC and RUN/SYS themselves
 - Four interchangeable output backends behind one seam (`SidBackend`): a real USBSID-Pico over USB, software audio (ResidFp) via miniaudio, a WAV file, or a Network SID Device server (v4/v5) over TCP. Software audio and netdevice play every chip a v5 tune asks for, up to 15; a real board (USB, WebUSB, or the embedded player) plays its own first 4 physical sockets
 - `--stereo`: pan a multi-SID tune per its own v5 panning hint, on software audio and WAV output (off by default, one channel)
-- FM/OPL playback via Nuked-OPL3, for tunes that use a board's FM/OPL chip alongside its SID chips; the netdevice backend can also enable/disable FM OPL on the server itself (NSD v5's `TRY_SET_FM_OPL`)
+- FM/OPL playback via Nuked-OPL3-fast, for tunes that use a board's FM/OPL chip alongside its SID chips; the netdevice backend can also enable/disable FM OPL on the server itself (NSD v5's `TRY_SET_FM_OPL`)
 - HVSC Songlengths support, stops a tune when the song ends instead of playing on forever, preferring a v5 tune's own embedded song length table over the five minute default when the external database has never heard of it
 - Muting and solo by chip and voice, subtune switching, PAL/NTSC forcing, and a `--trace` mode that records every SID register event to a file
 - Per subsystem logging switches (SID/CIA/VIC/CPU reads and writes, banking, instructions, timers) carried over from the old player

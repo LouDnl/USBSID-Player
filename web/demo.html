@@ -38,6 +38,16 @@
 <div class="row" id="midiRow" style="display:none">
   <label>MIDI output <select id="midiout"></select></label>
 </div>
+<div class="row" id="volRow" style="display:none">
+  <label>SID volume
+    <input type="range" id="sidvol" min="0" max="300" value="100" style="width:8rem" />
+    <span id="sidvolval" class="muted">100%</span>
+  </label>
+  <label>FM/OPL volume
+    <input type="range" id="fmvol" min="0" max="300" value="50" style="width:8rem" />
+    <span id="fmvolval" class="muted">50%</span>
+  </label>
+</div>
 <div class="row">
   <input type="file" id="file" accept=".sid,.prg,.p00" />
   <label>subtune <input type="number" id="subtune" value="0" min="0" style="width:4rem" /></label>
@@ -128,6 +138,9 @@ let connected = false, inWorker = false;
 
 $('ttype').onchange = () => {
   $('midiRow').style.display = ($('ttype').value === 'asid') ? 'flex' : 'none';
+  /* Only software audio mixes its own SID/FM balance - a board or ASID has
+   * no such thing to turn. */
+  $('volRow').style.display = ($('ttype').value === 'audio') ? 'flex' : 'none';
   /* Software audio needs no device, so it needs no connect either. Enabling play
    * the moment it is chosen, rather than making the user press a button that
    * does nothing, which is what LouD hit. */
@@ -138,6 +151,21 @@ $('ttype').onchange = () => {
     $('connect').disabled = false;
   }
   maybeEnable();
+};
+
+/* Independent SID/FM gain, inside the wasm mix rather than a post-mix page
+ * volume control - see UsPlayerAudio.setSidVolume()/setFmVolume(). Applied
+ * straight to audioOut when it exists (play() creates it before either
+ * slider can have been touched for a given load, but a value changed while
+ * already playing should take effect immediately, hence live on 'input'
+ * rather than only read back at play() time). */
+$('sidvol').oninput = () => {
+  $('sidvolval').textContent = $('sidvol').value + '%';
+  if (audioOut) audioOut.setSidVolume($('sidvol').value);
+};
+$('fmvol').oninput = () => {
+  $('fmvolval').textContent = $('fmvol').value + '%';
+  if (audioOut) audioOut.setFmVolume($('fmvol').value);
 };
 
 $('connect').onclick = async () => {
@@ -288,6 +316,13 @@ $('play').onclick = async () => {
    * that gesture. */
   if ($('ttype').value === 'audio') {
     if (!audioOut) audioOut = new UsPlayerAudio(player);
+    /* The sliders may already be off their defaults (a previous tune, or the
+     * user moved them before pressing play) - apply() rather than trust
+     * usp_audio_configure()'s own defaults, which start()/_configure() below
+     * does not touch either way (see setSidVolume()/setFmVolume()'s own
+     * comments on why this is not reset by a reconfigure). */
+    audioOut.setSidVolume($('sidvol').value);
+    audioOut.setFmVolume($('fmvol').value);
     const n = isPrg ? 1 : countSids(fileBytes);
     /* The chip the tune asks for, not always a 6581: the model decides which
      * filter is emulated and is plainly audible. A program says nothing, so it

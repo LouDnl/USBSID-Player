@@ -108,6 +108,20 @@ struct SidFile {
    * which for a BASIC program is a jump into a tokenised line.
    */
   bool is_basic = false;
+
+  /**
+   * @brief Flags bit 0: the payload is Compute!'s Sidplayer MUS data, not a
+   * built-in music player (v2-5 only; always false for v1, which has no
+   * flags field).
+   *
+   * This player has no MUS decoder. A tune with this set has no init/play
+   * routine of its own - `init_addr` still defaults to `load_addr` below,
+   * which for MUS data is not code, so nothing here should call it. Callers
+   * should check this and refuse to play rather than run the MUS data as
+   * 6502.
+   */
+  bool is_mus_player = false;
+
   uint8_t start_page = 0;   /* where the driver may be relocated to */
   uint8_t max_pages = 0;
   uint16_t reserved = 0;    /* holds the second and third SID addresses, v3/v4 only */
@@ -144,7 +158,18 @@ struct SidFile {
   bool song_uses_cia(uint16_t song) const
   {
     if (song < 1) song = 1;
-    const uint16_t bit = static_cast<uint16_t>((song > 32) ? 32 : song);
+    uint16_t bit;
+    if (song <= 32) {
+      bit = song;
+    } else if (version == 1 || (flags & 0x0002) != 0) {
+      /* v1, or v2-5 with the PlaySID-specific flag (bit 1) set: the 32 bit
+       * pattern repeats past tune 32 (spec: "tune 33 uses bit 0, tune 34
+       * uses bit 1, and so on"). */
+      bit = static_cast<uint16_t>(((song - 1) % 32) + 1);
+    } else {
+      /* v2-5 with the flag clear: tune 32 and everything past it takes bit 31. */
+      bit = 32;
+    }
     return (speed & (1u << (bit - 1))) != 0;
   }
 

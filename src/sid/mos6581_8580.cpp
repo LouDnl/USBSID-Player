@@ -254,6 +254,14 @@ void Mos6581_8580::set_voice_mute(uint8_t chip, uint8_t voice, bool muted)
   }
 }
 
+void Mos6581_8580::set_voice_solo(uint8_t chip, uint8_t voice)
+{
+  if (chip < 1 || chip > kMaxSids || voice < 1 || voice > 3) return;
+  config_.solo_active = true;
+  config_.voice_solo[chip - 1] = static_cast<uint8_t>(
+    config_.voice_solo[chip - 1] | (1u << (voice - 1)));
+}
+
 /**
  * @brief Hold a whole chip silent, dropping its writes.
  *
@@ -345,16 +353,38 @@ void Mos6581_8580::io_write(addr_t addr, data_t value)
   }
 
   if (chip >= 1 && chip <= kMaxSids) {
-    US_LOG_IF(sid_rw, "[W SID%u] $%04x $%03x:%02x [C]%5u\n", chip, addr, reg,
-              value, static_cast<unsigned>(bus_.cycles() - last_event_));
+    const bool chip_is_muted = (config_.chip_mute & (1u << (chip - 1))) != 0;
+
+    /* --solo: local < 0x15 is one of the three per-voice register blocks
+     * (7 bytes each: freq lo/hi, pulse lo/hi, control, ad, sr); 0x15-0x18
+     * is the chip-shared filter/volume block, dropped only when the chip
+     * has no solo'd voice at all - a solo'd voice still needs its shared
+     * filter/volume to reach the backend to be heard. */
+    bool solo_dropped = false;
+    if (config_.solo_active) {
+      const addr_t local = reg & 0x1f;
+      const uint8_t keep = config_.voice_solo[chip - 1];
+      solo_dropped = (local >= 0x15) ? (keep == 0)
+                                     : ((keep & (1u << (local / 7))) == 0);
+    }
+
+    /* Gated on mute/solo state so -srw shows only the writes that
+     * actually reach the backend, not the full stream. */
+    if (!chip_is_muted && !solo_dropped) {
+      US_LOG_IF(sid_rw, "[W SID%u] $%04x $%03x:%02x [C]%5u\n", chip, addr, reg,
+                value, static_cast<unsigned>(bus_.cycles() - last_event_));
+    }
     /* Voice three follows along so $d41b/$d41c can answer, fed the
-     * register and cycle so it can be caught up lazily and stay exact. */
+     * register and cycle so it can be caught up lazily and stay exact.
+     * Kept running even when muted/solo-dropped, same reasoning as the
+     * muted-chip comment below. */
     voice3_[chip - 1].write(static_cast<reg_t>(addr & 0x1f), value,
                             bus_.cycles());
     /* A muted chip's writes are dropped here, and only here (after the
      * mirror and voice three, so $d41b/$d41c answer the same muted or
-     * not - tunes poll those as a timer and random source). */
-    if ((config_.chip_mute & (1u << (chip - 1))) != 0) return;
+     * not - tunes poll those as a timer and random source). Solo-dropped
+     * writes leave the same way, for the same reason. */
+    if (chip_is_muted || solo_dropped) return;
 
     /* Voice mute is applied only here, on the way out. */
     backend_->write(reg, mask_for_output(reg, value), cycles_since_last_event());
@@ -380,17 +410,29 @@ data_t Mos6581_8580::io_read(addr_t addr)
     return backend_->read(reg, cycles_since_last_event());
   }
 
+  /* --solo: a chip with no solo'd voice at all never reaches the backend
+   * (see io_write()), so its reads are pure emulation noise for whoever
+   * asked to isolate SPEC's traffic with -srw - suppressed the same way
+   * writes are, chip-granular since $d41b/$d41c are voice three's alone
+   * but a tune polls them regardless of which voice it cares about. */
+  const bool solo_read_dropped = config_.solo_active && chip >= 1 &&
+    chip <= kMaxSids && config_.voice_solo[chip - 1] == 0;
+
   if (chip >= 1 && chip <= kMaxSids) {
     if (local == kSidRegOsc3 || local == kSidRegEnv3) {
       const data_t value = (local == kSidRegOsc3)
         ? voice3_[chip - 1].osc3(bus_.cycles())
         : voice3_[chip - 1].env3(bus_.cycles());
-      US_LOG_IF(sid_rw, "[R SID%u] $%04x $%03x:%02x\n", chip, addr, reg, value);
+      if (!solo_read_dropped) {
+        US_LOG_IF(sid_rw, "[R SID%u] $%04x $%03x:%02x\n", chip, addr, reg, value);
+      }
       return value;
     }
   }
-  US_LOG_IF(sid_rw, "[R SID%u] $%04x $%03x:%02x (mirror)\n", chip, addr, reg,
-            regs_[reg & (kRegsSize - 1)]);
+  if (!solo_read_dropped) {
+    US_LOG_IF(sid_rw, "[R SID%u] $%04x $%03x:%02x (mirror)\n", chip, addr, reg,
+              regs_[reg & (kRegsSize - 1)]);
+  }
 
   /* Everything else floats on real hardware; the mirror is the most
    * useful thing to hand back. */

@@ -92,6 +92,24 @@ struct SidConfig {
    * kMaxSids is 15, one bit short of an 8 bit mask. */
   uint16_t chip_mute = 0;
 
+  /**
+   * @brief Hard solo: which voices are kept, one byte per chip, bits 0 to 2.
+   *
+   * Unlike voice_mute, a voice missing from here has its writes dropped
+   * entirely rather than merely gate/sustain-silenced, and a chip with no
+   * bit set at all also drops its shared filter/volume registers - so only
+   * --solo's own SPEC ever reaches the backend. Set once from the CLI
+   * before playback starts (see solo_active below); no runtime toggle or
+   * unmute-replay concern like chip_mute has.
+   */
+  uint8_t voice_solo[kMaxSids] = { 0 };
+
+  /* Whether --solo is in effect at all. voice_solo[] full of zero bits
+   * means "nothing solo'd yet", which without this flag would be
+   * indistinguishable from "solo not requested" - and the former must
+   * still drop every chip. */
+  bool solo_active = false;
+
   /* USBSID-Pico socket layout, mirrored from the device config */
   uint8_t sids_socket_one = 1;
   uint8_t sids_socket_two = 0;
@@ -179,6 +197,19 @@ class Mos6581_8580 final : public IoDevice, public VicFrameObserver
      * level and restarts the note if gated.
      */
     void set_voice_mute(uint8_t chip, uint8_t voice, bool muted);
+
+    /**
+     * @brief Hard-solo one voice: only voices given to this (across however
+     * many calls) ever have their writes reach the backend at all.
+     *
+     * @param chip   1 to kMaxSids
+     * @param voice  1 to 3
+     *
+     * One-shot for a CLI run, not a toggle - there is no way to un-solo a
+     * voice once set. First call flips solo_active, after which every chip
+     * with nothing solo'd drops its shared filter/volume registers too.
+     */
+    void set_voice_solo(uint8_t chip, uint8_t voice);
 
     /**
      * @brief Hold a whole chip silent, dropping its writes. Chip counts

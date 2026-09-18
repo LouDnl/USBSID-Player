@@ -31,6 +31,7 @@
 #include <chrono>
 #include <thread>
 #include <vector>
+#include <sys/stat.h>
 
 #include "machine.h"
 #include "pacing.h"
@@ -70,21 +71,30 @@ void on_signal(int)
  * own means its three voices, which is the common case and saves writing them
  * out. Chips and voices count from one, the way the sockets and the datasheet
  * do, because the alternative is a flag that means something different from
- * every other place these are named.
+ * every other place these are named. Chip numbers go up to kMaxSids (15),
+ * same ceiling as --select-sids: Mos6581_8580::set_voice_mute() already
+ * accepts any chip up to kMaxSids regardless of output, so capping the parser
+ * at 4 here would silence --output=audio/nsd/usbsid-multi runs incorrectly
+ * for chip 5 and up.
  *
  * @param spec  the argument as given
- * @param mask  out, four bytes, bits 0 to 2 per chip
+ * @param mask  out, kMaxSids bytes, bits 0 to 2 per chip
  * @returns true if the whole string parsed, false on the first thing that did
  *          not, with mask left as far as it got
  */
-bool parse_voice_spec(const char * spec, uint8_t mask[4])
+bool parse_voice_spec(const char * spec, uint8_t mask[kMaxSids])
 {
-  mask[0] = mask[1] = mask[2] = mask[3] = 0;
+  for (uint8_t i = 0; i < kMaxSids; i++) mask[i] = 0;
   if (spec == nullptr || *spec == '\0') return false;
   const char * p = spec;
   while (*p != '\0') {
-    if (*p < '1' || *p > '4') return false;
-    const int chip = *p++ - '0';
+    if (*p < '0' || *p > '9') return false;
+    long chip = 0;
+    while (*p >= '0' && *p <= '9') {
+      chip = chip * 10 + (*p++ - '0');
+      if (chip > kMaxSids) return false;
+    }
+    if (chip < 1) return false;
     int voices = 0x7;
     if (*p == ':') {
       p++;
@@ -99,11 +109,11 @@ bool parse_voice_spec(const char * spec, uint8_t mask[4])
 }
 
 /** @brief Print what was silenced, so a WAV file's provenance is on screen. */
-void print_voice_mask(const char * label, const uint8_t mask[4])
+void print_voice_mask(const char * label, const uint8_t mask[kMaxSids])
 {
   printf("  %-9s: ", label);
   bool first = true;
-  for (int c = 0; c < 4; c++) {
+  for (int c = 0; c < kMaxSids; c++) {
     for (int v = 0; v < 3; v++) {
       if ((mask[c] & (1 << v)) == 0) continue;
       printf("%schip %d voice %d", first ? "" : ", ", c + 1, v + 1);
@@ -114,38 +124,87 @@ void print_voice_mask(const char * label, const uint8_t mask[4])
 }
 
 /**
- * @brief Read a `--select-sids` list into an ordered array of tune SID numbers.
+ * @brief Read a `--select-sids` list into a slot indexed array of tune SID
+ * numbers, 0 marking a slot nobody claimed.
  *
- * `3,4,5` sends the tune's third SID to the board's first socket, its fourth
- * to the second and its fifth to the third - see
- * UsbSidBackend::set_sid_select(). Comma separated, counting from 1, the same
- * convention as --mute/--solo.
+ * Comma separated entries, each `SID` or `SID:SLOT`, counting from 1 like
+ * --mute/--solo. `3,4,5` packs into consecutive slots one, two, three - see
+ * UsbSidBackend::set_sid_select(), which already treats a 0 entry as "empty,
+ * skip it". `3:1,5:4` instead puts tune SID 3 in slot one and tune SID 5 in
+ * slot four, leaving two and three empty. A bare entry claims the lowest
+ * numbered slot not already claimed by an explicit one, regardless of where
+ * in the spec that explicit entry appears - so `1,3:1` and `3:1,1` both put
+ * tune SID 1 in slot two.
  *
  * @param spec   the argument as given
- * @param out    out, up to kMaxSids entries
- * @param count  out, how many entries were read
+ * @param out    out, kMaxSids entries, slot indexed, 0 for unused
+ * @param count  out, one past the highest slot any entry claimed
  * @returns true if the whole string parsed, false on the first thing that did
- *          not, with count left as far as it got
+ *          not, with out/count left as far as it got
  */
 bool parse_sid_select(const char * spec, uint8_t out[kMaxSids], uint8_t & count)
 {
+  for (uint8_t i = 0; i < kMaxSids; i++) out[i] = 0;
   count = 0;
   if (spec == nullptr || *spec == '\0') return false;
+
+  uint8_t sid_tok[kMaxSids];
+  int16_t slot_tok[kMaxSids]; /* -1 = no explicit slot, else 0 based */
+  uint8_t n_tok = 0;
+
   const char * p = spec;
   while (*p != '\0') {
     if (*p < '0' || *p > '9') return false;
-    long n = 0;
+    long sid = 0;
     while (*p >= '0' && *p <= '9') {
-      n = n * 10 + (*p++ - '0');
-      if (n > kMaxSids) return false;
+      sid = sid * 10 + (*p++ - '0');
+      if (sid > kMaxSids) return false;
     }
-    if (n < 1 || count >= kMaxSids) return false;
-    out[count++] = static_cast<uint8_t>(n);
+    if (sid < 1 || n_tok >= kMaxSids) return false;
+
+    long slot = -1;
+    if (*p == ':') {
+      p++;
+      slot = 0;
+      if (*p < '0' || *p > '9') return false;
+      while (*p >= '0' && *p <= '9') {
+        slot = slot * 10 + (*p++ - '0');
+        if (slot > kMaxSids) return false;
+      }
+      if (slot < 1) return false;
+      slot--; /* 0 based */
+    }
+
+    sid_tok[n_tok] = static_cast<uint8_t>(sid);
+    slot_tok[n_tok] = static_cast<int16_t>(slot);
+    n_tok++;
+
     if (*p == ',') { p++; continue; }
     if (*p != '\0') return false;
   }
-  return count > 0;
+  if (n_tok == 0) return false;
+
+  /* Explicit slots are placed first, so a bare entry can never displace one
+   * named later in the spec than itself. */
+  for (uint8_t i = 0; i < n_tok; i++) {
+    if (slot_tok[i] < 0) continue;
+    out[slot_tok[i]] = sid_tok[i];
+    if (static_cast<uint8_t>(slot_tok[i] + 1) > count) {
+      count = static_cast<uint8_t>(slot_tok[i] + 1);
+    }
+  }
+  uint8_t cursor = 0;
+  for (uint8_t i = 0; i < n_tok; i++) {
+    if (slot_tok[i] >= 0) continue;
+    while (cursor < kMaxSids && out[cursor] != 0) cursor++;
+    if (cursor >= kMaxSids) return false;
+    out[cursor] = sid_tok[i];
+    if (static_cast<uint8_t>(cursor + 1) > count) count = static_cast<uint8_t>(cursor + 1);
+    cursor++;
+  }
+  return true;
 }
+
 
 void usage(const char * argv0)
 {
@@ -168,46 +227,66 @@ void usage(const char * argv0)
     "      --output M    usbsid (default), audio, or wav. usbsid falls back\n"
     "                    to audio when no board is found\n"
 #endif
-    "      --wav FILE    write a WAV instead of playing, implies --output=wav\n"
+    "  -w, --wav FILE    write a WAV instead of playing, implies --output=wav\n"
 #if US_HAVE_NETDEVICE
-    "      --net-host H  Network SID Device server to connect to for\n"
+    "  -nh, --net-host H  Network SID Device server to connect to for\n"
     "                    --output=nsd (default 127.0.0.1)\n"
-    "      --net-port P  its TCP port (default 6581)\n"
-    "      --net-sids N  SIDs to tell it about (default: the tune's own count)\n"
+    "  -np, --net-port P  its TCP port (default 6581)\n"
+    "  -ns, --net-sids N  SIDs to tell it about (default: the tune's own count)\n"
 #endif
-    "      --rate N      sample rate for audio and wav (default 44100). A device\n"
+    "  -ra, --rate N     sample rate for audio and wav (default 44100). A device\n"
     "                    may impose its own, which is then what is used\n"
-    "      --quality Q   fast (linear) or good (sinc, default)\n"
-    "      --stereo      pan multi-SID tunes per the v5 file's own hint\n"
+    "  -q, --quality Q   fast (linear) or good (sinc, default)\n"
+    "  -st, --stereo     pan multi-SID tunes per the v5 file's own hint\n"
     "                    (--output=audio/wav only; off by default, one channel)\n"
+    "  -rv, --resid-volume N  reSIDfp (SID) output level, percent, 0-300\n"
+    "                    (--output=audio/wav only; default 100)\n"
+    "  -fv, --fmopl-volume N  FM/OPL output level, percent, 0-300 (same scope;\n"
+    "                    default 50 - the OPL is the louder of the two chips)\n"
     "  -T, --trace FILE  write every SID register event to FILE. Records what\n"
     "                    is played, so it works with a board and with --wav;\n"
     "                    add -n for a silent run that only records\n"
-    "      --mute SPEC   silence voices. SPEC is a comma separated list of\n"
-    "                    CHIP:VOICE or CHIP for all three, chips and voices\n"
-    "                    counting from 1, for example 1:3 or 2 or 1:1,1:2\n"
-    "      --solo SPEC   the other way round: silence everything except SPEC.\n"
-    "                    --solo 1:2 --wav v2.wav records voice two on its own\n"
-    "      --pal         force PAL timing\n"
-    "      --ntsc        force NTSC timing\n"
+    "  -m, --mute SPEC   silence voices (gate/sustain forced off; everything\n"
+    "                    else for that voice still reaches the backend). SPEC\n"
+    "                    is a comma separated list of CHIP:VOICE or CHIP for\n"
+    "                    all three, chips and voices counting from 1, for\n"
+    "                    example 1:3 or 2 or 1:1,1:2\n"
+    "  -S, --solo SPEC   the other way round, and harder: only SPEC's writes\n"
+    "                    reach the backend at all, everything else is dropped\n"
+    "                    before it gets there (and before -srw sees it), not\n"
+    "                    just silenced. --solo 1:2 --wav v2.wav records voice\n"
+    "                    two on its own with no other chip/voice traffic\n"
+    "  -ms, --mute-solo SPEC  the old --solo: silence everything except SPEC\n"
+    "                    the soft way, same as --mute. Kept under its own name\n"
+    "                    for anyone relying on that behavior specifically\n"
+    "  -P, --pal         force PAL timing\n"
+    "  -N, --ntsc        force NTSC timing\n"
     "\n"
     "  hardware:\n"
     "  -rr               read the SID back from the chip, not the mirror\n"
     "  -f                force everything into socket two\n"
     "  -fa XX            force everything to physical base $XX (hex)\n"
-    "      --select-sids SPEC  play only these of the tune's SIDs, on the\n"
+    "  -ss, --select-sids SPEC  play only these of the tune's SIDs, on the\n"
     "                    board's sockets in the order given. SPEC is a comma\n"
     "                    separated list of tune SID numbers counting from 1,\n"
-    "                    for example 3,4,5 puts the tune's 3rd SID on the\n"
-    "                    board's first socket, its 4th on the second, and its\n"
-    "                    5th on the third. At most 4 entries are used.\n"
-    "                    (--output=usbsid only; default: the tune's first 4\n"
-    "                    SIDs on the board's first 4 sockets, in order)\n"
-    "      --overhead N  cycles one hardware access costs (default 1)\n"
-    "      --songlengths F  HVSC Songlengths database, to stop when the song ends.\n"
-    "                    Found by itself in $SONGLENGTHS, ~/Songlengths.md5,\n"
-    "                    $HVSCROOT or $HVSC_BASE DOCUMENTS/Songlengths.md5, or $HVSCDB.\n"
-    "      --no-songlengths  ignore it even when one is found\n"
+    "                    each optionally followed by :SLOT to name the exact\n"
+    "                    socket it lands on, also counting from 1. For\n"
+    "                    example 3,4,5 puts the tune's 3rd SID on the board's\n"
+    "                    first socket, its 4th on the second, and its 5th on\n"
+    "                    the third; 3:1,5:4 instead puts the 3rd SID on the\n"
+    "                    first socket and the 5th on the fourth, leaving the\n"
+    "                    second and third empty. A bare entry claims the\n"
+    "                    lowest socket no :SLOT entry already claimed. At\n"
+    "                    most 4 sockets are used.\n"
+    "                    (--output=usbsid only, or as many entries as\n"
+    "                    --output=usbsid-multi has open boards; default: the\n"
+    "                    tune's first N SIDs on the first N sockets, in order)\n"
+    "  -oh, --overhead N  cycles one hardware access costs (default 1)\n"
+    "  -sl, --songlengths F  HVSC Songlengths database, to stop when the song\n"
+    "                    ends. Found by itself in $SONGLENGTHS,\n"
+    "                    ~/Songlengths.md5, $HVSCROOT or $HVSC_BASE\n"
+    "                    DOCUMENTS/Songlengths.md5, or $HVSCDB.\n"
+    "  -nsl, --no-songlengths  ignore it even when one is found\n"
     "\n"
     "  logging, to stdout, same switches as old player:\n"
     "  -srw              SID reads and writes\n"
@@ -226,6 +305,13 @@ void usage(const char * argv0)
 
 bool read_file(const char * path, std::vector<data_t> & out)
 {
+  /* fopen(path, "rb") happily opens a directory on Linux, and ftell() on that
+   * stream returns whatever bogus/huge value the filesystem reports as its
+   * "size" rather than failing - resize() on that then throws std::bad_alloc
+   * instead of the ordinary "cannot read" error every other bad path gets. */
+  struct stat st;
+  if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) return false;
+
   FILE * f = fopen(path, "rb");
   if (f == nullptr) return false;
   fseek(f, 0, SEEK_END);
@@ -371,6 +457,10 @@ void print_tune(const SidFile & t, bool stereo)
 
   printf("  data     : %zu bytes at offset $%04x\n", t.data_size, t.data_offset);
   if (t.is_basic) printf("  basic    : yes, an RSID holding a BASIC program\n");
+  if (t.is_mus_player) {
+    printf("  format   : Compute!'s Sidplayer MUS data - this player has no MUS\n"
+           "             decoder, it cannot be played\n");
+  }
 }
 
 /**
@@ -415,6 +505,7 @@ int main(int argc, char ** argv)
   const char * trace_path = nullptr;
   const char * mute_spec = nullptr;
   const char * solo_spec = nullptr;
+  const char * mute_solo_spec = nullptr;
   const char * select_sids_spec = nullptr;
   uint16_t song = 0;
   int seconds = 0;
@@ -440,6 +531,11 @@ int main(int argc, char ** argv)
    * so this stays off unless asked for. See ResidFpSidBackend::configure()'s
    * own comment on why it is a configure()-time choice and not a toggle. */
   bool soft_stereo = false;
+  /* Percent, 0-300; 100/50 are the defaults ResidFpSidBackend/OplChip already
+   * start at, so leaving these untouched is a no-op - see soft.set_sid_gain()/
+   * set_fm_gain() below. */
+  int soft_sid_volume = 100;
+  int soft_fm_volume = 50;
 
 #if US_HAVE_NETDEVICE
   /* --output=nsd: a Network SID Device server to send writes to
@@ -455,30 +551,35 @@ int main(int argc, char ** argv)
     if (!strcmp(a, "-h") || !strcmp(a, "--help")) { usage(argv[0]); return 0; }
     else if (!strcmp(a, "-i") || !strcmp(a, "--info")) info_only = true;
     else if (!strcmp(a, "-n") || !strcmp(a, "--no-device")) no_device = true;
-    else if (!strcmp(a, "--pal")) forced_model = VideoModel::Pal6569;
-    else if (!strcmp(a, "--ntsc")) forced_model = VideoModel::Ntsc6567R8;
+    else if (!strcmp(a, "-P") || !strcmp(a, "--pal")) forced_model = VideoModel::Pal6569;
+    else if (!strcmp(a, "-N") || !strcmp(a, "--ntsc")) forced_model = VideoModel::Ntsc6567R8;
     else if ((!strcmp(a, "-s") || !strcmp(a, "--song")) && i + 1 < argc)
       song = static_cast<uint16_t>(atoi(argv[++i]));
     else if ((!strcmp(a, "-t") || !strcmp(a, "--seconds")) && i + 1 < argc)
       seconds = atoi(argv[++i]);
     else if ((!strcmp(a, "-T") || !strcmp(a, "--trace")) && i + 1 < argc)
       trace_path = argv[++i];
-    else if (!strcmp(a, "--mute") && i + 1 < argc) mute_spec = argv[++i];
-    else if (!strcmp(a, "--solo") && i + 1 < argc) solo_spec = argv[++i];
-    else if (!strcmp(a, "--select-sids") && i + 1 < argc) select_sids_spec = argv[++i];
+    else if ((!strcmp(a, "-m") || !strcmp(a, "--mute")) && i + 1 < argc) mute_spec = argv[++i];
+    else if ((!strcmp(a, "-S") || !strcmp(a, "--solo")) && i + 1 < argc) solo_spec = argv[++i];
+    else if ((!strcmp(a, "-ms") || !strcmp(a, "--mute-solo")) && i + 1 < argc) mute_solo_spec = argv[++i];
+    else if ((!strcmp(a, "-ss") || !strcmp(a, "--select-sids")) && i + 1 < argc)
+      select_sids_spec = argv[++i];
     else if (!strcmp(a, "-rr")) real_reads = true;
     else if (!strcmp(a, "-f")) force_socket_two = true;
     else if (!strcmp(a, "-fa") && i + 1 < argc) {
       force_address = true;
       forced_address = static_cast<data_t>(strtol(argv[++i], nullptr, 16));
     }
-    else if (!strcmp(a, "--overhead") && i + 1 < argc) overhead = atoi(argv[++i]);
-    else if (!strncmp(a, "--output", 8)) {
-      /* Both spellings, because both get typed: --output=wav and --output wav */
+    else if ((!strcmp(a, "-oh") || !strcmp(a, "--overhead")) && i + 1 < argc)
+      overhead = atoi(argv[++i]);
+    else if (!strcmp(a, "-o") || !strncmp(a, "--output", 8)) {
+      /* Both spellings, because both get typed: --output=wav and --output wav;
+       * -o only ever takes the space separated form. */
       const char * v = nullptr;
-      if (a[8] == '=') v = a + 9;
+      if (!strcmp(a, "-o")) { if (i + 1 < argc) v = argv[++i]; }
+      else if (a[8] == '=') v = a + 9;
       else if (a[8] == '\0' && i + 1 < argc) v = argv[++i];
-      if (v == nullptr) { printf("--output needs usbsid, audio or wav\n"); return 2; }
+      if (v == nullptr) { printf("-o/--output needs usbsid, audio or wav\n"); return 2; }
       if (!strcmp(v, "usbsid")) output = OutputMode::UsbSid;
       else if (!strcmp(v, "audio")) output = OutputMode::Audio;
       else if (!strcmp(v, "wav")) output = OutputMode::Wav;
@@ -494,26 +595,34 @@ int main(int argc, char ** argv)
       }
       else { printf("unknown output '%s': use usbsid, audio, wav or nsd\n", v); return 2; }
     }
-    else if (!strcmp(a, "--wav") && i + 1 < argc) {
+    else if ((!strcmp(a, "-w") || !strcmp(a, "--wav")) && i + 1 < argc) {
       wav_path = argv[++i];
       output = OutputMode::Wav;   /* naming a file is asking for it */
     }
 #if US_HAVE_NETDEVICE
-    else if (!strcmp(a, "--net-host") && i + 1 < argc) net_host = argv[++i];
-    else if (!strcmp(a, "--net-port") && i + 1 < argc) net_port = atoi(argv[++i]);
-    else if (!strcmp(a, "--net-sids") && i + 1 < argc) net_sids = atoi(argv[++i]);
+    else if ((!strcmp(a, "-nh") || !strcmp(a, "--net-host")) && i + 1 < argc)
+      net_host = argv[++i];
+    else if ((!strcmp(a, "-np") || !strcmp(a, "--net-port")) && i + 1 < argc)
+      net_port = atoi(argv[++i]);
+    else if ((!strcmp(a, "-ns") || !strcmp(a, "--net-sids")) && i + 1 < argc)
+      net_sids = atoi(argv[++i]);
 #endif
-    else if (!strcmp(a, "--rate") && i + 1 < argc)
+    else if ((!strcmp(a, "-ra") || !strcmp(a, "--rate")) && i + 1 < argc)
       soft_rate = static_cast<unsigned>(atoi(argv[++i]));
-    else if (!strcmp(a, "--quality") && i + 1 < argc) {
+    else if ((!strcmp(a, "-q") || !strcmp(a, "--quality")) && i + 1 < argc) {
       const char * v = argv[++i];
       if (!strcmp(v, "fast")) soft_quality = SoftSidQuality::Fast;
       else if (!strcmp(v, "good")) soft_quality = SoftSidQuality::Good;
       else { printf("unknown quality '%s': use fast or good\n", v); return 2; }
     }
-    else if (!strcmp(a, "--stereo")) soft_stereo = true;
-    else if (!strcmp(a, "--songlengths") && i + 1 < argc) songlengths_path = argv[++i];
-    else if (!strcmp(a, "--no-songlengths")) use_songlengths = false;
+    else if (!strcmp(a, "-st") || !strcmp(a, "--stereo")) soft_stereo = true;
+    else if ((!strcmp(a, "-rv") || !strcmp(a, "--resid-volume")) && i + 1 < argc)
+      soft_sid_volume = atoi(argv[++i]);
+    else if ((!strcmp(a, "-fv") || !strcmp(a, "--fmopl-volume")) && i + 1 < argc)
+      soft_fm_volume = atoi(argv[++i]);
+    else if ((!strcmp(a, "-sl") || !strcmp(a, "--songlengths")) && i + 1 < argc)
+      songlengths_path = argv[++i];
+    else if (!strcmp(a, "-nsl") || !strcmp(a, "--no-songlengths")) use_songlengths = false;
     else if (!strcmp(a, "-srw")) us_log.sid_rw = true;
     else if (!strcmp(a, "-c1rw")) us_log.cia1_rw = true;
     else if (!strcmp(a, "-c2rw")) us_log.cia2_rw = true;
@@ -570,6 +679,12 @@ int main(int argc, char ** argv)
     }
   }
   if (info_only) return 0;
+  if (is_sid && info.is_mus_player) {
+    /* print_tune() already said why; refuse rather than call MUS data as
+     * 6502 code, which is what init_addr defaulting to load_addr means for
+     * a file like this (SidFile::is_mus_player's own comment). */
+    return 1;
+  }
 
   Machine machine;
   if (forced_model != VideoModel::Count) machine.set_video_model(forced_model);
@@ -692,6 +807,14 @@ int main(int argc, char ** argv)
      * format's own ceiling, so this should not happen) still gets whatever
      * actually got built via soft.chips(), not the raw request above. */
     const uint8_t real_chips = soft.chips();
+    /* Neither of these is touched by configure() - see their own comments -
+     * so setting them once here, rather than after every configure() call
+     * (soft.chips()/soft.set_pan() need that, these don't), is enough for
+     * the whole run including the PAL/NTSC reconfigure below. */
+    soft.set_sid_gain(static_cast<float>(
+      (soft_sid_volume < 0) ? 0 : soft_sid_volume) / 100.0f);
+    soft.set_fm_gain(static_cast<float>(
+      (soft_fm_volume < 0) ? 0 : soft_fm_volume) / 100.0f);
     /* The v5 file's own panning hint (sidfile.cpp's compute_panning(), run
      * at parse time - see is_sid's own info.sid_pan[]), one call per chip
      * actually built. No effect at all unless soft_stereo/--stereo, and a
@@ -762,9 +885,11 @@ int main(int argc, char ** argv)
   sid_config.force_address = force_address;
   sid_config.forced_address = forced_address;
   sid_config.access_overhead = static_cast<uint8_t>(overhead);
-  sid_config.sids_socket_one = usb.sids_socket_one();
-  sid_config.sids_socket_two = usb.sids_socket_two();
-  sid_config.fmopl_sid = usb.fmopl_sid();
+  {
+    sid_config.sids_socket_one = usb.sids_socket_one();
+    sid_config.sids_socket_two = usb.sids_socket_two();
+    sid_config.fmopl_sid = usb.fmopl_sid();
+  }
 
   /* --select-sids picks which of the tune's SIDs land on which board socket,
    * in place of the default first-4-to-first-4 mapping. Set on `usb` itself
@@ -783,16 +908,24 @@ int main(int argc, char ** argv)
       return 2;
     }
     usb.set_sid_select(sids, count);
-    if (output == OutputMode::UsbSid) {
+    const uint8_t slots = 4;
+    if (output == OutputMode::UsbSid || output == OutputMode::UsbSidMulti) {
       printf("  sid select:");
-      for (uint8_t s = 0; s < count && s < 4; s++) {
-        printf(" board %u <- tune SID %u", s + 1, sids[s]);
+      bool any = false;
+      for (uint8_t s = 0; s < count && s < slots; s++) {
+        if (sids[s] == 0) continue;
+        printf(" slot %u <- tune SID %u", s + 1, sids[s]);
+        any = true;
       }
-      if (count > 4) printf(" (%u more ignored, only 4 sockets)", count - 4);
+      if (!any) printf(" (nothing in range)");
+      uint8_t beyond = 0;
+      for (uint8_t s = slots; s < count; s++) if (sids[s] != 0) beyond++;
+      if (beyond > 0) printf(" (%u beyond slot %u ignored, only %u socket%s)",
+                              beyond, slots, slots, slots == 1 ? "" : "s");
       printf("\n");
       if (is_sid) {
-        for (uint8_t s = 0; s < count && s < 4; s++) {
-          if (sids[s] > info.sid_count) {
+        for (uint8_t s = 0; s < count && s < slots; s++) {
+          if (sids[s] != 0 && sids[s] > info.sid_count) {
             printf("  warning  : tune only has %u SID%s, --select-sids asks "
                    "for SID %u\n", info.sid_count,
                    info.sid_count == 1 ? "" : "s", sids[s]);
@@ -800,6 +933,35 @@ int main(int argc, char ** argv)
         }
       }
     }
+  }
+
+  /* --solo, set before Player/init_tune() so even the very first power-on
+   * writes are dropped for anything not in SPEC - unlike --mute/--mute-solo
+   * below, set_voice_solo() pushes nothing to the backend itself (it only
+   * flips state io_write() consults), so there is no "set before load"
+   * hazard the way there would be for an active push like set_voice_mute's.
+   * Unlike --mute-solo it also needs no tune sid_count to clamp against:
+   * it isn't inverted, SPEC names exactly what to keep. Only the chip/voice
+   * combos named in SPEC ever reach the backend at all; everything else is
+   * dropped in Mos6581_8580::io_write() before the backend write and before
+   * -srw logs it, not merely silenced - so a soloed board sees only the
+   * soloed traffic and -srw reflects exactly that, from the first write. */
+  if (solo_spec != nullptr) {
+    uint8_t mask[kMaxSids] = { 0 };
+    if (!parse_voice_spec(solo_spec, mask)) {
+      printf("  cannot read --solo %s, expected CHIP or CHIP:VOICE, "
+             "comma separated, counting from 1\n", solo_spec);
+      return 2;
+    }
+    for (int c = 0; c < kMaxSids; c++) {
+      for (int v = 0; v < 3; v++) {
+        if (mask[c] & (1 << v)) {
+          machine.sid().set_voice_solo(static_cast<uint8_t>(c + 1),
+                                       static_cast<uint8_t>(v + 1));
+        }
+      }
+    }
+    print_voice_mask("solo", mask);
   }
 
   Player player(machine);
@@ -878,26 +1040,29 @@ int main(int argc, char ** argv)
    *
    * The mute lives in the SID layer, on the way out to whatever is playing, so
    * this works the same for a board, for the speakers and for a WAV: recording
-   * three files with `--solo 1:1`, `1:2` and `1:3` gives the three voices
-   * separately from the same run of the same emulation. */
-  if (mute_spec != nullptr || solo_spec != nullptr) {
-    uint8_t mask[4] = { 0, 0, 0, 0 };
-    const char * spec = (solo_spec != nullptr) ? solo_spec : mute_spec;
+   * three files with `--mute-solo 1:1`, `1:2` and `1:3` gives the three
+   * voices separately from the same run of the same emulation. */
+  if (mute_spec != nullptr || mute_solo_spec != nullptr) {
+    uint8_t mask[kMaxSids] = { 0 };
+    const char * spec = (mute_solo_spec != nullptr) ? mute_solo_spec : mute_spec;
     if (!parse_voice_spec(spec, mask)) {
       printf("  cannot read --%s %s, expected CHIP or CHIP:VOICE, "
              "comma separated, counting from 1\n",
-             (solo_spec != nullptr) ? "solo" : "mute", spec);
+             (mute_solo_spec != nullptr) ? "mute-solo" : "mute", spec);
       return 2;
     }
-    if (solo_spec != nullptr) {
-      /* Only as far as the tune has chips: inverting all four would report
-       * nine voices silenced on a one chip tune, which reads as a fault. */
-      const int chips_here = is_sid ? player.tune().sid_count : 2;
-      for (int c = 0; c < 4; c++) {
+    if (mute_solo_spec != nullptr) {
+      /* Only as far as the tune has chips: inverting all of them would report
+       * a one chip tune's other fourteen as silenced, which reads as a fault.
+       * Capped at kMaxSids same as player.cpp's own sid.count clamp. */
+      const int chips_here = is_sid
+        ? ((player.tune().sid_count > kMaxSids) ? kMaxSids : player.tune().sid_count)
+        : 2;
+      for (int c = 0; c < kMaxSids; c++) {
         mask[c] = (c < chips_here) ? static_cast<uint8_t>(~mask[c] & 0x7) : 0;
       }
     }
-    for (int c = 0; c < 4; c++) {
+    for (int c = 0; c < kMaxSids; c++) {
       for (int v = 0; v < 3; v++) {
         if (mask[c] & (1 << v)) {
           machine.sid().set_voice_mute(static_cast<uint8_t>(c + 1),

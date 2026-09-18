@@ -472,7 +472,7 @@ void print_tune(const SidFile & t, bool stereo)
  * that says what it did. `NetDevice` gets the same treatment: a server that
  * cannot be reached falls back to `Audio` rather than playing silently.
  */
-enum class OutputMode { UsbSid, Audio, Wav, NetDevice };
+enum class OutputMode { UsbSid, UsbSidMulti, Audio, Wav, NetDevice };
 
 } /* namespace */
 

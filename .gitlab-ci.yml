@@ -5,7 +5,7 @@
 #   release.yml -> release:*, package:release, create:release   v* tags
 #
 # Supports two GitLab instances:
-#   - gitlab.loudai.nl (private): Linux runner only
+#   - gitlab.loudai.nl (private): Linux and Windows runners
 #   - gitlab.com (public): Linux, macOS and Windows runners
 #
 # macOS x86_64 (macos-15-intel on GitHub) is not built here: gitlab.com SaaS
@@ -17,8 +17,11 @@ variables:
   # checked out into lib/driver instead of being pinned as a submodule.
   # Override in the CI/CD variables to use the GitLab mirror.
   USBSID_DRIVER_REPO: "https://github.com/LouDnl/USBSID-Pico-driver.git"
-  # Instance without macOS and Windows runners
+  # Instance without a macOS runner
   PRIVATE_HOST: "gitlab.loudai.nl"
+  # Windows runner tag. The default is the gitlab.com SaaS runner, set this
+  # in the project CI/CD variables on an instance with its own Windows runner.
+  WINDOWS_RUNNER_TAG: "saas-windows-medium-amd64"
   EMSDK_IMAGE: "emscripten/emsdk:4.0.12"
   DEBIAN_FRONTEND: noninteractive
 
@@ -73,8 +76,8 @@ default:
         - web/**/*
         - .gitlab-ci.yml
 
-# Windows and macOS runners only exist on gitlab.com
-.rules_dev_public:
+# macOS runners only exist on gitlab.com
+.rules_dev_macos:
   rules:
     - if: $PIPELINE_TYPE == "manual" && $CI_SERVER_HOST != $PRIVATE_HOST
     - if: $PIPELINE_TYPE == "dev" && $CI_SERVER_HOST != $PRIVATE_HOST
@@ -91,7 +94,7 @@ default:
   rules:
     - if: $PIPELINE_TYPE == "release"
 
-.rules_release_public:
+.rules_release_macos:
   rules:
     - if: $PIPELINE_TYPE == "release" && $CI_SERVER_HOST != $PRIVATE_HOST
 
@@ -121,14 +124,14 @@ default:
     - brew install pkg-config cmake libusb
     - !reference [.driver_clone, script]
 
-# gitlab.com SaaS Windows runner. MinGW64 through msys2, like the GitHub job.
+# Windows runner (gitlab.com SaaS by default). MinGW64 through msys2, like the GitHub job.
 # The runner shell is PowerShell, so the bash parts are written to a file and
 # run through the msys2 login shell. CHERE_INVOKING keeps that shell in the
 # project directory, and only environment variables (not PowerShell variables)
 # reach it.
 .player_windows_setup:
   tags:
-    - saas-windows-medium-amd64
+    - $WINDOWS_RUNNER_TAG
   before_script:
     - choco install msys2 -y --no-progress
     - C:\tools\msys64\usr\bin\bash -lc "pacman -Syu --noconfirm"
@@ -182,14 +185,14 @@ build:macos:
   extends:
     - .player_dev_unix
     - .player_macos_setup
-    - .rules_dev_public
+    - .rules_dev_macos
   artifacts:
     name: "usbsid-macos-arm64-${CI_COMMIT_REF_SLUG}-${CI_PIPELINE_IID}"
 
 build:windows:
   extends:
     - .player_windows_setup
-    - .rules_dev_public
+    - .rules_dev
   stage: build
   script:
     - |
@@ -323,14 +326,14 @@ release:macos:
   extends:
     - .player_release_unix
     - .player_macos_setup
-    - .rules_release_public
+    - .rules_release_macos
   variables:
     ASSET: "macos-arm64"
 
 release:windows:
   extends:
     - .player_windows_setup
-    - .rules_release_public
+    - .rules_release
   stage: build
   variables:
     ASSET: "windows-x86_64"
@@ -433,7 +436,7 @@ release:web:
 # PACKAGE AND RELEASE (release.yml "Create release files")
 # ============================================================================
 
-# Everything above in one place. Windows and macOS only exist on gitlab.com.
+# Everything above in one place. macOS only exists on gitlab.com.
 package:release:
   stage: package
   image: alpine:latest
@@ -453,7 +456,6 @@ package:release:
     - job: release:macos
       optional: true
     - job: release:windows
-      optional: true
     - job: release:web
   rules:
     - if: $PIPELINE_TYPE == "release"

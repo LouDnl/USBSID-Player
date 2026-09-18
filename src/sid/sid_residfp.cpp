@@ -27,6 +27,7 @@
 #include "sid_residfp.h"
 
 #include <algorithm>
+#include <cmath>
 
 #include "residfp.h"
 
@@ -240,6 +241,13 @@ void ResidFpSidBackend::advance(uint32_t cycles)
         int32_t r = mix_r_[static_cast<size_t>(s)];
         if (pan_count_l_ > 1) l /= static_cast<int32_t>(pan_count_l_);
         if (pan_count_r_ > 1) r /= static_cast<int32_t>(pan_count_r_);
+        /* sid_gain_: applied here, before the clamp, same spot the per-chip
+         * headroom divide above just used - see set_sid_gain(). Unity by
+         * default, so this is a no-op unless a caller asked for otherwise. */
+        if (sid_gain_ != 1.0f) {
+          l = static_cast<int32_t>(std::lround(l * sid_gain_));
+          r = static_cast<int32_t>(std::lround(r * sid_gain_));
+        }
         if (l > 32767) { l = 32767; clipped_++; } else if (l < -32768) { l = -32768; clipped_++; }
         if (r > 32767) { r = 32767; clipped_++; } else if (r < -32768) { r = -32768; clipped_++; }
         out_.push_back(static_cast<int16_t>(l));
@@ -269,6 +277,7 @@ void ResidFpSidBackend::advance(uint32_t cycles)
       for (int s = 0; s < n; s++) {
         int32_t v = mix_[static_cast<size_t>(s)];
         if (chips_ > 1) v /= static_cast<int32_t>(chips_);
+        if (sid_gain_ != 1.0f) v = static_cast<int32_t>(std::lround(v * sid_gain_));
         if (v > 32767) { v = 32767; clipped_++; }
         else if (v < -32768) { v = -32768; clipped_++; }
         out_.push_back(static_cast<int16_t>(v));

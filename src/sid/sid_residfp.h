@@ -166,6 +166,39 @@ class ResidFpSidBackend final : public SidBackend
     void set_pan(uint8_t chip, SidPan pan);
 
     /**
+     * @brief How much the SID mix is turned down (or up) before it is output.
+     *
+     * A plain multiplier applied after the per-chip/per-pan headroom divide
+     * and before the clamp to int16 range - see advance(). 1.0 is unity (the
+     * default, identical output to before this existed), 0.0 silences the
+     * SID side. Independent of set_fm_gain(): the two chips are scaled
+     * separately, before they are summed, which a single post-mix volume
+     * control cannot do. Not reset by configure() - a host sets this once
+     * and it survives a tune/subtune change same as set_pan() would if the
+     * caller did not have to reapply it (pan_[] IS reset by configure(),
+     * this is not).
+     *
+     * @param gain the new multiplier, clamped to >= 0
+     */
+    void set_sid_gain(float gain) { sid_gain_ = (gain < 0.0f) ? 0.0f : gain; }
+    /** @brief The multiplier the SID mix is scaled by. */
+    float sid_gain(void) const { return sid_gain_; }
+
+    /**
+     * @brief How much the FM/OPL side is turned down (or up) before it is
+     * summed onto the SID mix. Forwards to the owned OplChip - see
+     * OplChip::set_gain() for the default and what it means when there is no
+     * FM chip built yet (nothing to do until a tune actually writes to one,
+     * see fm()'s own comment - the gain is remembered on the OplChip either
+     * way and applied once it exists).
+     *
+     * @param gain the new multiplier, clamped to >= 0
+     */
+    void set_fm_gain(float gain) { fm_.set_gain(gain); }
+    /** @brief The multiplier the FM/OPL side is scaled by. */
+    float fm_gain(void) const { return fm_.gain(); }
+
+    /**
      * @brief Attach to a machine, setting what this backend needs of it.
      *
      * Sets `access_overhead` to 0, which is the one part of the contract that
@@ -289,6 +322,9 @@ class ResidFpSidBackend final : public SidBackend
      * uses. Always at least 1. Meaningless, and unused, when !stereo_. */
     uint8_t pan_count_l_ = 1;
     uint8_t pan_count_r_ = 1;
+
+    /** See set_sid_gain(). Not touched by configure(). */
+    float sid_gain_ = 1.0f;
 
     /* Rendered frames, oldest first: one int16_t each if mono, an
      * interleaved L/R pair each if stereo (see channels()). A vector and not

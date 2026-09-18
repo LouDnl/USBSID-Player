@@ -545,4 +545,48 @@ int usp_audio_fm_writes(void)
   return g_soft_on ? static_cast<int>(g_soft.fm_writes()) : 0;
 }
 
+/**
+ * @brief How loud the reSIDfp (SID) side of the mix is, independent of FM.
+ *
+ * A plain multiplier applied before the two chips are summed - a post-mix
+ * page volume control (a WebAudio GainNode) cannot balance one against the
+ * other, only turn both down together. Callable any time, including before
+ * usp_audio_configure(): the backend remembers it, exactly as the CLI's
+ * -rv/--resid-volume does - see ResidFpSidBackend::set_sid_gain().
+ *
+ * @param percent 100 is unity, 0 silences the SID side, 300 is the CLI's
+ *                own suggested ceiling (not enforced here either)
+ */
+void usp_audio_set_sid_volume(int percent)
+{
+  g_soft.set_sid_gain(static_cast<float>(percent) / 100.0f);
+}
+
+/** @brief The SID side's current multiplier, as usp_audio_set_sid_volume()
+ * would take it (100 = unity). */
+int usp_audio_sid_volume(void)
+{
+  return static_cast<int>(g_soft.sid_gain() * 100.0f);
+}
+
+/**
+ * @brief How loud the FM/OPL side of the mix is, independent of the SID side.
+ *
+ * See usp_audio_set_sid_volume() - same idea, the other chip. Default 50: the
+ * OPL is the louder of the two in practice - see OplChip::set_gain().
+ *
+ * @param percent 100 is unity, 0 silences the FM side
+ */
+void usp_audio_set_fm_volume(int percent)
+{
+  g_soft.set_fm_gain(static_cast<float>(percent) / 100.0f);
+}
+
+/** @brief The FM side's current multiplier, as usp_audio_set_fm_volume()
+ * would take it (100 = unity). */
+int usp_audio_fm_volume(void)
+{
+  return static_cast<int>(g_soft.fm_gain() * 100.0f);
+}
+
 } /* extern "C" */

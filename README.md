@@ -173,7 +173,7 @@ CLI player:
 # Libraries used for non USBSID audio play (CLI & Web)
 - [ResidFp](https://github.com/libsidplayfp/libresidfp)
 - [miniaudio](https://github.com/mackron/miniaudio)
-- [Nuked-OPL3](https://github.com/nukeykt/Nuked-OPL3)
+- [Nuked-OPL3-fast](https://github.com/tgies/Nuked-OPL3-fast), a bit-exact perf fork of [Nuked-OPL3](https://github.com/nukeykt/Nuked-OPL3)
 
 
 # Disclaimer

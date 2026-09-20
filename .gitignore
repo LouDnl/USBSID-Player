@@ -29,6 +29,8 @@
 # Directories to un-ignore
 !.github
 !.github/workflows
+!.gitlab
+!.gitlab/**
 !assets
 !assets/cia6526_example
 !assets/cia6526_example/**

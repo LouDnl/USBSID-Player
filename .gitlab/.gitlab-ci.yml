@@ -5,11 +5,8 @@
 #   release.yml -> release:*, package:release, create:release   v* tags
 #
 # Supports two GitLab instances:
-#   - gitlab.loudai.nl (private): Linux and Windows runners
-#   - gitlab.com (public): Linux, macOS and Windows runners
-#
-# macOS x86_64 (macos-15-intel on GitHub) is not built here: gitlab.com SaaS
-# has no Intel macOS runner.
+#   - gitlab.loudai.nl (private): Linux, Windows and macOS 15 Intel runners
+#   - gitlab.com (public): Linux, macOS (Apple Silicon) and Windows runners
 
 variables:
   BUILD_TYPE: "Release"
@@ -17,7 +14,7 @@ variables:
   # checked out into lib/driver instead of being pinned as a submodule.
   # Override in the CI/CD variables to use the GitLab mirror.
   USBSID_DRIVER_REPO: "https://github.com/LouDnl/USBSID-Pico-driver.git"
-  # Instance without a macOS runner
+  # Instance with the Intel macOS runner (no Apple Silicon runner there)
   PRIVATE_HOST: "gitlab.loudai.nl"
   # Windows runner tag. The default is the gitlab.com SaaS runner, set this
   # in the project CI/CD variables on an instance with its own Windows runner.
@@ -98,6 +95,24 @@ default:
   rules:
     - if: $PIPELINE_TYPE == "release" && $CI_SERVER_HOST != $PRIVATE_HOST
 
+# macOS 15 Intel runner only exists on the private instance
+.rules_dev_macos15intel:
+  rules:
+    - if: $PIPELINE_TYPE == "manual" && $CI_SERVER_HOST == $PRIVATE_HOST
+    - if: $PIPELINE_TYPE == "dev" && $CI_SERVER_HOST == $PRIVATE_HOST
+      changes:
+        - CMakeLists.txt
+        - cmake/**/*
+        - src/**/*
+        - lib/**/*
+        - tests/**/*
+        - web/**/*
+        - .gitlab-ci.yml
+
+.rules_release_macos15intel:
+  rules:
+    - if: $PIPELINE_TYPE == "release" && $CI_SERVER_HOST == $PRIVATE_HOST
+
 # ============================================================================
 # SHARED PIECES
 # ============================================================================
@@ -119,6 +134,17 @@ default:
   tags:
     - saas-macos-medium-m1
   image: macos-14-xcode-15
+  before_script:
+    - brew update
+    - brew install pkg-config cmake libusb
+    - !reference [.driver_clone, script]
+
+# Private instance's own macOS 15 Intel runner (shell executor on real
+# hardware, no Docker image to pick). ARM runner on the same Mac is planned
+# but not set up yet, so this stays Intel only for now.
+.player_macos15intel_setup:
+  tags:
+    - macos-15-intel
   before_script:
     - brew update
     - brew install pkg-config cmake libusb
@@ -188,6 +214,14 @@ build:macos:
     - .rules_dev_macos
   artifacts:
     name: "usbsid-macos-arm64-${CI_COMMIT_REF_SLUG}-${CI_PIPELINE_IID}"
+
+build:macos15-intel:
+  extends:
+    - .player_dev_unix
+    - .player_macos15intel_setup
+    - .rules_dev_macos15intel
+  artifacts:
+    name: "usbsid-macos-x86_64-${CI_COMMIT_REF_SLUG}-${CI_PIPELINE_IID}"
 
 build:windows:
   extends:
@@ -330,6 +364,14 @@ release:macos:
   variables:
     ASSET: "macos-arm64"
 
+release:macos15-intel:
+  extends:
+    - .player_release_unix
+    - .player_macos15intel_setup
+    - .rules_release_macos15intel
+  variables:
+    ASSET: "macos-x86_64"
+
 release:windows:
   extends:
     - .player_windows_setup
@@ -436,7 +478,8 @@ release:web:
 # PACKAGE AND RELEASE (release.yml "Create release files")
 # ============================================================================
 
-# Everything above in one place. macOS only exists on gitlab.com.
+# Everything above in one place. Apple Silicon macOS only exists on
+# gitlab.com, Intel macOS only on the private instance.
 package:release:
   stage: package
   image: alpine:latest
@@ -454,6 +497,8 @@ package:release:
   needs:
     - job: release:linux
     - job: release:macos
+      optional: true
+    - job: release:macos15-intel
       optional: true
     - job: release:windows
     - job: release:web

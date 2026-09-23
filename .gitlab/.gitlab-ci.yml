@@ -12,6 +12,12 @@
 
 variables:
   BUILD_TYPE: "Release"
+  # Parallel compile jobs (-j) for the Linux jobs. The Linux runner host has
+  # 6 cores and runs up to 4 jobs at once, and nproc inside a pod reports all
+  # host cores, so it is set here rather than derived. Override it with an
+  # instance or project CI/CD variable to tune without a code change. macOS
+  # and Windows jobs keep using all cores of their own machines.
+  BUILD_THREADS: "2"
   # The driver is developed alongside this repository, so like on GitHub it is
   # checked out into lib/driver instead of being pinned as a submodule.
   # It is cloned from the instance running the pipeline: .driver_clone picks
@@ -227,6 +233,8 @@ default:
   script:
     - |
       JOBS=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
+      # BUILD_THREADS caps the shared Linux runner, macOS keeps all its cores
+      if [ "$(uname -s)" = "Linux" ]; then JOBS="${BUILD_THREADS}"; fi
       cmake -S . -B build -DDESKTOP=1 -DEMBEDDED=0 -DWEB=0 \
         -DBUILD_TESTS=1 -DPROFILE=0 -DSTRICT=1 -DREQUIRE_AUDIO=1 \
         -DEXECUTABLE=usbsid
@@ -310,7 +318,7 @@ web:
   script:
     # build-web/ is the same directory ./build.sh uses
     - emcmake cmake -S . -B build-web -DWEB=1 -DREQUIRE_AUDIO=1
-    - cmake --build build-web -j "$(getconf _NPROCESSORS_ONLN)"
+    - cmake --build build-web -j "${BUILD_THREADS}"
     # The WEB build links with an explicit EXPORTED_FUNCTIONS list, so a
     # function can compile and still not be reachable from JavaScript, which
     # looks to a page exactly like a browser that cannot do audio. Loading it
@@ -370,6 +378,8 @@ web:
     - |
       set -eu
       JOBS=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
+      # BUILD_THREADS caps the shared Linux runner, macOS keeps all its cores
+      if [ "$(uname -s)" = "Linux" ]; then JOBS="${BUILD_THREADS}"; fi
       cmake -S . -B build \
         -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
         -DDESKTOP=1 -DEMBEDDED=0 -DWEB=0 \
@@ -478,7 +488,7 @@ release:web:
     - !reference [.driver_clone, script]
   script:
     - emcmake cmake -S . -B build-web -DWEB=1 -DREQUIRE_AUDIO=1
-    - cmake --build build-web -j "$(getconf _NPROCESSORS_ONLN)"
+    - cmake --build build-web -j "${BUILD_THREADS}"
     - |
       node --input-type=module -e "
         import Module from './web/usbsid.mjs';
@@ -498,7 +508,7 @@ release:web:
     # this is a native build in the same checkout and the two toolchains must
     # not share a cache.
     - cmake -S . -B build -DDESKTOP=1 -DWEB=0 -DBUILD_TESTS=1 -DSTRICT=1 -DREQUIRE_AUDIO=1
-    - cmake --build build --target usbsid-test -j "$(getconf _NPROCESSORS_ONLN)"
+    - cmake --build build --target usbsid-test -j "${BUILD_THREADS}"
     - ./build/usbsid-test
     # The build copies usbsid.js, .mjs and .wasm into web/, so the directory is
     # already the deliverable. web/README.md is the bundle's own.

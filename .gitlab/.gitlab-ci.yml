@@ -3,6 +3,8 @@
 # Mirrors the GitHub Actions workflows in .github/workflows/:
 #   build.yml   -> build:*, web            builds and tests on every branch push
 #   release.yml -> release:*, package:release, create:release   v* tags
+#   (GitLab only) d* tags run the same release builds as a snapshot prerelease:
+#                  create:snapshot, cleanup:old-snapshots
 #
 # Supports two GitLab instances:
 #   - gitlab.loudai.nl (private): Linux, Windows and macOS 15 Intel runners
@@ -20,18 +22,33 @@ variables:
   USBSID_DRIVER_REPO_PUBLIC: "https://gitlab.com/usbsid-pico/USBSID-Pico-driver.git"
   # Instance with the Intel macOS runner (no Apple Silicon runner there)
   PRIVATE_HOST: "gitlab.loudai.nl"
+  # Pipelines on any instance other than PRIVATE_HOST (gitlab.com) are off.
+  # The jobs stay in this file; set this to "true" here, or as a CI/CD variable
+  # in the gitlab.com project, to run them again.
+  PUBLIC_PIPELINES_ENABLED: "false"
   # Windows runner tag. The default is the gitlab.com SaaS runner, set this
   # in the project CI/CD variables on an instance with its own Windows runner.
   WINDOWS_RUNNER_TAG: "saas-windows-medium-amd64"
+  # Linux runner tag, the default for every job without its own tags (see
+  # default: below). Without it an untagged job can land on the macOS shell
+  # runner, which has no apt-get and ignores image:. "linux" is a tag of the
+  # private instance's Linux runner. gitlab.com SaaS runners do not carry it, so
+  # set this to "saas-linux-small-amd64" in the gitlab.com project's CI/CD
+  # variables together with PUBLIC_PIPELINES_ENABLED.
+  LINUX_RUNNER_TAG: "linux"
   EMSDK_IMAGE: "emscripten/emsdk:4.0.12"
   DEBIAN_FRONTEND: noninteractive
 
 # Pipeline runs on:
 # - branch pushes touching the player sources (build.yml)
 # - v* tags: release (release.yml)
+# - d* tags: snapshot prerelease, same builds as a release
 # - manual web trigger, or FORCE_RUN=true (workflow_dispatch)
 workflow:
   rules:
+    # Nothing runs outside PRIVATE_HOST unless PUBLIC_PIPELINES_ENABLED is "true"
+    - if: $CI_SERVER_HOST != $PRIVATE_HOST && $PUBLIC_PIPELINES_ENABLED != "true"
+      when: never
     - if: $CI_COMMIT_BRANCH && $CI_PIPELINE_SOURCE == "push"
       changes:
         - CMakeLists.txt
@@ -42,12 +59,16 @@ workflow:
         # The browser player is JavaScript around the same emulation, and the
         # web job builds and loads it.
         - web/**/*
-        - .gitlab-ci.yml
+        - .gitlab/.gitlab-ci.yml
       variables:
         PIPELINE_TYPE: "dev"
     - if: $CI_COMMIT_TAG =~ /^v.+$/
       variables:
         PIPELINE_TYPE: "release"
+    # Date tags (d20250101, etc.), same pattern as the firmware
+    - if: $CI_COMMIT_TAG =~ /^d[0-9a-z]+$/
+      variables:
+        PIPELINE_TYPE: "snapshot"
     - if: $CI_PIPELINE_SOURCE == "web" || $FORCE_RUN == "true"
       variables:
         PIPELINE_TYPE: "manual"
@@ -59,6 +80,9 @@ stages:
 
 default:
   interruptible: true
+  # Jobs with their own tags (Windows, macOS) replace this
+  tags:
+    - $LINUX_RUNNER_TAG
 
 # ============================================================================
 # RULE SETS
@@ -75,7 +99,7 @@ default:
         - lib/**/*
         - tests/**/*
         - web/**/*
-        - .gitlab-ci.yml
+        - .gitlab/.gitlab-ci.yml
 
 # macOS runners only exist on gitlab.com
 .rules_dev_macos:
@@ -89,15 +113,15 @@ default:
         - lib/**/*
         - tests/**/*
         - web/**/*
-        - .gitlab-ci.yml
+        - .gitlab/.gitlab-ci.yml
 
 .rules_release:
   rules:
-    - if: $PIPELINE_TYPE == "release"
+    - if: $PIPELINE_TYPE == "release" || $PIPELINE_TYPE == "snapshot"
 
 .rules_release_macos:
   rules:
-    - if: $PIPELINE_TYPE == "release" && $CI_SERVER_HOST != $PRIVATE_HOST
+    - if: ($PIPELINE_TYPE == "release" || $PIPELINE_TYPE == "snapshot") && $CI_SERVER_HOST != $PRIVATE_HOST
 
 # macOS 15 Intel runner only exists on the private instance
 .rules_dev_macos15intel:
@@ -111,11 +135,11 @@ default:
         - lib/**/*
         - tests/**/*
         - web/**/*
-        - .gitlab-ci.yml
+        - .gitlab/.gitlab-ci.yml
 
 .rules_release_macos15intel:
   rules:
-    - if: $PIPELINE_TYPE == "release" && $CI_SERVER_HOST == $PRIVATE_HOST
+    - if: ($PIPELINE_TYPE == "release" || $PIPELINE_TYPE == "snapshot") && $CI_SERVER_HOST == $PRIVATE_HOST
 
 # ============================================================================
 # SHARED PIECES
@@ -525,7 +549,40 @@ package:release:
     - job: release:windows
     - job: release:web
   rules:
-    - if: $PIPELINE_TYPE == "release"
+    - if: $PIPELINE_TYPE == "release" || $PIPELINE_TYPE == "snapshot"
+
+# Delete snapshot prereleases older than 30 days, but keep the newest 10.
+# Needs a GitLab API token in the GITLAB_API_TOKEN CI/CD variable, skipped
+# without one. Only releases are deleted, the d* tags stay.
+cleanup:old-snapshots:
+  stage: package
+  image: alpine:latest
+  variables:
+    GIT_STRATEGY: none
+  before_script:
+    - apk add --no-cache curl jq
+  script:
+    - |
+      if [ -z "${GITLAB_API_TOKEN:-}" ]; then
+        echo "GITLAB_API_TOKEN not set, skipping cleanup"
+        exit 0
+      fi
+      API_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/releases"
+      releases=$(curl -fsS --header "PRIVATE-TOKEN: ${GITLAB_API_TOKEN}" "${API_URL}?per_page=100")
+      # Newest first, skip the first 10, then keep everything younger than 30 days
+      echo "$releases" | jq -r --argjson now "$(date +%s)" '
+        [ .[] | select(.tag_name | test("^d[0-9a-z]+$")) ]
+        | sort_by(.created_at) | reverse
+        | to_entries[] | select(.key >= 10)
+        | select(($now - (.value.created_at | sub("\\.[0-9]+"; "") | sub("\\+00:00$"; "Z") | fromdateiso8601)) > 30 * 86400)
+        | .value.tag_name' | while read -r tag; do
+        echo "Deleting old snapshot prerelease: ${tag}"
+        curl -fsS --request DELETE --header "PRIVATE-TOKEN: ${GITLAB_API_TOKEN}" "${API_URL}/${tag}" > /dev/null
+      done
+      echo "Cleanup complete"
+  rules:
+    - if: $PIPELINE_TYPE == "snapshot"
+  allow_failure: true
 
 # Commits since the previous tag, or the whole history the first time round
 release:notes:
@@ -576,3 +633,31 @@ create:release:
     - job: release:notes
   rules:
     - if: $PIPELINE_TYPE == "release"
+
+# Snapshot prerelease, d* tags only
+create:snapshot:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  script:
+    - echo "Creating snapshot prerelease for ${CI_COMMIT_TAG}"
+  release:
+    tag_name: ${CI_COMMIT_TAG}
+    name: "${CI_COMMIT_TAG} snapshot"
+    description: |
+      ## Snapshot build ${CI_COMMIT_TAG}
+
+      Automated snapshot build for testing purposes.
+      This is a prerelease and may contain bugs.
+    assets:
+      links:
+        - name: "Release files, browse"
+          url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/browse/release?job=package:release"
+          link_type: "package"
+        - name: "Release files, download all"
+          url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/download?job=package:release"
+          link_type: "package"
+  needs:
+    - job: package:release
+      artifacts: false
+  rules:
+    - if: $PIPELINE_TYPE == "snapshot"

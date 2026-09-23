@@ -12,8 +12,12 @@ variables:
   BUILD_TYPE: "Release"
   # The driver is developed alongside this repository, so like on GitHub it is
   # checked out into lib/driver instead of being pinned as a submodule.
-  # Override in the CI/CD variables to use the GitLab mirror.
-  USBSID_DRIVER_REPO: "https://github.com/LouDnl/USBSID-Pico-driver.git"
+  # It is cloned from the instance running the pipeline: .driver_clone picks
+  # USBSID_DRIVER_REPO_PRIVATE on PRIVATE_HOST and USBSID_DRIVER_REPO_PUBLIC
+  # everywhere else. A non-empty USBSID_DRIVER_REPO overrides both.
+  USBSID_DRIVER_REPO: ""
+  USBSID_DRIVER_REPO_PRIVATE: "https://gitlab.loudai.nl/usbsid/USBSID-Pico-driver.git"
+  USBSID_DRIVER_REPO_PUBLIC: "https://gitlab.com/usbsid-pico/USBSID-Pico-driver.git"
   # Instance with the Intel macOS runner (no Apple Silicon runner there)
   PRIVATE_HOST: "gitlab.loudai.nl"
   # Windows runner tag. The default is the gitlab.com SaaS runner, set this
@@ -119,8 +123,17 @@ default:
 
 .driver_clone:
   script:
-    - rm -rf lib/driver
-    - git clone -q --depth 1 "$USBSID_DRIVER_REPO" lib/driver
+    - |
+      if [ -z "$USBSID_DRIVER_REPO" ]; then
+        if [ "$CI_SERVER_HOST" = "$PRIVATE_HOST" ]; then
+          USBSID_DRIVER_REPO="$USBSID_DRIVER_REPO_PRIVATE"
+        else
+          USBSID_DRIVER_REPO="$USBSID_DRIVER_REPO_PUBLIC"
+        fi
+      fi
+      echo "USBSID-Pico-driver source: ${USBSID_DRIVER_REPO}"
+      rm -rf lib/driver
+      git clone -q --depth 1 "$USBSID_DRIVER_REPO" lib/driver
 
 # Same dependency set as the GitHub jobs. Native jobs need libusb and libudev.
 .player_linux_setup:
@@ -162,7 +175,16 @@ default:
     - choco install msys2 -y --no-progress
     - C:\tools\msys64\usr\bin\bash -lc "pacman -Syu --noconfirm"
     - C:\tools\msys64\usr\bin\bash -lc "pacman -S --noconfirm --needed mingw-w64-x86_64-gcc mingw-w64-x86_64-libusb mingw-w64-x86_64-cmake mingw-w64-x86_64-pkg-config mingw-w64-x86_64-ninja zip"
+    # Same selection as .driver_clone, which is bash only
     - |
+      if (-not $env:USBSID_DRIVER_REPO) {
+        if ($env:CI_SERVER_HOST -eq $env:PRIVATE_HOST) {
+          $env:USBSID_DRIVER_REPO = $env:USBSID_DRIVER_REPO_PRIVATE
+        } else {
+          $env:USBSID_DRIVER_REPO = $env:USBSID_DRIVER_REPO_PUBLIC
+        }
+      }
+      Write-Output "USBSID-Pico-driver source: $env:USBSID_DRIVER_REPO"
       if (Test-Path lib/driver) { Remove-Item -Recurse -Force lib/driver }
       git clone -q --depth 1 $env:USBSID_DRIVER_REPO lib/driver
 

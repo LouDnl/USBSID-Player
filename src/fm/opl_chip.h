@@ -22,6 +22,10 @@
  * backend gets FM without knowing this file exists: --output=audio,
  * --output=wav and the browser alike.
  *
+ * A command line build configured with FM_YMFM=1 (`./build.sh cli-ymfm`)
+ * swaps the engine for ymfm's YM3812 (lib/ymfm), resampled to the output rate
+ * here. Both engines sit behind this same class, nothing above it changes.
+ *
  * Not built for the embedded target. The RP2350 has no reSIDfp and no software
  * audio: there, an FM write goes to a chip on the board.
  *
@@ -51,9 +55,13 @@
 #include <cstdint>
 #include <vector>
 
+#if defined(US_FM_YMFM) && US_FM_YMFM
+#include "ymfm_opl.h"
+#else
 extern "C" {
 #include "opl3.h"
 }
+#endif
 
 namespace usbsid {
 
@@ -144,7 +152,16 @@ class OplChip
     void reset(void);
 
   private:
+#if defined(US_FM_YMFM) && US_FM_YMFM
+    ymfm::ymfm_interface intf_;
+    ymfm::ym3812 chip_{intf_};
+    double native_step_ = 1.0;   /**< native samples consumed per output sample */
+    double native_pos_ = 0.0;    /**< position between prev_ and next_, 0..1 */
+    int32_t prev_ = 0;           /**< native sample the position is after */
+    int32_t next_ = 0;           /**< native sample the position is before */
+#else
     opl3_chip chip_ = {};
+#endif
     bool ready_ = false;
     unsigned sample_rate_ = 0;
     uint8_t address_ = 0;      /**< the register $df40 last selected */
@@ -174,7 +191,17 @@ class OplChip
      * once and it should survive a tune change same as the SID mix's own
      * gain does. */
     float gain_ = 0.5f;
-    /** Nuked renders stereo pairs; this is where they land before the mix. */
+    /** Reset the engine for sample_rate_. */
+    void chip_reset_(void);
+    /** Write one register on the engine. */
+    void chip_write_(uint8_t reg, uint8_t value);
+#if defined(US_FM_YMFM) && US_FM_YMFM
+    /** Render one output-rate mono sample, resampled from the native rate. */
+    int32_t chip_sample_(void);
+#endif
+
+    /** Nuked renders stereo pairs; this is where they land before the mix.
+     * Unused by the ymfm engine, which renders mono. */
     std::vector<int16_t> scratch_;
 };
 

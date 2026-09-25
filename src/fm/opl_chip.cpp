@@ -36,6 +36,12 @@ namespace {
  * whatever the longest mix happens to be. */
 constexpr size_t kBlock = 1024;
 
+#if defined(US_FM_YMFM) && US_FM_YMFM
+/* The clock an OPL2 sits on in a C64 cartridge is the NTSC colour burst
+ * crystal, which gives the familiar 49716 Hz native output rate. */
+constexpr uint32_t kOplClock = 3579545;
+#endif
+
 /* FM-YAM digi mode - see the class comment in opl_chip.h. */
 constexpr uint8_t kFmTestReg   = 0x01; /**< arms/disarms digi mode */
 constexpr uint8_t kDigiArmValue = 0x04; /**< the value that arms it */
@@ -49,11 +55,52 @@ constexpr uint8_t kFmDigiAddrB = 0xa1;  /**< channel B's PCM port */
 constexpr int32_t kDigiScale = 32;
 } /* namespace */
 
+void OplChip::chip_reset_(void)
+{
+#if defined(US_FM_YMFM) && US_FM_YMFM
+  chip_.reset();
+  native_step_ = static_cast<double>(chip_.sample_rate(kOplClock)) /
+                 static_cast<double>(sample_rate_);
+  native_pos_ = 0.0;
+  prev_ = next_ = 0;
+#else
+  OPL3_Reset(&chip_, static_cast<uint32_t>(sample_rate_));
+#endif
+}
+
+void OplChip::chip_write_(uint8_t reg, uint8_t value)
+{
+#if defined(US_FM_YMFM) && US_FM_YMFM
+  chip_.write_address(reg);
+  chip_.write_data(value);
+#else
+  OPL3_WriteRegBuffered(&chip_, reg, value);
+#endif
+}
+
+#if defined(US_FM_YMFM) && US_FM_YMFM
+int32_t OplChip::chip_sample_(void)
+{
+  /* Linear interpolation between the two native samples the output position
+   * falls between, pulling native samples in as the position passes them. */
+  native_pos_ += native_step_;
+  while (native_pos_ >= 1.0) {
+    native_pos_ -= 1.0;
+    ymfm::ym3812::output_data out;
+    chip_.generate(&out, 1);
+    prev_ = next_;
+    next_ = ymfm::clamp(out.data[0], -32768, 32767);
+  }
+  return prev_ + static_cast<int32_t>(
+    std::lround(static_cast<double>(next_ - prev_) * native_pos_));
+}
+#endif
+
 void OplChip::configure(unsigned sample_rate)
 {
   if (sample_rate == 0) return;
-  OPL3_Reset(&chip_, static_cast<uint32_t>(sample_rate));
   sample_rate_ = sample_rate;
+  chip_reset_();
   address_ = 0;
   writes_ = 0;
   clipped_ = 0;
@@ -80,7 +127,7 @@ void OplChip::bus_write(uint8_t reg, uint8_t value)
     return;
   }
 
-  OPL3_WriteRegBuffered(&chip_, address_, value);
+  chip_write_(address_, value);
   writes_++;
 }
 
@@ -109,6 +156,15 @@ void OplChip::mix_into(int16_t * out, size_t count)
   size_t done = 0;
   while (done < count) {
     const size_t n = ((count - done) > kBlock) ? kBlock : (count - done);
+#if defined(US_FM_YMFM) && US_FM_YMFM
+    for (size_t i = 0; i < n; i++) {
+      const int32_t scaled = static_cast<int32_t>(std::lround(chip_sample_() * gain_));
+      int32_t v = static_cast<int32_t>(out[done + i]) + scaled;
+      if (v > 32767) { v = 32767; clipped_++; }
+      else if (v < -32768) { v = -32768; clipped_++; }
+      out[done + i] = static_cast<int16_t>(v);
+    }
+#else
     OPL3_GenerateStream(&chip_, scratch_.data(), static_cast<uint32_t>(n));
     for (size_t i = 0; i < n; i++) {
       /* Mono by summing the pair and halving it, which is the same mixdown the
@@ -121,6 +177,7 @@ void OplChip::mix_into(int16_t * out, size_t count)
       else if (v < -32768) { v = -32768; clipped_++; }
       out[done + i] = static_cast<int16_t>(v);
     }
+#endif
     done += n;
   }
 }
@@ -131,7 +188,7 @@ void OplChip::reset(void)
   /* A full re-reset rather than keying everything off by hand: it is the same
    * few hundred microseconds of table setup and it cannot leave a register
    * behind, which silencing by hand can. */
-  OPL3_Reset(&chip_, static_cast<uint32_t>(sample_rate_));
+  chip_reset_();
   address_ = 0;
   writes_ = 0;
   clipped_ = 0;

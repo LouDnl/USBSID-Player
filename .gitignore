@@ -62,6 +62,12 @@
 # different depending on where it is played.
 !lib/nukedopl
 !lib/nukedopl/**
+# ymfm (BSD-3-Clause), the opt-in FM/OPL engine of for local build test, pinned
+# by lib/ymfm/PINNED_COMMIT. The .ipp template implementation is included by
+# ymfm_opl.cpp.
+!lib/ymfm
+!lib/ymfm/**
+!*.ipp
 # The un-ignore rules above are per extension, and these are the ones the
 # vendored trees use that nothing else does.
 !*.h.in

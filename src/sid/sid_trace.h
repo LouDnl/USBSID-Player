@@ -33,7 +33,9 @@
 
 #include <cstdio>
 
+#include "mos6581_8580.h"
 #include "sid_backend.h"
+#include "sidfile.h"
 #include "types.h"
 
 namespace usbsid {
@@ -50,10 +52,13 @@ class TraceSidBackend final : public SidBackend
   public:
     struct Event {
       uint64_t cycle;   /* running total, so two traces line up */
+      uint64_t play;    /* bus cycles since the tune started, for play time */
       uint16_t delta;   /* cycles since the previous event */
       addr_t reg;
+      addr_t addr;      /* C64 address, 0 when the source did not know it */
       data_t value;
       char kind;        /* 'w' write, 'r' read, 'f' flush, 'i' wait */
+      uint8_t chip;     /* 1 based, past kMaxSids for FM/OPL */
     };
 
     TraceSidBackend(Event * buffer, size_t capacity)
@@ -75,6 +80,17 @@ class TraceSidBackend final : public SidBackend
     void set_next(SidBackend * next) { next_ = next; }
     SidBackend * next(void) const { return next_; }
 
+    /**
+     * @brief Label events with the source's C64 address, chip and play time.
+     *
+     * Without a source, chip comes from the register block and play time
+     * from the summed deltas.
+     */
+    void set_source(const Mos6581_8580 * source) { source_ = source; }
+
+    /** @brief C64 clock in Hz, converts play cycles to time in dump(). */
+    void set_clock_hz(uint32_t hz) { clock_hz_ = (hz != 0) ? hz : 985248u; }
+
     void write(addr_t reg, data_t value, uint16_t cycles) override
     {
       cycle_ += cycles;
@@ -90,6 +106,15 @@ class TraceSidBackend final : public SidBackend
       const data_t v = (next_ != nullptr) ? next_->read(reg, cycles) : 0;
       record('r', reg, v, cycles);
       return v;
+    }
+    void note_read(addr_t reg, data_t value, uint16_t cycles) override
+    {
+      /* Positioned at the current cycle without consuming the delta: the next
+       * event still carries the whole gap, so the running total stays exact. */
+      const uint64_t base = cycle_;
+      cycle_ += cycles;
+      record('r', reg, value, cycles);
+      cycle_ = base;
     }
     void wait(uint16_t cycles) override
     {
@@ -112,27 +137,51 @@ class TraceSidBackend final : public SidBackend
     size_t dropped(void) const { return dropped_; }
     const Event & at(size_t i) const { return events_[i]; }
 
-    /** @brief One line per event, the format the old player logs in. */
+    /**
+     * @brief One line per event, laid out like -srw plus cycle and play time.
+     *
+     * [C] is the delta sent to the backend, @ the running cycle total,
+     * [T] the play time as MM:SS.mmm.
+     */
     void dump(FILE * out) const
     {
       for (size_t i = 0; i < count_; i++) {
         const Event & e = events_[i];
+        const unsigned long long ms = static_cast<unsigned long long>(
+          e.play * 1000u / clock_hz_);
+        char stamp[40];
+        snprintf(stamp, sizeof(stamp), "@%llu [T]%02llu:%02llu.%03llu",
+                 static_cast<unsigned long long>(e.cycle), ms / 60000u,
+                 (ms / 1000u) % 60u, ms % 1000u);
+
+        char label[16];
+        if (e.chip >= 1 && e.chip <= kMaxSids) {
+          snprintf(label, sizeof(label), "SID%u", e.chip);
+        } else {
+          snprintf(label, sizeof(label), "FM");
+        }
+        char addr[8];
+        if (e.addr != 0) {
+          snprintf(addr, sizeof(addr), "$%04x", e.addr);
+        } else {
+          snprintf(addr, sizeof(addr), "$----");
+        }
+
         switch (e.kind) {
           case 'w':
-            fprintf(out, "[W]$%03x:%02x [C]%5u @%llu\n", e.reg, e.value,
-                    e.delta, static_cast<unsigned long long>(e.cycle));
+            fprintf(out, "[W %s] %s $%03x:%02x [C]%5u %s\n", label, addr,
+                    e.reg, e.value, e.delta, stamp);
             break;
           case 'r':
-            fprintf(out, "[R]$%03x    [C]%5u @%llu\n", e.reg, e.delta,
-                    static_cast<unsigned long long>(e.cycle));
+            fprintf(out, "[R %s] %s $%03x:%02x [C]%5u %s\n", label, addr,
+                    e.reg, e.value, e.delta, stamp);
             break;
           case 'i':
-            fprintf(out, "[WAIT]     [C]%5u @%llu\n", e.delta,
-                    static_cast<unsigned long long>(e.cycle));
+            fprintf(out, "[WAIT]                       [C]%5u %s\n", e.delta,
+                    stamp);
             break;
           default:
-            fprintf(out, "[FLUSH]              @%llu\n",
-                    static_cast<unsigned long long>(e.cycle));
+            fprintf(out, "[FLUSH]                             %s\n", stamp);
             break;
         }
       }
@@ -142,11 +191,25 @@ class TraceSidBackend final : public SidBackend
     void record(char kind, addr_t reg, data_t value, uint16_t delta)
     {
       if (count_ >= capacity_) { ++dropped_; return; }
-      events_[count_++] = Event{ cycle_, delta, reg, value, kind };
+      Event & e = events_[count_++];
+      e.cycle = cycle_;
+      e.delta = delta;
+      e.reg = reg;
+      e.value = value;
+      e.kind = kind;
+      e.play = (source_ != nullptr) ? source_->play_cycles() : cycle_;
+      e.addr = 0;
+      e.chip = static_cast<uint8_t>((reg >> 5) + 1);
+      if (source_ != nullptr && source_->io_chip() != 0) {
+        e.addr = source_->io_addr();
+        e.chip = source_->io_chip();
+      }
     }
 
     Event * events_;
     SidBackend * next_ = nullptr;
+    const Mos6581_8580 * source_ = nullptr;
+    uint32_t clock_hz_ = 985248;
     size_t capacity_;
     size_t count_ = 0;
     size_t dropped_ = 0;

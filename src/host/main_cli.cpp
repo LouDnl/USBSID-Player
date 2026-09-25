@@ -50,6 +50,12 @@
 #include "wav_write.h"
 #include "songlengths.h"
 
+/* Set by CMakeLists.txt from .version; a compile outside CMake still builds */
+#ifndef US_PLAYER_VERSION
+#define US_PLAYER_VERSION "unknown"
+#endif
+#define US_PLAYER_BANNER "USBSID-Player v" US_PLAYER_VERSION "\n"
+
 using namespace usbsid;
 
 namespace {
@@ -250,6 +256,7 @@ bool parse_board_order(const char * spec, std::vector<std::string> & out)
 void usage(const char * argv0)
 {
   printf(
+    US_PLAYER_BANNER
     "usage: %s [options] <file.sid|file.prg|file.p00>\n"
     "\n"
     "  a SID file plays; a program is loaded where it says and started the\n"
@@ -749,6 +756,7 @@ int main(int argc, char ** argv)
     return 1;
   }
 
+  fputs(US_PLAYER_BANNER, stdout);
   printf("%s\n", path);
   if (is_sid) {
     print_tune(info, soft_stereo);

@@ -32,6 +32,21 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(PROJECT_NAME usbsid)
 set(EXECUTABLE ${PROJECT_NAME} CACHE STRING "EXECUTABLE")
 
+### The player's version, one line in .version beside this file. Listed as a
+### configure dependency: editing .version re-runs CMake on the next build,
+### instead of leaving the old number in a build directory configured earlier.
+set(US_VERSION_FILE ${CMAKE_CURRENT_LIST_DIR}/.version)
+if(EXISTS ${US_VERSION_FILE})
+  file(STRINGS ${US_VERSION_FILE} US_PLAYER_VERSION LIMIT_COUNT 1)
+  string(STRIP "${US_PLAYER_VERSION}" US_PLAYER_VERSION)
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${US_VERSION_FILE})
+endif()
+if("${US_PLAYER_VERSION}" STREQUAL "")
+  message(WARNING "No version in ${US_VERSION_FILE}, the player reports 'unknown'")
+  set(US_PLAYER_VERSION "unknown")
+endif()
+message(STATUS "USBSID-Player version: ${US_PLAYER_VERSION}")
+
 ### Target selection, mutually exclusive
 set(DESKTOP 1 CACHE STRING "Build the desktop command line player")
 set(EMBEDDED 0 CACHE STRING "Build for the RP2350 firmware")
@@ -505,6 +520,7 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
     ${US_FM_INCLUDE_DIRS})
   target_compile_definitions(${EXECUTABLE} PRIVATE US_SOFTSID=${US_HAVE_RESIDFP})
   target_compile_definitions(${EXECUTABLE} PRIVATE US_HAVE_NETDEVICE=${US_HAVE_NETDEVICE})
+  target_compile_definitions(${EXECUTABLE} PRIVATE US_PLAYER_VERSION="${US_PLAYER_VERSION}")
   ### std::thread (sid_netdevice.cpp's sender thread) needs this on every
   ### platform, reSIDfp or not - it used to ride in on reSIDfp's own Linux
   ### only need for it, which left it unlinked on a build with neither.

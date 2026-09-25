@@ -62,6 +62,20 @@ class SidBackend
     /** @brief One register read. Backends without real hardware may guess. */
     virtual data_t read(addr_t reg, uint16_t cycles) { (void)reg; (void)cycles; return 0; }
 
+    /**
+     * @brief A read the machine answered itself, reported for recording only.
+     *
+     * Not a bus access: the cycle base is untouched and nothing is sent on.
+     *
+     * @param reg    register the access maps to
+     * @param value  what the tune read
+     * @param cycles cycles since the previous event
+     */
+    virtual void note_read(addr_t reg, data_t value, uint16_t cycles)
+    {
+      (void)reg; (void)value; (void)cycles;
+    }
+
     /** @brief More than $ffff cycles passed with nothing to write. */
     virtual void wait(uint16_t cycles) { (void)cycles; }
 

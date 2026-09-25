@@ -31,6 +31,13 @@ usage: usbsid [options] <file.sid|file.prg|file.p00>
   sound:
       --output M    usbsid (default), audio, wav, or nsd. usbsid
                     falls back to audio when no board is found
+  -lb, --list-boards  list every attached board's serial number and exit
+  -b, --boards SPEC  open these boards (comma separated serial numbers
+                    from --list-boards, board 1 first) instead of the
+                    one the driver picks; the tune's SIDs are spread
+                    across every opened board's SIDs, and FM/OPL goes to
+                    the first board with an FM/OPL configured (not with
+                    -f/-fa/--select-sids, see --select-sids fm)
       --wav FILE    write a WAV instead of playing, implies --output=wav
       --net-host H  Network SID Device server to connect to for
                     --output=nsd (default 127.0.0.1)
@@ -41,9 +48,12 @@ usage: usbsid [options] <file.sid|file.prg|file.p00>
       --quality Q   fast (linear) or good (sinc, default)
       --stereo      pan multi-SID tunes per the v5 file's own hint
                     (--output=audio/wav only; off by default, one channel)
-  -T, --trace FILE  write every SID register event to FILE. Records what
-                    is played, so it works with a board and with --wav;
-                    add -n for a silent run that only records
+  -T, --trace FILE  write every SID register event to FILE, laid out like
+                    -srw (chip, C64 address, register:value, [C] cycle
+                    delta) plus the running cycle total and the play
+                    time MM:SS.mmm. Records what is played, so it works
+                    with a board and with --wav; add -n for a silent
+                    run that only records
       --mute SPEC   silence voices. SPEC is a comma separated list of
                     CHIP:VOICE or CHIP for all three, chips and voices
                     counting from 1, for example 1:3 or 2 or 1:1,1:2
@@ -56,14 +66,24 @@ usage: usbsid [options] <file.sid|file.prg|file.p00>
   -rr               read the SID back from the chip, not the mirror
   -f                force everything into socket two
   -fa XX            force everything to physical base $XX (hex)
-      --select-sids SPEC  play only these of the tune's SIDs, on the
+  -ss, --select-sids SPEC  play only these of the tune's SIDs, on the
                     board's sockets in the order given. SPEC is a comma
                     separated list of tune SID numbers counting from 1,
-                    for example 3,4,5 puts the tune's 3rd SID on the
-                    board's first socket, its 4th on the second, and its
-                    5th on the third. At most 4 entries are used.
-                    (--output=usbsid only; default: the tune's first 4
-                    SIDs on the board's first 4 sockets, in order)
+                    each optionally followed by :SLOT to name the exact
+                    socket it lands on, also counting from 1. For
+                    example 3,4,5 puts the tune's 3rd SID on the board's
+                    first socket, its 4th on the second, and its 5th on
+                    the third; 3:1,5:4 instead puts the 3rd SID on the
+                    first socket and the 5th on the fourth, leaving the
+                    second and third empty. A bare entry claims the
+                    lowest socket no :SLOT entry already claimed. At
+                    most 4 sockets are used on one board, or every
+                    SID of the boards --boards opened. fm or fm:SLOT
+                    puts the tune's FM/OPL on that socket, only when
+                    it is the board's configured FM/OPL; with SPEC
+                    given, an FM/OPL not named this way is not played
+                    (--output=usbsid only; default: the tune's first N
+                    SIDs on the first N sockets, in order)
       --overhead N  cycles one hardware access costs (default 1)
       --songlengths F  HVSC Songlengths database, to stop when the song ends.
                     Found by itself in $SONGLENGTHS, ~/Songlengths.md5,
@@ -145,16 +165,23 @@ stop_sidplayer();
 See [docs/API_EMBEDDED.md](docs/API_EMBEDDED.md) for the full API.
 
 ## Run the test suite
+The suite is part of the command line build (`BUILD_TESTS` defaults to 1), in the same build directory:
 ```bash
-./build.sh test
+cmake -S . -B build_cli \
+  -DDESKTOP=1 -DEMBEDDED=0 -DWEB=0 -DBUILD_TESTS=1 && \
+	cmake --build build_cli --target usbsid-test --parallel $(nproc) && \
+  ./build_cli/usbsid-test
 ```
+Every component also has its own `test_<name>` executable registered with CTest, run them all with `ctest --test-dir build_cli` after a full `cmake --build build_cli`.
 
-## Other build.sh targets
+## Build the command line player with ymfm
+Uses [ymfm](https://github.com/aaronsgiles/ymfm) instead of Nuked-OPL3-fast as the FM/OPL engine. Command line player only, CMake refuses `FM_YMFM=1` together with `WEB=1` or `EMBEDDED=1`. `EXECUTABLE` gives the binary its own name and keeps it from replacing the regular `usbsid`:
 ```bash
-./build.sh all      # cli + web
-./build.sh install  # copy web/ into the config tool's usplayer/
-./build.sh clean    # remove build/ and build-web/
-./build.sh          # full target list, including the site/deepsid deploy targets
+cmake -S . -B build_ymfm \
+  -DDESKTOP=1 -DEMBEDDED=0 -DWEB=0 -DREQUIRE_AUDIO=1 \
+  -DFM_YMFM=1 -DEXECUTABLE=usbsid-ymfm && \
+	cmake --build build_ymfm --parallel $(nproc) && \
+  cp build_ymfm/usbsid-ymfm .
 ```
 
 
@@ -174,6 +201,7 @@ CLI player:
 - [ResidFp](https://github.com/libsidplayfp/libresidfp)
 - [miniaudio](https://github.com/mackron/miniaudio)
 - [Nuked-OPL3-fast](https://github.com/tgies/Nuked-OPL3-fast), a bit-exact perf fork of [Nuked-OPL3](https://github.com/nukeykt/Nuked-OPL3)
+- [ymfm](https://github.com/aaronsgiles/ymfm), optional FM/OPL engine for the `cli-ymfm` build (CLI only)
 
 
 # Disclaimer

@@ -37,6 +37,9 @@ constexpr uint32_t kMaxDelta = 0xffff;
 /* The FM/OPL addresses live in the second expansion IO page */
 constexpr addr_t kFmOplAddrA = 0xdf40;
 constexpr addr_t kFmOplAddrB = 0xdf50;
+/* The cartridge decodes its ports, status read included, in this window */
+constexpr addr_t kFmOplWindowFirst = 0xdf40;
+constexpr addr_t kFmOplWindowLast  = 0xdf7f;
 
 /* Where an unclaimed FM/OPL write is parked: one 32 byte block past the
  * last real chip (kMaxSids * 0x20 = 0x1e0), inside regs_[]'s own 0x200. */
@@ -81,23 +84,44 @@ bool Mos6581_8580::custom_address(addr_t addr) const
          (page >= 0xd5c0 && page <= 0xd5df);
 }
 
+/**
+ * @brief Board register the tune's first chip is forced to start at.
+ *
+ * @returns forced_address with -fa, socket two's first register with -f,
+ *          0 otherwise
+ */
+addr_t Mos6581_8580::socket_offset(void) const
+{
+  if (config_.force_address) return config_.forced_address;
+  if (config_.force_socket_two) {
+    return (config_.sids_socket_one == 1) ? 0x20
+         : (config_.sids_socket_one == 2) ? 0x40
+                                          : 0x00;
+  }
+  return 0;
+}
+
+/**
+ * @brief Shift a tune-side chip register by the forced socket offset.
+ *
+ * @param logical  register in the tune's own chip layout, (chip - 1) * 0x20
+ * @returns the board register, or kSidNotMapped when the shift pushes it
+ *          past the last real chip
+ */
+addr_t Mos6581_8580::physical_reg(addr_t logical) const
+{
+  const addr_t reg = static_cast<addr_t>(logical + socket_offset());
+  return (reg < kFmOplParkBase) ? reg : kSidNotMapped;
+}
+
 addr_t Mos6581_8580::translate(addr_t addr, uint8_t & chip) const
 {
   chip = 0;
 
-  /* Where socket two starts, when writes are being forced into it */
-  data_t socket_offset = 0;
-  if (config_.force_address) {
-    socket_offset = config_.forced_address;
-  } else if (config_.force_socket_two) {
-    socket_offset = (config_.sids_socket_one == 1) ? 0x20
-                  : (config_.sids_socket_one == 2) ? 0x40
-                                                   : 0x00;
-  }
-
-  /* The FM/OPL address goes to whichever chip is configured for it */
+  /* The FM/OPL address goes to whichever chip is configured for it. Up to
+   * kMaxSids, not 4: with several boards open it is a logical slot. */
   if (addr == kFmOplAddrA || addr == kFmOplAddrB) {
-    if (config_.fmopl_sid >= 1 && config_.fmopl_sid <= 4) {
+    if (config_.fmopl_sid >= 1 && config_.fmopl_sid <= kMaxSids) {
       chip = static_cast<uint8_t>(config_.fmopl_sid);
       return static_cast<addr_t>(((chip - 1) * 0x20) + (addr & 0x1f));
     }
@@ -117,16 +141,15 @@ addr_t Mos6581_8580::translate(addr_t addr, uint8_t & chip) const
     if (base == 0) continue;
     if (addr >= base && addr < static_cast<addr_t>(base + 0x20)) {
       chip = static_cast<uint8_t>(n + 1);
-      const addr_t reg = static_cast<addr_t>((n * 0x20) + (addr & 0x1f));
-      /* only the first chip can be pushed into the other socket */
-      return (n == 0) ? static_cast<addr_t>(socket_offset + (addr & 0x1f)) : reg;
+      /* -f/-fa move every chip along, keeping the tune's chip order */
+      return physical_reg(static_cast<addr_t>((n * 0x20) + (addr & 0x1f)));
     }
   }
 
   /* anything else inside the SID page belongs to the first chip */
   if (custom_address(addr)) {
     chip = 1;
-    return static_cast<addr_t>(socket_offset + (addr & 0x1f));
+    return physical_reg(static_cast<addr_t>(addr & 0x1f));
   }
 
   return kSidNotMapped;
@@ -241,13 +264,17 @@ void Mos6581_8580::set_voice_mute(uint8_t chip, uint8_t voice, bool muted)
   static const addr_t kSustainRelease[3] = { 0x06, 0x0d, 0x14 };
   static const addr_t kControl[3]        = { 0x04, 0x0b, 0x12 };
   if (backend_ != nullptr) {
+    io_addr_ = 0;
+    io_chip_ = 0;
     const addr_t base = static_cast<addr_t>((chip - 1) * 0x20);
     const addr_t order[2] = {
       static_cast<addr_t>(base + kSustainRelease[voice - 1]),
       static_cast<addr_t>(base + kControl[voice - 1]),
     };
     for (const addr_t reg : order) {
-      backend_->write(reg, mask_for_output(reg, regs_[reg & (kRegsSize - 1)]),
+      const addr_t out = physical_reg(reg);
+      if (out == kSidNotMapped) continue;
+      backend_->write(out, mask_for_output(reg, regs_[reg & (kRegsSize - 1)]),
                       cycles_since_last_event());
       ++writes_;
     }
@@ -294,6 +321,8 @@ void Mos6581_8580::apply_chip_mute_pending(void)
   const uint16_t pending = chip_mute_pending_;
   chip_mute_pending_ = 0;
   if (backend_ == nullptr) return;
+  io_addr_ = 0;
+  io_chip_ = 0;
 
   /* Reset last_event_ to now: a muted chip's writes are dropped before
    * cycle accounting, so the first write after unmute would otherwise
@@ -309,9 +338,12 @@ void Mos6581_8580::apply_chip_mute_pending(void)
 
     const addr_t base = static_cast<addr_t>((chip - 1) * 0x20);
     const addr_t vol = static_cast<addr_t>(base + 0x18);
+    /* Skip a chip -f/-fa pushed past the last real one */
+    if (physical_reg(vol) == kSidNotMapped) continue;
 
     if ((config_.chip_mute & bit) != 0) {
-      backend_->write(vol, static_cast<data_t>(regs_[vol & (kRegsSize - 1)] & 0xf0),
+      backend_->write(physical_reg(vol),
+                      static_cast<data_t>(regs_[vol & (kRegsSize - 1)] & 0xf0),
                       cycles_since_last_event());
       ++writes_;
       continue;
@@ -319,11 +351,13 @@ void Mos6581_8580::apply_chip_mute_pending(void)
 
     for (addr_t r = 0; r <= 0x17; ++r) {
       const addr_t reg = static_cast<addr_t>(base + r);
-      backend_->write(reg, mask_for_output(reg, regs_[reg & (kRegsSize - 1)]),
+      backend_->write(physical_reg(reg),
+                      mask_for_output(reg, regs_[reg & (kRegsSize - 1)]),
                       cycles_since_last_event());
       ++writes_;
     }
-    backend_->write(vol, regs_[vol & (kRegsSize - 1)], cycles_since_last_event());
+    backend_->write(physical_reg(vol), regs_[vol & (kRegsSize - 1)],
+                    cycles_since_last_event());
     ++writes_;
   }
 }
@@ -340,13 +374,20 @@ void Mos6581_8580::io_write(addr_t addr, data_t value)
    * below, so a chip coming back is already itself for the next write. */
   if (chip_mute_pending_ != 0) apply_chip_mute_pending();
 
-  regs_[reg & (kRegsSize - 1)] = value;
+  io_addr_ = addr;
+  io_chip_ = chip;
+  /* Mirror in the tune's own chip layout, unshifted by -f/-fa */
+  const addr_t mirror = (chip >= 1 && chip <= kMaxSids)
+    ? static_cast<addr_t>(((chip - 1) * 0x20) + (addr & 0x1f)) : reg;
+  regs_[mirror & (kRegsSize - 1)] = value;
 
   /* Unclaimed FM/OPL addresses (kMaxSids + 1 from translate()) go to the
    * backend as reg values out of any real chip's range; a backend that
    * can't use them drops them (UsbSidBackend/EmbeddedSidBackend both
    * guard on reg >= 0x80, well below kFmOplParkBase). */
   if (chip == kMaxSids + 1) {
+    US_LOG_IF(sid_rw, "[W FM] $%04x $%03x:%02x [C]%5u\n", addr, reg, value,
+              static_cast<unsigned>(bus_.cycles() - last_event_));
     backend_->write(reg, value, cycles_since_last_event());
     ++writes_;
     return;
@@ -362,7 +403,7 @@ void Mos6581_8580::io_write(addr_t addr, data_t value)
      * filter/volume to reach the backend to be heard. */
     bool solo_dropped = false;
     if (config_.solo_active) {
-      const addr_t local = reg & 0x1f;
+      const addr_t local = mirror & 0x1f;
       const uint8_t keep = config_.voice_solo[chip - 1];
       solo_dropped = (local >= 0x15) ? (keep == 0)
                                      : ((keep & (1u << (local / 7))) == 0);
@@ -387,7 +428,7 @@ void Mos6581_8580::io_write(addr_t addr, data_t value)
     if (chip_is_muted || solo_dropped) return;
 
     /* Voice mute is applied only here, on the way out. */
-    backend_->write(reg, mask_for_output(reg, value), cycles_since_last_event());
+    backend_->write(reg, mask_for_output(mirror, value), cycles_since_last_event());
     ++writes_;
   }
 }
@@ -397,8 +438,21 @@ data_t Mos6581_8580::io_read(addr_t addr)
   uint8_t chip = 0;
   const addr_t reg = translate(addr, chip);
 
-  if (reg == kSidNotMapped) return 0xff;
+  if (reg == kSidNotMapped) {
+    /* OPL window reads (status port) are unemulated and float high. Reported
+     * to the backend for a trace to record; other backends ignore it. */
+    if (addr >= kFmOplWindowFirst && addr <= kFmOplWindowLast &&
+        backend_ != nullptr) {
+      io_addr_ = addr;
+      io_chip_ = static_cast<uint8_t>(kMaxSids + 1);
+      backend_->note_read(static_cast<addr_t>(kFmOplParkBase + (addr & 0x1f)), 0xff,
+        static_cast<uint16_t>(bus_.cycles() - last_event_));
+    }
+    return 0xff;
+  }
 
+  io_addr_ = addr;
+  io_chip_ = chip;
   ++reads_;
 
   /* Only voice three's oscillator/envelope registers are readable. With
@@ -429,14 +483,17 @@ data_t Mos6581_8580::io_read(addr_t addr)
       return value;
     }
   }
+  /* Mirror index in the tune's own chip layout, see io_write() */
+  const addr_t mirror = (chip >= 1 && chip <= kMaxSids)
+    ? static_cast<addr_t>(((chip - 1) * 0x20) + local) : reg;
   if (!solo_read_dropped) {
     US_LOG_IF(sid_rw, "[R SID%u] $%04x $%03x:%02x (mirror)\n", chip, addr, reg,
-              regs_[reg & (kRegsSize - 1)]);
+              regs_[mirror & (kRegsSize - 1)]);
   }
 
   /* Everything else floats on real hardware; the mirror is the most
    * useful thing to hand back. */
-  return regs_[reg & (kRegsSize - 1)];
+  return regs_[mirror & (kRegsSize - 1)];
 }
 
 void Mos6581_8580::vic_frame_ended(void)

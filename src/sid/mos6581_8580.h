@@ -158,6 +158,17 @@ class Mos6581_8580 final : public IoDevice, public VicFrameObserver
      */
     addr_t translate(addr_t addr, uint8_t & chip) const US_RAM_ATTR;
 
+    /** @brief Board register the tune's first chip is forced to (-f/-fa), or 0. */
+    addr_t socket_offset(void) const US_RAM_ATTR;
+
+    /**
+     * @brief Shift a tune-side chip register by socket_offset().
+     *
+     * @param logical  (chip - 1) * 0x20 + register
+     * @returns the board register, or kSidNotMapped past the last real chip
+     */
+    addr_t physical_reg(addr_t logical) const US_RAM_ATTR;
+
     /** @brief What the hardware should see. Out of line deliberately: gcc
      * already inlines it into io_write() at -O3, a hand-rolled inline
      * fast path measured slower. */
@@ -170,6 +181,7 @@ class Mos6581_8580 final : public IoDevice, public VicFrameObserver
     void resync(void)
     {
       last_event_ = bus_.cycles();
+      play_start_ = last_event_;
       for (uint8_t i = 0; i < kMaxSids; i++) voice3_[i].resync(last_event_);
     }
 
@@ -179,11 +191,12 @@ class Mos6581_8580 final : public IoDevice, public VicFrameObserver
       return voice3_[(chip >= 1 && chip <= kMaxSids) ? (chip - 1) : 0];
     }
 
-    /* the register mirror, one 32 byte block per chip. Masked to 0x1ff
+    /* the register mirror, one 32 byte block per chip in the tune's own
+     * chip order, unshifted by -f/-fa. Masked to 0x1ff
      * (kRegsSize - 1, a power of two one past kMaxSids * 0x20) rather than
      * kRegsSize itself, so this stays a cheap AND regardless of what the
      * caller hands in. */
-    data_t peek(addr_t physical_reg) const { return regs_[physical_reg & (kRegsSize - 1)]; }
+    data_t peek(addr_t reg) const { return regs_[reg & (kRegsSize - 1)]; }
 
     /**
      * @brief Hold one voice silent, or let it go again.
@@ -230,6 +243,15 @@ class Mos6581_8580 final : public IoDevice, public VicFrameObserver
     uint32_t writes(void) const { return writes_; }
     uint32_t reads(void) const { return reads_; }
 
+    /** @brief C64 address of the access in flight, 0 outside io_read()/io_write(). */
+    addr_t io_addr(void) const { return io_addr_; }
+
+    /** @brief Chip (1 based) of the access in flight, 0 outside io_read()/io_write(). */
+    uint8_t io_chip(void) const { return io_chip_; }
+
+    /** @brief Bus cycles since the last resync(), the tune's play time. */
+    cycle_t play_cycles(void) const { return bus_.cycles() - play_start_; }
+
   private:
     uint16_t cycles_since_last_event(void) US_RAM_ATTR;
     bool custom_address(addr_t addr) const US_RAM_ATTR;
@@ -250,6 +272,11 @@ class Mos6581_8580 final : public IoDevice, public VicFrameObserver
     SidVoice3 voice3_[kMaxSids];
 
     cycle_t last_event_ = 0;
+    cycle_t play_start_ = 0;
+
+    /* Access in flight, for a chained TraceSidBackend to label its events. */
+    addr_t io_addr_ = 0;
+    uint8_t io_chip_ = 0;
 
     /* Chips whose mute state changed and still need their registers pushed,
      * bit 0 for chip one. set_chip_mute() runs on core 0 (config handler)

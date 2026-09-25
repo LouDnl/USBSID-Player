@@ -110,7 +110,7 @@ int test_translation(void)
   }
 
   {
-    /* forcing playback into socket two shifts the first chip along */
+    /* forcing playback into socket two shifts every chip along */
     SidConfig & c = sid.config();
     c.count = 1;
     c.base[0] = 0xd400;
@@ -122,12 +122,38 @@ int test_translation(void)
     c.sids_socket_one = 2;
     US_CHECK_EQ_U(sid.translate(0xd400, chip), 0x40u,
                   "two SIDs in socket one move it to $40");
+    US_CHECK_EQ_U(sid.translate(0xd420, chip), 0x40u,
+                  "a mirror of the first chip moves with it");
+
+    c.count = 2;
+    c.base[1] = 0xd420;
+    US_CHECK_EQ_U(sid.translate(0xd420, chip), 0x60u,
+                  "the second chip follows the first into socket two");
+    US_CHECK_EQ_U(chip, 2u, "still chip 2");
     c.force_socket_two = false;
 
     /* or an explicit address wins over everything */
     c.force_address = true;
     c.forced_address = 0x60;
     US_CHECK_EQ_U(sid.translate(0xd407, chip), 0x67u, "a forced address is used as is");
+    US_CHECK_EQ_U(sid.translate(0xd427, chip), 0x87u,
+                  "the second chip lands one block past the forced address");
+    c.force_address = false;
+    c.count = 1;
+    c.base[1] = 0;
+  }
+
+  {
+    /* the mirror keeps the tune's own layout while writes are forced */
+    SidConfig & c = sid.config();
+    c.count = 1;
+    c.base[0] = 0xd400;
+    c.force_address = true;
+    c.forced_address = 0x40;
+    sid.io_write(0xd405, 0x5a);
+    US_CHECK_EQ_U(sid.peek(0x05), 0x5au, "mirror holds the write at the tune's register");
+    US_CHECK_EQ_U(sid.peek(0x45), 0x00u, "not at the forced board register");
+    US_CHECK_EQ_U(sid.io_read(0xd405), 0x5au, "reads come back from the tune's register");
     c.force_address = false;
   }
 
@@ -140,6 +166,11 @@ int test_translation(void)
     c.fmopl_sid = 2;
     US_CHECK_EQ_U(sid.translate(0xdf40, chip), 0x20u, "FM/OPL lands on chip 2");
     US_CHECK_EQ_U(chip, 2u, "and reports chip 2");
+
+    /* several boards: a logical slot past board one's four */
+    c.fmopl_sid = 6;
+    US_CHECK_EQ_U(sid.translate(0xdf50, chip), 0xb0u, "FM/OPL lands on logical slot 6");
+    US_CHECK_EQ_U(chip, 6u, "and reports chip 6");
 
     c.fmopl_sid = -1;
     const data_t parked = sid.translate(0xdf40, chip);
@@ -563,6 +594,105 @@ int test_trace_dump(void)
 }
 
 
+/* ---- what the trace labels its events with ----------------------------- */
+
+int test_trace_labels(void)
+{
+  TestC64 c64;
+  if (!c64.boot()) {
+    ++us_test_failures; ++us_test_checks;
+    printf("  FAIL trace labels: the machine did not boot\n");
+    return 1;
+  }
+
+  std::vector<TraceSidBackend::Event> buffer(512);
+  TraceSidBackend trace(buffer.data(), buffer.size());
+  trace.set_source(&c64.machine.sid());
+  trace.set_clock_hz(1000000);
+  c64.machine.set_sid_backend(trace);
+  trace.reset();
+  c64.machine.sid().resync();
+
+  c64.machine.mmu().write(0xd405, 0x5a);
+  for (unsigned i = 0; i < 1500000; i++) c64.machine.tick();
+  c64.machine.mmu().write(0xd40c, 0xa5);
+
+  size_t writes = 0;
+  const TraceSidBackend::Event * first = nullptr;
+  const TraceSidBackend::Event * last = nullptr;
+  for (size_t i = 0; i < trace.count(); i++) {
+    if (trace.at(i).kind != 'w') continue;
+    if (first == nullptr) first = &trace.at(i);
+    last = &trace.at(i);
+    ++writes;
+  }
+  US_CHECK(writes >= 2, "both writes were traced");
+  if (writes < 2) return 1;
+
+  US_CHECK(first->addr == 0xd405 && first->chip == 1, "first event carries $d405, SID1");
+  US_CHECK(last->addr == 0xd40c && last->reg == 0x0c, "last event carries $d40c");
+  US_CHECK(last->play >= 1500000, "play time counts bus cycles since resync");
+
+  FILE * f = tmpfile();
+  if (f == nullptr) return 1;
+  trace.dump(f);
+  rewind(f);
+  char text[4096] = { 0 };
+  const size_t n = fread(text, 1, sizeof(text) - 1, f);
+  text[n] = '\0';
+  fclose(f);
+  US_CHECK(strstr(text, "[W SID1] $d405 $005:5a") != nullptr, "dump prints chip, address, reg:value");
+  US_CHECK(strstr(text, "[T]00:01.") != nullptr, "dump prints play time as MM:SS.mmm");
+  return 0;
+}
+
+
+int test_trace_fm_read(void)
+{
+  Bus bus;
+  std::vector<TraceSidBackend::Event> buffer(64);
+  TraceSidBackend trace(buffer.data(), buffer.size());
+  Mos6581_8580 sid(bus, trace);
+  trace.set_source(&sid);
+  sid.config().count = 1;
+  sid.config().base[0] = 0xd400;
+  trace.reset();
+  sid.resync();
+
+  sid.io_write(0xd400, 0x11);
+  bus.run(100);
+  const data_t value = sid.io_read(0xdf60);
+  bus.run(50);
+  sid.io_write(0xd401, 0x22);
+
+  US_CHECK_EQ_U(value, 0xffu, "an OPL status read still floats high");
+
+  const TraceSidBackend::Event * rd = nullptr;
+  const TraceSidBackend::Event * after = nullptr;
+  for (size_t i = 0; i < trace.count(); i++) {
+    if (trace.at(i).kind == 'r' && rd == nullptr) rd = &trace.at(i);
+    if (trace.at(i).kind == 'w' && trace.at(i).reg == 0x01) after = &trace.at(i);
+  }
+  US_CHECK(rd != nullptr, "the OPL status read was traced");
+  if (rd == nullptr || after == nullptr) return 1;
+
+  US_CHECK_EQ_U(rd->addr, 0xdf60u, "with its C64 address");
+  US_CHECK(rd->chip > 4, "labelled as FM, no real chip");
+  US_CHECK_EQ_U(rd->value, 0xffu, "with the value the tune saw");
+  US_CHECK_EQ_U(rd->delta, 100u, "and the cycles since the previous event");
+  US_CHECK_EQ_U(after->delta, 150u - sid.config().access_overhead,
+                "the read does not consume the delta of the next write");
+
+  /* Other backends never hear about it */
+  {
+    Bus bus2;
+    NullSidBackend null_backend;
+    Mos6581_8580 sid2(bus2, null_backend);
+    US_CHECK_EQ_U(sid2.io_read(0xdf60), 0xffu, "no trace, same answer");
+  }
+  return 0;
+}
+
 /* ---- voice three, the only part of a SID that can be read --------------- */
 
 int test_voice3(void)
@@ -695,6 +825,8 @@ int us_test_sid(void)
   test_voice_mute();
   test_machine_integration();
   test_trace_dump();
+  test_trace_labels();
+  test_trace_fm_read();
   test_voice3();
 
   US_TEST_END("sid/mos6581_8580");

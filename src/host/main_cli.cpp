@@ -74,7 +74,7 @@ void on_signal(int)
  * every other place these are named. Chip numbers go up to kMaxSids (15),
  * same ceiling as --select-sids: Mos6581_8580::set_voice_mute() already
  * accepts any chip up to kMaxSids regardless of output, so capping the parser
- * at 4 here would silence --output=audio/nsd/usbsid-multi runs incorrectly
+ * at 4 here would silence --output=audio/nsd or multi-board runs incorrectly
  * for chip 5 and up.
  *
  * @param spec  the argument as given
@@ -136,6 +136,10 @@ void print_voice_mask(const char * label, const uint8_t mask[kMaxSids])
  * in the spec that explicit entry appears - so `1,3:1` and `3:1,1` both put
  * tune SID 1 in slot two.
  *
+ * `fm` in place of a SID number (`fm` or `fm:SLOT`, at most once) is the
+ * tune's FM/OPL, stored as kSelectFmOpl; UsbSidBackend::set_sid_select()
+ * only honours it on a slot that is its board's FM/OPL.
+ *
  * @param spec   the argument as given
  * @param out    out, kMaxSids entries, slot indexed, 0 for unused
  * @param count  out, one past the highest slot any entry claimed
@@ -152,13 +156,21 @@ bool parse_sid_select(const char * spec, uint8_t out[kMaxSids], uint8_t & count)
   int16_t slot_tok[kMaxSids]; /* -1 = no explicit slot, else 0 based */
   uint8_t n_tok = 0;
 
+  bool have_fm = false;
   const char * p = spec;
   while (*p != '\0') {
-    if (*p < '0' || *p > '9') return false;
     long sid = 0;
-    while (*p >= '0' && *p <= '9') {
-      sid = sid * 10 + (*p++ - '0');
-      if (sid > kMaxSids) return false;
+    if ((p[0] == 'f' || p[0] == 'F') && (p[1] == 'm' || p[1] == 'M')) {
+      if (have_fm) return false;
+      have_fm = true;
+      sid = kSelectFmOpl;
+      p += 2;
+    } else {
+      if (*p < '0' || *p > '9') return false;
+      while (*p >= '0' && *p <= '9') {
+        sid = sid * 10 + (*p++ - '0');
+        if (sid > kMaxSids) return false;
+      }
     }
     if (sid < 1 || n_tok >= kMaxSids) return false;
 
@@ -205,6 +217,35 @@ bool parse_sid_select(const char * spec, uint8_t out[kMaxSids], uint8_t & count)
   return true;
 }
 
+/**
+ * @brief Read a `--boards` list into serial numbers, in the order given.
+ *
+ * Comma separated. A board is named by its own serial number, not a
+ * position, since which board USB happens to enumerate first is not
+ * something worth relying on - see --list-boards for what a board's serial
+ * actually is. Passed straight through to USBSID_Manager::OpenAll(),
+ * which opens exactly these boards, in this order, and skips one that
+ * turns out not to be attached.
+ *
+ * @param spec  the argument as given
+ * @param out   out, one entry per comma separated serial
+ * @returns true if the whole string parsed, false on a stray empty entry
+ *          (e.g. a leading, trailing, or doubled comma)
+ */
+bool parse_board_order(const char * spec, std::vector<std::string> & out)
+{
+  out.clear();
+  if (spec == nullptr || *spec == '\0') return false;
+  const char * p = spec;
+  while (*p != '\0') {
+    const char * start = p;
+    while (*p != '\0' && *p != ',') p++;
+    if (p == start) return false;
+    out.emplace_back(start, static_cast<size_t>(p - start));
+    if (*p == ',') p++;
+  }
+  return !out.empty();
+}
 
 void usage(const char * argv0)
 {
@@ -221,12 +262,23 @@ void usage(const char * argv0)
     "\n"
     "  sound:\n"
 #if US_HAVE_NETDEVICE
-    "      --output M    usbsid (default), audio, wav, or nsd. usbsid\n"
+    "  -o, --output M    usbsid (default), audio, wav, or nsd. usbsid\n"
     "                    falls back to audio when no board is found\n"
 #else
-    "      --output M    usbsid (default), audio, or wav. usbsid falls back\n"
+    "  -o, --output M    usbsid (default), audio, or wav. usbsid falls back\n"
     "                    to audio when no board is found\n"
 #endif
+    "  -lb, --list-boards  list every attached board's serial number and exit\n"
+    "  -b, --boards SPEC  open these boards for --output=usbsid instead of\n"
+    "                    the one the driver picks, in this order (board 1\n"
+    "                    is the first, etc.). SPEC is a comma separated list\n"
+    "                    of serial numbers from --list-boards, for example\n"
+    "                    AB12,CD34 opens AB12 as board 1 and CD34 as board 2\n"
+    "                    regardless of USB-connect order, and leaves any\n"
+    "                    other attached board untouched. The tune's SIDs are\n"
+    "                    spread across every opened board's SIDs, board 1's\n"
+    "                    first. (default: one board, the first in USB\n"
+    "                    bus/port order)\n"
     "  -w, --wav FILE    write a WAV instead of playing, implies --output=wav\n"
 #if US_HAVE_NETDEVICE
     "  -nh, --net-host H  Network SID Device server to connect to for\n"
@@ -243,9 +295,12 @@ void usage(const char * argv0)
     "                    (--output=audio/wav only; default 100)\n"
     "  -fv, --fmopl-volume N  FM/OPL output level, percent, 0-300 (same scope;\n"
     "                    default 50 - the OPL is the louder of the two chips)\n"
-    "  -T, --trace FILE  write every SID register event to FILE. Records what\n"
-    "                    is played, so it works with a board and with --wav;\n"
-    "                    add -n for a silent run that only records\n"
+    "  -T, --trace FILE  write every SID register event to FILE, laid out like\n"
+    "                    -srw (chip, C64 address, register:value, [C] cycle\n"
+    "                    delta) plus the running cycle total and the play\n"
+    "                    time MM:SS.mmm. Records what is played, so it works\n"
+    "                    with a board and with --wav; add -n for a silent\n"
+    "                    run that only records\n"
     "  -m, --mute SPEC   silence voices (gate/sustain forced off; everything\n"
     "                    else for that voice still reaches the backend). SPEC\n"
     "                    is a comma separated list of CHIP:VOICE or CHIP for\n"
@@ -277,10 +332,13 @@ void usage(const char * argv0)
     "                    first socket and the 5th on the fourth, leaving the\n"
     "                    second and third empty. A bare entry claims the\n"
     "                    lowest socket no :SLOT entry already claimed. At\n"
-    "                    most 4 sockets are used.\n"
-    "                    (--output=usbsid only, or as many entries as\n"
-    "                    --output=usbsid-multi has open boards; default: the\n"
-    "                    tune's first N SIDs on the first N sockets, in order)\n"
+    "                    most 4 sockets are used on one board, or every\n"
+    "                    SID of the boards --boards opened. fm or fm:SLOT\n"
+    "                    puts the tune's FM/OPL on that socket, only when\n"
+    "                    it is the board's configured FM/OPL; with SPEC\n"
+    "                    given, an FM/OPL not named this way is not played\n"
+    "                    (--output=usbsid only; default: the tune's first N\n"
+    "                    SIDs on the first N sockets, in order)\n"
     "  -oh, --overhead N  cycles one hardware access costs (default 1)\n"
     "  -sl, --songlengths F  HVSC Songlengths database, to stop when the song\n"
     "                    ends. Found by itself in $SONGLENGTHS,\n"
@@ -466,13 +524,13 @@ void print_tune(const SidFile & t, bool stereo)
 /**
  * @brief Where the sound comes out.
  *
- * `UsbSid` is the default and is always tried first. With no board it becomes
+ * `USBSID` is the default and is always tried first. With no board it becomes
  * `Audio` rather than playing silently: a machine with no hardware still wants
  * to hear the tune, and silence that needs explaining is worse than a fallback
  * that says what it did. `NetDevice` gets the same treatment: a server that
  * cannot be reached falls back to `Audio` rather than playing silently.
  */
-enum class OutputMode { UsbSid, UsbSidMulti, Audio, Wav, NetDevice };
+enum class OutputMode { USBSID, Audio, Wav, NetDevice };
 
 } /* namespace */
 
@@ -523,7 +581,7 @@ int main(int argc, char ** argv)
   /* Where the sound comes out. `usbsid` is the default and always tried first;
    * with no board it falls back to `audio` rather than playing silently, which
    * is what a machine with no hardware wants. See --output in the usage. */
-  OutputMode output = OutputMode::UsbSid;
+  OutputMode output = OutputMode::USBSID;
   const char * wav_path = nullptr;
   unsigned soft_rate = 44100;
   SoftSidQuality soft_quality = SoftSidQuality::Good;
@@ -546,6 +604,9 @@ int main(int argc, char ** argv)
   int net_sids = 0; /* 0 means "use the tune's own SID count" */
 #endif
 
+  const char * boards_spec = nullptr;
+  bool list_boards = false;
+
   for (int i = 1; i < argc; i++) {
     const char * a = argv[i];
     if (!strcmp(a, "-h") || !strcmp(a, "--help")) { usage(argv[0]); return 0; }
@@ -564,6 +625,9 @@ int main(int argc, char ** argv)
     else if ((!strcmp(a, "-ms") || !strcmp(a, "--mute-solo")) && i + 1 < argc) mute_solo_spec = argv[++i];
     else if ((!strcmp(a, "-ss") || !strcmp(a, "--select-sids")) && i + 1 < argc)
       select_sids_spec = argv[++i];
+    else if (!strcmp(a, "-lb") || !strcmp(a, "--list-boards")) list_boards = true;
+    else if ((!strcmp(a, "-b") || !strcmp(a, "--boards")) && i + 1 < argc)
+      boards_spec = argv[++i];
     else if (!strcmp(a, "-rr")) real_reads = true;
     else if (!strcmp(a, "-f")) force_socket_two = true;
     else if (!strcmp(a, "-fa") && i + 1 < argc) {
@@ -580,7 +644,7 @@ int main(int argc, char ** argv)
       else if (a[8] == '=') v = a + 9;
       else if (a[8] == '\0' && i + 1 < argc) v = argv[++i];
       if (v == nullptr) { printf("-o/--output needs usbsid, audio or wav\n"); return 2; }
-      if (!strcmp(v, "usbsid")) output = OutputMode::UsbSid;
+      if (!strcmp(v, "usbsid")) output = OutputMode::USBSID;
       else if (!strcmp(v, "audio")) output = OutputMode::Audio;
       else if (!strcmp(v, "wav")) output = OutputMode::Wav;
       else if (!strcmp(v, "nsd")) {
@@ -636,6 +700,31 @@ int main(int argc, char ** argv)
     else if (!strcmp(a, "-lmem")) us_log.memstate = true;
     else if (a[0] != '-') path = a;
     else { printf("unknown option %s\n", a); usage(argv[0]); return 2; }
+  }
+
+  if (list_boards) {
+    auto found = USBSID_Manager::Enumerate();
+    if (found.empty()) {
+      printf("no USBSID-Pico boards found\n");
+    } else {
+      for (size_t b = 0; b < found.size(); b++) {
+        printf("  board %zu: serial %s\n", b + 1,
+               found[b].serial.empty() ? "<unknown>" : found[b].serial.c_str());
+      }
+      printf("use --boards SERIAL,SERIAL,... to choose which of these "
+             "to open, and in what order\n");
+    }
+    return 0;
+  }
+
+  std::vector<std::string> board_order;
+  if (boards_spec != nullptr) {
+    if (!parse_board_order(boards_spec, board_order)) {
+      printf("  cannot read --boards %s, expected a comma separated list of "
+             "board serial numbers, for example AB12,CD34 - see "
+             "--list-boards\n", boards_spec);
+      return 2;
+    }
   }
 
   if (path == nullptr) { usage(argv[0]); return 2; }
@@ -724,14 +813,35 @@ int main(int argc, char ** argv)
   if (trace_path != nullptr) {
     trace_buffer.resize(4u * 1000u * 1000u);
     trace = new TraceSidBackend(trace_buffer.data(), trace_buffer.size());
+    trace->set_source(&machine.sid());
   }
 
-  if (output == OutputMode::UsbSid && !no_device) {
-    if (usb.open()) {
-      printf("  device   : USBSID-Pico, pcb v%d, %d SID%s "
-             "(socket one %d, socket two %d)\n",
-             usb.pcb_version(), usb.num_sids(), usb.num_sids() == 1 ? "" : "s",
-             usb.sids_socket_one(), usb.sids_socket_two());
+  if (output == OutputMode::USBSID && !no_device) {
+    if (usb.open(board_order)) {
+      if (usb.num_boards() == 1) {
+        printf("  device   : USBSID-Pico, pcb v%d, %d SID%s "
+               "(socket one %d, socket two %d)\n",
+               usb.pcb_version(), usb.num_sids(), usb.num_sids() == 1 ? "" : "s",
+               usb.sids_socket_one(), usb.sids_socket_two());
+      } else {
+        printf("  device   : %d USBSID-Pico boards, %d SID%s total\n",
+               usb.num_boards(), usb.num_sids(), usb.num_sids() == 1 ? "" : "s");
+      }
+      const auto & boards = usb.manager().Boards();
+      if (!board_order.empty()) {
+        for (size_t b = 0; b < boards.size(); b++) {
+          printf("               board %zu: pcb v%d, %d SID%s, serial %s\n",
+                 b + 1, boards[b].pcbversion, boards[b].numsids,
+                 boards[b].numsids == 1 ? "" : "s",
+                 boards[b].serial.empty() ? "<unknown>" : boards[b].serial.c_str());
+        }
+      }
+      for (const auto & wanted : board_order) {
+        bool opened = false;
+        for (const auto & b : boards) if (b.serial == wanted) { opened = true; break; }
+        if (!opened) printf("  warning  : --boards asked for %s, not opened "
+                             "(not attached, or already claimed)\n", wanted.c_str());
+      }
       machine.set_sid_backend(usb);
       active_backend = &usb;
     } else {
@@ -885,36 +995,57 @@ int main(int argc, char ** argv)
   sid_config.force_address = force_address;
   sid_config.forced_address = forced_address;
   sid_config.access_overhead = static_cast<uint8_t>(overhead);
-  {
-    sid_config.sids_socket_one = usb.sids_socket_one();
-    sid_config.sids_socket_two = usb.sids_socket_two();
-    sid_config.fmopl_sid = usb.fmopl_sid();
+  /* Socket counts are board 1's: -f moves the tune to board 1's socket two */
+  sid_config.sids_socket_one = usb.sids_socket_one();
+  sid_config.sids_socket_two = usb.sids_socket_two();
+  sid_config.fmopl_sid = usb.fmopl_sid();
+  /* Several boards without -f/-fa/--select-sids: the backend already picked
+   * the first FM/OPL in --boards order. -f/-fa move chips by slot and could
+   * put a SID on top of it: they turn that pick off. --select-sids always
+   * turns it off, on one board too: the FM/OPL is then parked (fmopl_sid -1)
+   * and only reaches a board through an `fm` entry, see below. */
+  const bool multi_board = usb.is_open() && usb.num_boards() > 1;
+  const bool force_remap = force_socket_two || force_address;
+  if ((multi_board && force_remap) || select_sids_spec != nullptr) {
+    sid_config.fmopl_sid = -1;
+  }
+  if (multi_board && select_sids_spec == nullptr && is_sid && info.has_fm_opl) {
+    if (force_remap) {
+      printf("  fm/opl   : not used, -f/-fa move the SIDs "
+             "(name it with --select-sids fm:SLOT)\n");
+    } else if (usb.fmopl_sid() >= 1) {
+      printf("  fm/opl   : board %d, slot %d\n", usb.fmopl_board(), usb.fmopl_sid());
+    } else {
+      printf("  fm/opl   : none of the boards has one configured\n");
+    }
   }
 
-  /* --select-sids picks which of the tune's SIDs land on which board socket,
-   * in place of the default first-4-to-first-4 mapping. Set on `usb` itself
-   * (UsbSidBackend::set_sid_select()) rather than in SidConfig, because it is
-   * purely a board output concern: the emulation still sees, mutes and traces
-   * every one of the tune's SIDs exactly as it always did, only what actually
-   * reaches the hardware changes. Harmless, and silently unused, on any other
-   * --output. */
+  /* --select-sids picks which of the tune's SIDs land on which board socket
+   * (or, with several --boards open, logical slot), in place of the default
+   * first-N-to-first-N mapping. Set on the backend itself rather than in
+   * SidConfig, because it is purely an output concern: the emulation still
+   * sees, mutes and traces every one of the tune's SIDs exactly as it always
+   * did, only what actually reaches the hardware changes. Harmless, and
+   * silently unused, on any other --output. */
   if (select_sids_spec != nullptr) {
     uint8_t sids[kMaxSids];
     uint8_t count = 0;
     if (!parse_sid_select(select_sids_spec, sids, count)) {
       printf("  cannot read --select-sids %s, expected a comma separated "
-             "list of SID numbers counting from 1, for example 3,4,5\n",
-             select_sids_spec);
+             "list of SID numbers counting from 1, each optionally followed "
+             "by :SLOT, and fm for the FM/OPL, for example 3,4,5 or "
+             "3:1,5:4,fm:2\n", select_sids_spec);
       return 2;
     }
-    usb.set_sid_select(sids, count);
-    const uint8_t slots = 4;
-    if (output == OutputMode::UsbSid || output == OutputMode::UsbSidMulti) {
+    const bool fm_ok = usb.set_sid_select(sids, count);
+    const uint8_t slots = static_cast<uint8_t>(usb.num_slots());
+    if (output == OutputMode::USBSID) {
       printf("  sid select:");
       bool any = false;
       for (uint8_t s = 0; s < count && s < slots; s++) {
         if (sids[s] == 0) continue;
-        printf(" slot %u <- tune SID %u", s + 1, sids[s]);
+        if (sids[s] == kSelectFmOpl) printf(" slot %u <- FM/OPL", s + 1);
+        else printf(" slot %u <- tune SID %u", s + 1, sids[s]);
         any = true;
       }
       if (!any) printf(" (nothing in range)");
@@ -923,8 +1054,19 @@ int main(int argc, char ** argv)
       if (beyond > 0) printf(" (%u beyond slot %u ignored, only %u socket%s)",
                               beyond, slots, slots, slots == 1 ? "" : "s");
       printf("\n");
+      if (!fm_ok && usb.is_open()) {
+        printf("  warning  : --select-sids fm names a slot that is not a "
+               "configured FM/OPL, FM/OPL not played\n");
+      }
       if (is_sid) {
         for (uint8_t s = 0; s < count && s < slots; s++) {
+          if (sids[s] == kSelectFmOpl) {
+            if (!info.has_fm_opl) {
+              printf("  warning  : --select-sids fm, but the tune does not "
+                     "flag FM/OPL use\n");
+            }
+            continue;
+          }
           if (sids[s] != 0 && sids[s] > info.sid_count) {
             printf("  warning  : tune only has %u SID%s, --select-sids asks "
                    "for SID %u\n", info.sid_count,
@@ -1175,7 +1317,8 @@ int main(int argc, char ** argv)
      * sound at all, which is the immediate thing; zeroing the registers is what
      * makes the silence survive it, since a mute that is lifted with a gate
      * still set would restart the note the pause was meant to end. */
-    for (data_t r = 0; r <= 0x18; r++) usb.write(r, 0x00, 4);
+    /* physical_reg(): follow -f/-fa to the socket the tune plays on */
+    for (data_t r = 0; r <= 0x18; r++) usb.write(machine.sid().physical_reg(r), 0x00, 4);
     usb.flush();
     usb.mute(true);
   };
@@ -1184,7 +1327,8 @@ int main(int argc, char ** argv)
     /* Unmute first, then put the registers back, so the board is listening by
      * the time the values that make the sound arrive. */
     usb.mute(false);
-    for (data_t r = 0; r <= 0x18; r++) usb.write(r, machine.sid().peek(r), 4);
+    for (data_t r = 0; r <= 0x18; r++)
+      usb.write(machine.sid().physical_reg(r), machine.sid().peek(r), 4);
     usb.flush();
   };
 
@@ -1422,6 +1566,7 @@ int main(int argc, char ** argv)
   if (trace != nullptr) {
     FILE * out = fopen(trace_path, "w");
     if (out != nullptr) {
+      trace->set_clock_hz(machine.vic().timing().clock_hz);
       trace->dump(out);
       fclose(out);
       printf("  trace    : %zu events written to %s%s\n", trace->count(),

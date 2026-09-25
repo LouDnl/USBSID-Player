@@ -53,10 +53,20 @@ set(STRICT 1 CACHE STRING "Treat warnings as errors")
 ### producing a player without it. For releases and CI. See the reSIDfp block.
 set(REQUIRE_AUDIO 0 CACHE STRING "Refuse to configure without software audio")
 
+### Use ymfm (lib/ymfm, YM3812) instead of Nuked-OPL3-fast as the FM/OPL engine.
+### Command line only: the web and embedded builds always keep Nuked, so the
+### browser player and the default CLI stay on one engine. Run
+### `./build.sh cli-ymfm`, which configures this into its own build directory.
+set(FM_YMFM 0 CACHE STRING "Use ymfm instead of Nuked-OPL3-fast for FM/OPL (CLI only)")
+
 if(${WEB} EQUAL 1)
   set(DESKTOP 1)
   set(EMBEDDED 0)
   set(BUILD_TESTS 0) ### the suite is native, it does not cross compile
+endif()
+
+if(${FM_YMFM} EQUAL 1 AND (${WEB} EQUAL 1 OR ${EMBEDDED} EQUAL 1))
+  message(FATAL_ERROR "FM_YMFM=1 is for the command line player only, not WEB or EMBEDDED! Exiting...")
 endif()
 
 if(${DESKTOP} EQUAL 1 AND ${EMBEDDED} EQUAL 1)
@@ -180,7 +190,31 @@ endif()
 ### software audio: with no reSIDfp there is nothing to mix it into, and the
 ### embedded target sends FM writes to a real chip on the board.
 set(US_NUKEDOPL_DIR ${CMAKE_CURRENT_LIST_DIR}/lib/nukedopl)
-if(US_HAVE_RESIDFP AND EXISTS ${US_NUKEDOPL_DIR}/opl3.c)
+### ymfm (Aaron Giles, BSD-3-Clause), opt in with FM_YMFM=1. The YM3812 model is
+### used, which is the FM-YAM chip; the SFX Sound Expander's YM3526 is register
+### compatible with it. ymfm_opl.cpp includes ymfm_fm.ipp and also defines the
+### Y8950 and YMF278B, hence the adpcm and pcm sources.
+set(US_YMFM_DIR ${CMAKE_CURRENT_LIST_DIR}/lib/ymfm)
+set(US_YMFM_SOURCES
+  ${US_YMFM_DIR}/ymfm_opl.cpp
+  ${US_YMFM_DIR}/ymfm_adpcm.cpp
+  ${US_YMFM_DIR}/ymfm_pcm.cpp)
+if(${FM_YMFM} EQUAL 1)
+  if(NOT US_HAVE_RESIDFP)
+    message(FATAL_ERROR "FM_YMFM=1 needs software audio, but lib/residfp is empty! Exiting...")
+  endif()
+  if(NOT EXISTS ${US_YMFM_DIR}/ymfm_opl.cpp)
+    message(FATAL_ERROR "FM_YMFM=1 but ${US_YMFM_DIR}/ymfm_opl.cpp is missing! Exiting...")
+  endif()
+  set(US_FM_SOURCES
+    ${US_YMFM_SOURCES}
+    ${CMAKE_CURRENT_LIST_DIR}/src/fm/opl_chip.cpp)
+  set(US_FM_INCLUDE_DIRS
+    ${US_YMFM_DIR}
+    ${CMAKE_CURRENT_LIST_DIR}/src/fm)
+  set(US_HAVE_FM 1)
+  message(STATUS "FM/OPL: vendored ymfm YM3812 (lib/ymfm, FM_YMFM=1)")
+elseif(US_HAVE_RESIDFP AND EXISTS ${US_NUKEDOPL_DIR}/opl3.c)
   set(US_FM_SOURCES
     ${US_NUKEDOPL_DIR}/opl3.c
     ${CMAKE_CURRENT_LIST_DIR}/src/fm/opl_chip.cpp)
@@ -291,6 +325,8 @@ if(US_HAVE_FM)
   ### Nuked OPL3 is upstream C and was not written to this project's warnings,
   ### for the same reason reloc65.c and reSIDfp are not held to them.
   set_source_files_properties(${US_NUKEDOPL_DIR}/opl3.c PROPERTIES COMPILE_OPTIONS "-w")
+  ### ymfm is upstream C++ held to its own warning settings, same as the above.
+  set_source_files_properties(${US_YMFM_SOURCES} PROPERTIES COMPILE_OPTIONS "-w")
 endif()
 if(US_HAVE_RESIDFP)
   set_source_files_properties(${US_RESIDFP_SOURCES} PROPERTIES COMPILE_OPTIONS "-w;-fexceptions")
@@ -303,6 +339,8 @@ if(US_HAVE_RESIDFP)
   endif()
 endif()
 target_compile_definitions(usbsidcore PUBLIC ${US_COMPILE_DEFS})
+### opl_chip.h is included from the CLI target too, so this has to be PUBLIC.
+target_compile_definitions(usbsidcore PUBLIC US_FM_YMFM=${FM_YMFM})
 
 ### The desktop player. Which USBSID driver it builds against is worked out
 ### below: lib/driver by default and always in CI, a local working copy when
@@ -405,6 +443,17 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
       "  Locally, lib/driver is a symlink to the driver working copy:\n"
       "    ln -s ../../driver-repo/src lib/driver")
   endif()
+  ### The board backend drives every board through USBSID_Manager, which the
+  ### driver has carried beside USBSID.cpp since multiboard support. A driver
+  ### checkout older than that has USBSID.cpp only: stop with that said
+  ### rather than at link time.
+  if(NOT EXISTS ${US_DRIVER_DIR}/USBSID_Manager.cpp)
+    message(FATAL_ERROR
+      "The USBSID driver at\n"
+      "    ${US_DRIVER_DIR}\n"
+      "  has no USBSID_Manager.cpp. Update the driver checkout to one with\n"
+      "  multiboard support.")
+  endif()
   message(STATUS "USBSID driver sources: ${US_DRIVER_DIR} (${US_DRIVER_WHY})")
 
   ### Software audio: reSIDfp for the synthesis, miniaudio for the device.
@@ -445,6 +494,7 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
     ${CMAKE_CURRENT_LIST_DIR}/src/sid/sid_usbsid.cpp
     ${US_NETDEVICE_SOURCES}
     ${US_DRIVER_DIR}/USBSID.cpp
+    ${US_DRIVER_DIR}/USBSID_Manager.cpp
     ${US_SOFTSID_SOURCES}
   )
   target_link_libraries(${EXECUTABLE} PRIVATE usbsidcore ${US_LINK_LIBS})

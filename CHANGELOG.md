@@ -49,6 +49,27 @@ Please refer to the [releases page](https://github.com/LouDnl/USBSID-Player/rele
   [Nuked-OPL3-fast](https://github.com/tgies/Nuked-OPL3-fast), a bit-exact
   perf fork pinned to current upstream (1.5x-2.8x faster, and picks up
   upstream's 2024 envelope generator fix our old vendored copy predated)
+* Add SID register and CIA 1 timer A reports from the web player's audio
+  worker, timed to the audible output: piano, graph and register views of a
+  host page follow the tune in worker mode too
+* Add `setSidVolume()`, `setFmVolume()` and `hasFm()` to the web adapters:
+  the SID and FM/OPL sides of the software mix are set apart, worker mode
+  included
+* Add `hasFm` and `sidAddresses` to the tune info of the web adapters
+* Fix `hasFm()` of the web adapters missing SID+FM tunes older than v5, which
+  carry no FM/OPL header flag: in software audio a tune that writes to the
+  FM/OPL counts as an FM tune
+* Add `setBufferSamples()` to the DeepSID adapter: DeepSID's "Buffer size"
+  setting sets the software audio ring depth
+* Fix the web player's audio ring overfilling after a throttled tab: the
+  worklet reports its received sample count, a backlog of stale reports asks
+  for the shortfall once
+* Fix slow controls after returning to a hidden tab: the deep hidden ring is
+  trimmed to the visible target at once
+* Fix silence after a tab or app switch on mobile: a suspended or
+  interrupted audio context is resumed on return
+* Fix a cached older `usplayer-worker.js` being used by a newer adapter: the
+  worker URL is versioned like the wasm
 
 #### Version: 1.3.0
 * Add Cynthcart support to the embedded player, runs through USBSID-Player's own C64 core instead of the old emudore based path

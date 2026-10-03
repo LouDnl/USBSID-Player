@@ -399,6 +399,7 @@ extern uint16_t usplayer_song(void);
 extern uint16_t usplayer_songs(void);
 extern uint32_t usplayer_frames(void);
 extern uint16_t usplayer_driver_address(void);
+/* Header strings as stored in the file, Windows-1252; see win1252_to_utf8() */
 extern const char * usplayer_tune_name(void);
 extern const char * usplayer_tune_author(void);
 extern const char * usplayer_tune_released(void);

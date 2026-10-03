@@ -49,44 +49,6 @@ void copy_text(char * dst, const data_t * src, size_t n)
   dst[n] = 0;
 }
 
-/**
- * @brief Windows-1252 -> UTF-8, in place, truncating rather than overflowing.
- *
- * name/author/released are specified as Windows-1252 (spec, +0x16). 0x00-0x7f
- * is ASCII and passes through; 0xa0-0xff is identical to Latin-1 (code point
- * == byte value); 0x80-0x9f is the block where Windows-1252 differs from both,
- * mapped here per the standard table (also what WHATWG's "windows-1252"
- * encoding uses), including the five bytes (0x81, 0x8d, 0x8f, 0x90, 0x9d) the
- * standard leaves undefined, by convention mapped to their own C1 control
- * code point. Every one of these code points is under 0x800, so the UTF-8
- * result is at most two bytes per input byte - `tmp` is sized well past the
- * worst case (kMetaFieldSize - 1 input bytes, doubled) before truncating to
- * fit `cap`, so a v5 field that already fills nearly the whole 96 byte
- * metadata area can't overflow it.
- */
-void win1252_to_utf8(char * buf, size_t cap)
-{
-  static constexpr uint16_t kHighMap[32] = {
-    0x20AC, 0x0081, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
-    0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x008D, 0x017D, 0x008F,
-    0x0090, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
-    0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x009D, 0x017E, 0x0178
-  };
-  const size_t len = strlen(buf);
-  uint8_t tmp[256];
-  size_t w = 0;
-  for (size_t i = 0; i < len && w + 2 < sizeof(tmp); i++) {
-    const uint8_t c = static_cast<uint8_t>(buf[i]);
-    if (c < 0x80) { tmp[w++] = c; continue; }
-    const uint32_t cp = (c < 0xA0) ? kHighMap[c - 0x80] : c;
-    tmp[w++] = static_cast<uint8_t>(0xC0 | (cp >> 6));
-    tmp[w++] = static_cast<uint8_t>(0x80 | (cp & 0x3F));
-  }
-  const size_t n = (w < cap - 1) ? w : cap - 1;
-  memcpy(buf, tmp, n);
-  buf[n] = 0;
-}
-
 /* A second or third SID address is a byte holding the middle nybbles of
  * $dxx0. Only some of them are legal. */
 addr_t decode_sid_addr(uint8_t byte)
@@ -404,9 +366,6 @@ bool sidfile_parse(const data_t * bytes, size_t len, SidFile & out)
     copy_text(out.author,   bytes + 0x36, 32);
     copy_text(out.released, bytes + 0x56, 32);
   }
-  win1252_to_utf8(out.name,     sizeof(out.name));
-  win1252_to_utf8(out.author,   sizeof(out.author));
-  win1252_to_utf8(out.released, sizeof(out.released));
 
   if (out.version >= 2 || plus) {
     if (len < 0x7c) return false;
@@ -592,6 +551,38 @@ bool sidfile_parse(const data_t * bytes, size_t len, SidFile & out)
 
   out.valid = true;
   return true;
+}
+
+const char * win1252_to_utf8(const char * src, char * dst, size_t cap)
+{
+  /* 0x80-0x9f per the WHATWG windows-1252 table; the five undefined bytes
+   * (0x81, 0x8d, 0x8f, 0x90, 0x9d) map to their C1 code points. 0xa0-0xff
+   * equal their code point. */
+  static constexpr uint16_t kHighMap[32] = {
+    0x20AC, 0x0081, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
+    0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x008D, 0x017D, 0x008F,
+    0x0090, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
+    0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x009D, 0x017E, 0x0178
+  };
+  if (cap == 0) return dst;
+  size_t o = 0;
+  for (const uint8_t * p = reinterpret_cast<const uint8_t *>(src); *p != 0; ++p) {
+    const uint32_t cp = (*p < 0x80) ? *p : (*p < 0xa0) ? kHighMap[*p - 0x80] : *p;
+    const size_t need = (cp < 0x80) ? 1 : (cp < 0x800) ? 2 : 3;
+    if (o + need >= cap) break;
+    if (need == 1) {
+      dst[o++] = static_cast<char>(cp);
+    } else if (need == 2) {
+      dst[o++] = static_cast<char>(0xc0 | (cp >> 6));
+      dst[o++] = static_cast<char>(0x80 | (cp & 0x3f));
+    } else {
+      dst[o++] = static_cast<char>(0xe0 | (cp >> 12));
+      dst[o++] = static_cast<char>(0x80 | ((cp >> 6) & 0x3f));
+      dst[o++] = static_cast<char>(0x80 | (cp & 0x3f));
+    }
+  }
+  dst[o] = 0;
+  return dst;
 }
 
 } /* namespace usbsid */

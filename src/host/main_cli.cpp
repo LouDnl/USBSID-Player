@@ -408,9 +408,10 @@ const char * play_time(uint64_t frames, double rate)
 
 void print_tune(const SidFile & t, bool stereo)
 {
-  printf("  title    : %s\n", t.name);
-  printf("  author   : %s\n", t.author);
-  printf("  released : %s\n", t.released);
+  char text[kUtf8FieldSize];
+  printf("  title    : %s\n", win1252_to_utf8(t.name, text, sizeof(text)));
+  printf("  author   : %s\n", win1252_to_utf8(t.author, text, sizeof(text)));
+  printf("  released : %s\n", win1252_to_utf8(t.released, text, sizeof(text)));
   printf("  format   : %s v%u, %u song%s, default %u\n",
          t.is_rsid ? "RSID" : "PSID", t.version, t.songs,
          t.songs == 1 ? "" : "s", t.start_song);

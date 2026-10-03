@@ -1,6 +1,15 @@
 # Changelog
 Please refer to the [releases page](https://github.com/LouDnl/USBSID-Player/releases) for more information on version changes
 
+#### Version: 1.5.0
+* Change the licence to GPL-2.0-or-later (was GPL-2.0-only): every source
+  header says "version 2, or (at your option) any later version", so the
+  player can be combined with the GPL-3.0-or-later USBSID-Pico-driver
+* Fix tune name, author and release shown double encoded in the web player
+  ("MihÃ¡ly" for "Mihály"): the parser keeps the Windows-1252 bytes the file
+  stores, the web exports and the command line convert to UTF-8 once, with
+  three byte sequences for 0x80-0x9f (euro sign and friends)
+
 #### Version: 1.4.0
 * Add multiboard playback: `--boards SERIAL,...` opens several USBSID-Pico
   boards and spreads a tune's SIDs across all of them, `--list-boards` lists
@@ -70,9 +79,6 @@ Please refer to the [releases page](https://github.com/LouDnl/USBSID-Player/rele
   interrupted audio context is resumed on return
 * Fix a cached older `usplayer-worker.js` being used by a newer adapter: the
   worker URL is versioned like the wasm
-* Change the licence to GPL-2.0-or-later (was GPL-2.0-only): every source
-  header says "version 2, or (at your option) any later version", so the
-  player can be combined with the GPL-3.0-or-later USBSID-Pico-driver
 
 #### Version: 1.3.0
 * Add Cynthcart support to the embedded player, runs through USBSID-Player's own C64 core instead of the old emudore based path

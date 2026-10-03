@@ -193,6 +193,22 @@ struct SidFile {
  */
 bool sidfile_parse(const data_t * bytes, size_t len, SidFile & out);
 
+/* Buffer size that holds any SidFile string converted to UTF-8 */
+constexpr size_t kUtf8FieldSize = 3 * (SidFile::kMetaFieldSize - 1) + 1;
+
+/**
+ * @brief Convert a header string (name, author, released) to UTF-8.
+ *
+ * SidFile keeps the strings as the file stores them, Windows-1252. Convert
+ * only for display. Truncates at a whole character to fit.
+ *
+ * @param src  NUL terminated Windows-1252 text
+ * @param dst  destination, NUL terminated when cap > 0
+ * @param cap  size of dst, kUtf8FieldSize fits any SidFile string
+ * @return dst
+ */
+const char * win1252_to_utf8(const char * src, char * dst, size_t cap);
+
 } /* namespace usbsid */
 
 #endif /* _US_FILE_SIDFILE_H_ */

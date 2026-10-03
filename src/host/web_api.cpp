@@ -46,6 +46,7 @@
 #include <cstdlib>
 
 #include "sid_web.h"
+#include "sidfile.h"
 #include "songlengths.h"
 #include "usplayer.h"
 #include "sid_residfp.h"
@@ -204,44 +205,24 @@ int usp_song(void) { return usplayer_song(); }
 int usp_songs(void) { return usplayer_songs(); }
 uint32_t usp_frames(void) { return usplayer_frames(); }
 uint32_t usp_sid_writes(void) { return usplayer_sid_writes(); }
-/* The tune's own strings, re-encoded as UTF-8. PSID header name/author/
- * release fields are ISO 8859-1; the page reads them with `UTF8ToString`,
- * so a byte like 0xFC (u-umlaut) produced a replacement character/question
- * mark without this. ISO 8859-1 maps directly to Unicode's first 256 code
- * points, so it's the textbook 2-byte encoding, no table needed. Static
- * buffers sized 192 = 2x kMetaFieldSize (96) + terminator, the worst case. */
-static const char * latin1_to_utf8(const char * src, char * dst, size_t cap)
-{
-  size_t o = 0;
-  for (const unsigned char * p = (const unsigned char *)src; *p != '\0'; ++p) {
-    if (*p < 0x80) {
-      if (o + 2 > cap) break;
-      dst[o++] = (char)*p;
-    } else {
-      if (o + 3 > cap) break;
-      dst[o++] = (char)(0xc0 | (*p >> 6));
-      dst[o++] = (char)(0x80 | (*p & 0x3f));
-    }
-  }
-  dst[o] = '\0';
-  return dst;
-}
-
-static char g_utf8_name[192];
-static char g_utf8_author[192];
-static char g_utf8_released[192];
+/* The tune's own strings as UTF-8 for `UTF8ToString` on the page. The file
+ * stores them as Windows-1252. */
+static char g_utf8_name[usbsid::kUtf8FieldSize];
+static char g_utf8_author[usbsid::kUtf8FieldSize];
+static char g_utf8_released[usbsid::kUtf8FieldSize];
 
 const char * usp_tune_name(void)
 {
-  return latin1_to_utf8(usplayer_tune_name(), g_utf8_name, sizeof(g_utf8_name));
+  return usbsid::win1252_to_utf8(usplayer_tune_name(), g_utf8_name, sizeof(g_utf8_name));
 }
 const char * usp_tune_author(void)
 {
-  return latin1_to_utf8(usplayer_tune_author(), g_utf8_author, sizeof(g_utf8_author));
+  return usbsid::win1252_to_utf8(usplayer_tune_author(), g_utf8_author, sizeof(g_utf8_author));
 }
 const char * usp_tune_released(void)
 {
-  return latin1_to_utf8(usplayer_tune_released(), g_utf8_released, sizeof(g_utf8_released));
+  return usbsid::win1252_to_utf8(usplayer_tune_released(), g_utf8_released,
+                                 sizeof(g_utf8_released));
 }
 uint32_t usp_benchmark(uint32_t cycles) { return usplayer_benchmark(cycles); }
 

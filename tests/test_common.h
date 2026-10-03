@@ -126,6 +126,19 @@ static UsDir us_list_dir(const char * dir, const char * ext,
 
 #define US_TEST_BEGIN(name) printf("[TEST] %s\n", (name))
 
+/* Tests that boot the stock KERNAL and BASIC pass without checks in a build
+ * that has no ROMs compiled in (EMBED_ROMS=0) */
+#if US_EMBED_ROMS
+#define US_NEEDS_STOCK_ROMS(name) ((void)0)
+#else
+#define US_NEEDS_STOCK_ROMS(name)                                        \
+  do {                                                                   \
+    printf("[SKIP] %s: needs the stock ROMs, built with EMBED_ROMS=0\n", \
+           (name));                                                      \
+    return 0;                                                            \
+  } while (0)
+#endif
+
 #define US_TEST_END(name)                                       \
   do {                                                          \
     printf("[%s] %s (%d checks, %d failures)\n",                \

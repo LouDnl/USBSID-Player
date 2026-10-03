@@ -266,10 +266,12 @@ int test_loader_state(void)
                 "variables start where the program ends");
 
   /* It was started with SYS, which the editor echoed before running it */
+#if US_EMBED_ROMS
   char screen[1400];
   c64.screen_text(screen, sizeof(screen));
   US_CHECK(strstr(screen, "sys49152") != nullptr,
            "SYS 49152 was typed at the prompt");
+#endif
 
   /* and a program is not a tune */
   US_CHECK(player.init_tune(1) == false, "a program cannot be started as a tune");
@@ -285,7 +287,7 @@ int test_prg_sweep(void)
    * start it the way a person would, and count the ones that end up making a
    * sound. A program that stops writing registers has hit a bug somewhere
    * between the keyboard buffer and the SID. */
-  unsigned total = 0, parsed = 0, played = 0, silent = 0;
+  unsigned total = 0, parsed = 0, played = 0, silent = 0, needs = 0;
   std::vector<std::string> files;
   const UsDir listing = us_list_dir(US_TUNE_DIR "/prg", ".prg", files);
 
@@ -309,17 +311,28 @@ int test_prg_sweep(void)
       continue;
     }
     ++parsed;
-    if (!player.init_prg()) { ++silent; printf("    will not start: %s\n", path); continue; }
+    if (!player.init_prg()) {
+      /* Without ROMs a BASIC program has nothing to RUN it */
+      if (player.needs_roms() && !c64.machine.mmu().roms.complete()) {
+        ++needs;
+        printf("    needs ROMs: %s\n", path);
+      } else {
+        ++silent;
+        printf("    will not start: %s\n", path);
+      }
+      continue;
+    }
 
     backend.reset();
     player.run_frames(300);
 
     if (backend.writes > 50) ++played;
+    else if (player.stuck_without_roms()) { ++needs; printf("    needs ROMs to run: %s\n", path); }
     else { ++silent; printf("    silent: %s\n", path); }
   }
 
-  printf("  %u programs, %u are programs, %u made sound, %u silent\n",
-         total, parsed, played, silent);
+  printf("  %u programs, %u are programs, %u made sound, %u silent, %u need ROMs\n",
+         total, parsed, played, silent, needs);
 
   /* Missing is a machine without the collection and is a legitimate skip.
    * Empty is a directory that is there and gave nothing, which used to be
@@ -332,7 +345,7 @@ int test_prg_sweep(void)
   US_CHECK(listing == UsDir::Listed, "the program directory has programs in it");
   US_CHECK(total > 0, "the sweep found programs to run");
   if (total == 0) return us_test_failures;
-  US_CHECK_EQ_U(played, parsed, "every program that parses starts and plays");
+  US_CHECK_EQ_U(played + needs, parsed, "every program that parses starts and plays");
 
   return 0;
 }

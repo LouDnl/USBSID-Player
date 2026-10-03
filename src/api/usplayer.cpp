@@ -582,3 +582,32 @@ uint32_t usplayer_static_footprint(void)
   return static_cast<uint32_t>(sizeof(g_machine) + sizeof(g_player) +
                                sizeof(g_backend) + sizeof(g_tune_bytes));
 }
+
+bool usplayer_needs_roms(void) { return g_player.needs_roms(); }
+bool usplayer_stuck_without_roms(void) { return g_player.stuck_without_roms(); }
+
+#if !defined(EMBEDDED) || !EMBEDDED
+namespace {
+RomStore g_rom_store;
+} /* namespace */
+
+void usplayer_set_roms(const uint8_t * basic, const uint8_t * kernal,
+                       const uint8_t * chargen)
+{
+  g_rom_store.set(basic, kernal, chargen);
+  g_machine.mmu().roms = g_rom_store.roms();
+}
+
+void usplayer_default_roms(void)
+{
+  g_machine.mmu().roms = Roms{};
+}
+
+uint8_t usplayer_roms_present(void)
+{
+  const Roms & r = g_machine.mmu().roms;
+  return static_cast<uint8_t>((r.basic != nullptr ? 1 : 0) |
+                              (r.real_kernal ? 2 : 0) |
+                              (r.chargen != nullptr ? 4 : 0));
+}
+#endif

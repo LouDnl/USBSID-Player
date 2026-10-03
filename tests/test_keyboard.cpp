@@ -310,6 +310,7 @@ int test_player_control(void)
 
 int us_test_keyboard(void)
 {
+  US_NEEDS_STOCK_ROMS("keyboard");
   US_TEST_BEGIN("keyboard");
 
   test_matrix();

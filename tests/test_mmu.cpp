@@ -331,6 +331,7 @@ int test_kernal_boot(void)
 
 int us_test_mmu(void)
 {
+  US_NEEDS_STOCK_ROMS("mem/mmu");
   US_TEST_BEGIN("mem/mmu");
 
   test_banking_matrix();

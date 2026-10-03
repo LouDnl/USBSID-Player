@@ -467,6 +467,37 @@ extern uint32_t usplayer_static_footprint(void);
  */
 extern uint32_t usplayer_benchmark(uint32_t cycles);
 
+/**
+ * @brief Whether the loaded file needs real BASIC and KERNAL ROMs to start.
+ *
+ * True for a BASIC program without a SYS line, and a BASIC RSID.
+ */
+extern bool usplayer_needs_roms(void);
+
+/** @brief Whether a running program jammed for lack of ROMs, see Player. */
+extern bool usplayer_stuck_without_roms(void);
+
+#if !defined(EMBEDDED) || !EMBEDDED
+/**
+ * @brief Replace the ROM images, takes effect on the next init.
+ *
+ * Copies the images. NULL marks one absent: no BASIC or character ROM reads
+ * the RAM underneath, no KERNAL means the stub KERNAL.
+ *
+ * @param basic    8192 bytes or NULL
+ * @param kernal   8192 bytes or NULL
+ * @param chargen  4096 bytes or NULL
+ */
+extern void usplayer_set_roms(const uint8_t * basic, const uint8_t * kernal,
+                              const uint8_t * chargen);
+
+/** @brief Back to the build's own ROM set (stock images, or the stub). */
+extern void usplayer_default_roms(void);
+
+/** @brief Real images in use: bit 0 BASIC, bit 1 KERNAL, bit 2 chargen. */
+extern uint8_t usplayer_roms_present(void);
+#endif
+
 #if defined(__cplusplus)
 } /* the C surface ends here */
 

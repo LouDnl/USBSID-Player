@@ -43,6 +43,7 @@ int us_test_embedded(void);
 int us_test_prg(void);
 int us_test_keyboard(void);
 int us_test_web(void);
+int us_test_roms(void);
 
 /* Standalone main, defined by each test source under US_TEST_STANDALONE */
 #ifdef US_TEST_STANDALONE

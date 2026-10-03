@@ -267,6 +267,8 @@ void usage(const char * argv0)
     "  -t, --seconds N   stop after N seconds (default: play until ctrl-c)\n"
     "  -i, --info        print what the file says and exit\n"
     "  -n, --no-device   run without hardware, useful for checking a tune\n"
+    "  --no-roms         run on the stub KERNAL, without BASIC and character\n"
+    "                    ROM, the way a build without ROMs does\n"
     "\n"
     "  sound:\n"
 #if US_HAVE_NETDEVICE
@@ -578,6 +580,7 @@ int main(int argc, char ** argv)
   int seconds = 0;
   bool info_only = false;
   bool no_device = false;
+  bool no_roms = false;
   bool real_reads = false;
   bool force_socket_two = false;
   bool force_address = false;
@@ -621,6 +624,7 @@ int main(int argc, char ** argv)
     if (!strcmp(a, "-h") || !strcmp(a, "--help")) { usage(argv[0]); return 0; }
     else if (!strcmp(a, "-i") || !strcmp(a, "--info")) info_only = true;
     else if (!strcmp(a, "-n") || !strcmp(a, "--no-device")) no_device = true;
+    else if (!strcmp(a, "--no-roms")) no_roms = true;
     else if (!strcmp(a, "-P") || !strcmp(a, "--pal")) forced_model = VideoModel::Pal6569;
     else if (!strcmp(a, "-N") || !strcmp(a, "--ntsc")) forced_model = VideoModel::Ntsc6567R8;
     else if ((!strcmp(a, "-s") || !strcmp(a, "--song")) && i + 1 < argc)
@@ -787,6 +791,11 @@ int main(int argc, char ** argv)
 
   Machine machine;
   if (forced_model != VideoModel::Count) machine.set_video_model(forced_model);
+  static RomStore no_rom_store;
+  if (no_roms) {
+    machine.mmu().roms = no_rom_store.roms();
+    printf("  roms     : none, stub KERNAL\n");
+  }
 
   /* The trace backend records, the USBSID backend plays. Only one of them
    * can be the machine's backend, so tracing implies no hardware. */

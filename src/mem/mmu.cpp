@@ -73,11 +73,14 @@ void Mmu::update_banks(void)
 data_t Mmu::read_rom(Bank bank, addr_t addr) const
 {
   switch (bank) {
+    /* An absent BASIC or character ROM reads the RAM underneath */
     case Bank::Basic:
+      if (US_UNLIKELY(roms.basic == nullptr)) return ram_.read(addr);
       return roms.basic[addr - kAddrBasicFirstPage];
     case Bank::Kernal:
       return roms.kernal[addr - kAddrKernalFirstPage];
     case Bank::CharRom:
+      if (US_UNLIKELY(roms.chargen == nullptr)) return ram_.read(addr);
       return roms.chargen[addr - kAddrCharsFirstPage];
     default:
       return kOpenBus;
@@ -220,7 +223,7 @@ data_t Mmu::vic_read(addr_t addr) const
 
   /* The character generator appears at $1000-$1fff of the two even banks */
   if ((vic_bank_ & 1) == 0 && (addr & 0x3fff) >= 0x1000 &&
-      (addr & 0x3fff) < 0x2000) {
+      (addr & 0x3fff) < 0x2000 && roms.chargen != nullptr) {
     return roms.chargen[(addr & 0x0fff)];
   }
   return ram_.dma_read(full);

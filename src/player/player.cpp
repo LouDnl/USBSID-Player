@@ -234,9 +234,59 @@ void Player::set_basic_pointers(addr_t end_addr)
   ram.dma_write(0x0031, lo); ram.dma_write(0x0032, hi); /* end of arrays */
 }
 
+/**
+ * @brief Start a program on the stub KERNAL, without BASIC.
+ *
+ * No prompt to type at: the machine gets the boot image and the KERNAL's
+ * interrupt setup, then the CPU jumps to the SYS address (or the load
+ * address). An RTS from the program lands in the stub's idle loop.
+ *
+ * @return false when the program needs BASIC to start
+ */
+bool Player::init_prg_without_roms(void)
+{
+  if (needs_roms()) return false;
+
+  const addr_t entry = prg_.has_sys_stub ? prg_.sys_addr : prg_.load_addr;
+  const bool is_pal = (machine_.video_model() == VideoModel::Pal6569 ||
+                       machine_.video_model() == VideoModel::PalN6572);
+
+  machine_.power_on();
+  machine_.sid().reset();
+  apply_boot_image();
+
+  Ram & ram = machine_.ram();
+  for (size_t i = 0; i < prg_.data_size; i++) {
+    ram.dma_write(static_cast<addr_t>(prg_.load_addr + i), prg_.data[i]);
+  }
+  set_basic_pointers(prg_.end_addr);
+  machine_.keyboard().reset();
+
+  /* CIA1 timer A at the KERNAL's own rate, which is what the PSID values are */
+  setup_for_driver(is_pal);
+
+  while (!machine_.cpu().instruction_done()) machine_.tick();
+  Mos6510 & cpu = machine_.cpu();
+  cpu.hot_reset();
+  /* SP as BASIC's SYS leaves it ($f6): decrunchers count with TSX */
+  const addr_t ret = static_cast<addr_t>(kStubIdleLoop - 1);
+  ram.dma_write(0x01f8, static_cast<data_t>(ret >> 8));
+  ram.dma_write(0x01f7, static_cast<data_t>(ret & 0xff));
+  cpu.sp(0xf6);
+  cpu.pc(entry);
+
+  machine_.sid().resync();
+
+  frames_ = 0;
+  playing_ = true;
+  paused_ = false;
+  return true;
+}
+
 bool Player::init_prg(void)
 {
   if (!loaded_ || !is_prg_ || !prg_.valid) return false;
+  if (!machine_.mmu().roms.complete()) return init_prg_without_roms();
 
   machine_.power_on();
   machine_.sid().reset();

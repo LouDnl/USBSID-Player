@@ -69,6 +69,29 @@ class Player
      */
     bool init_prg(void);
 
+    /**
+     * @brief Whether the loaded file can only start with real ROMs.
+     *
+     * True for a BASIC program (or BASIC RSID) without a SYS line: RUN needs
+     * the BASIC interpreter. Everything else also starts on the stub KERNAL.
+     */
+    bool needs_roms(void) const
+    {
+      return loaded_ && is_prg_ && prg_.is_basic() && !prg_.has_sys_stub;
+    }
+
+    /**
+     * @brief Whether a running program stopped for lack of ROMs.
+     *
+     * True when the ROM set is incomplete and the CPU has jammed, the usual
+     * end of a program that jumps into BASIC (e.g. a decruncher exiting
+     * through RUN) while no BASIC ROM is mapped.
+     */
+    bool stuck_without_roms(void) const
+    {
+      return playing_ && !machine_.mmu().roms.complete() && machine_.cpu().jammed();
+    }
+
     /** @brief Start the installed tune, or restart it on another subtune. */
     bool init_tune(uint16_t song);
 
@@ -132,6 +155,7 @@ class Player
 
   private:
     void boot_kernal(void);
+    bool init_prg_without_roms(void);
     void apply_boot_image(void);
     void setup_for_driver(bool is_pal);
     /** @brief Tell BASIC where the program it just "loaded" ends. */

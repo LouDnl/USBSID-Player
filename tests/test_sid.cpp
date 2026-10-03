@@ -818,6 +818,7 @@ int test_voice3(void)
 
 int us_test_sid(void)
 {
+  US_NEEDS_STOCK_ROMS("sid/mos6581_8580");
   US_TEST_BEGIN("sid/mos6581_8580");
 
   test_translation();

@@ -426,11 +426,48 @@ int test_boot_image_matches_roms(void)
   return 0;
 }
 
+/* ---- header strings stay Windows-1252, converted only for display ------ */
+
+int test_win1252_to_utf8(void)
+{
+  char out[kUtf8FieldSize];
+  /* 0xe1 a-acute: two bytes; 0x80 euro sign: three; ASCII passes through */
+  const char in[] = { 'M', 'i', 'h', static_cast<char>(0xe1), ' ',
+                      static_cast<char>(0x80), 0 };
+  win1252_to_utf8(in, out, sizeof(out));
+  US_CHECK_EQ_STR(out, "Mih\xc3\xa1 \xe2\x82\xac", "a-acute and euro sign as UTF-8");
+
+  /* truncation keeps whole characters */
+  char small[4];
+  win1252_to_utf8(in + 3, small, sizeof(small));
+  US_CHECK_EQ_STR(small, "\xc3\xa1 ", "no half character at the end");
+
+  /* the parser keeps the bytes the file stores */
+  data_t file[0x7c] = { 0 };
+  memcpy(file, "PSID", 4);
+  file[5] = 2;              /* version 2 */
+  file[7] = 0x7c;           /* data offset */
+  file[0x0f] = 1;           /* one song */
+  file[0x11] = 1;           /* start song */
+  file[0x36] = 'M';
+  file[0x37] = static_cast<data_t>(0xe1);
+  std::vector<data_t> bytes(file, file + sizeof(file));
+  bytes.push_back(0x00); bytes.push_back(0x10); bytes.push_back(0x60);
+  SidFile tune;
+  US_CHECK(sidfile_parse(bytes.data(), bytes.size(), tune), "synthetic tune parses");
+  US_CHECK(static_cast<uint8_t>(tune.author[1]) == 0xe1, "author kept as Windows-1252");
+  return 0;
+}
+
 int us_test_player(void)
 {
   US_TEST_BEGIN("player");
 
+  test_win1252_to_utf8();
+
+#if US_EMBED_ROMS
   test_boot_image_matches_roms();
+#endif
   test_parse_synthetic();
   test_real_tunes();
   test_tune_runs();

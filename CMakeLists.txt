@@ -75,6 +75,12 @@ set(REQUIRE_AUDIO 0 CACHE STRING "Refuse to configure without software audio")
 ### `./build.sh cli-ymfm`, which configures this into its own build directory.
 set(FM_YMFM 0 CACHE STRING "Use ymfm instead of Nuked-OPL3-fast for FM/OPL (CLI only)")
 
+### Compile the stock Commodore BASIC, KERNAL and character ROMs in. With 0 the
+### build carries no Commodore code: tunes start on the stub KERNAL
+### (src/mem/roms/stub_kernal.cpp) and real images can be supplied at runtime
+### (usplayer_set_roms()). BASIC programs without a SYS line need them.
+set(EMBED_ROMS 1 CACHE STRING "Compile the stock C64 ROM images in")
+
 if(${WEB} EQUAL 1)
   set(DESKTOP 1)
   set(EMBEDDED 0)
@@ -83,6 +89,10 @@ endif()
 
 if(${FM_YMFM} EQUAL 1 AND (${WEB} EQUAL 1 OR ${EMBEDDED} EQUAL 1))
   message(FATAL_ERROR "FM_YMFM=1 is for the command line player only, not WEB or EMBEDDED! Exiting...")
+endif()
+
+if(${EMBED_ROMS} EQUAL 0 AND ${EMBEDDED} EQUAL 1)
+  message(FATAL_ERROR "EMBED_ROMS=0 is not supported for EMBEDDED! Exiting...")
 endif()
 
 if(${DESKTOP} EQUAL 1 AND ${EMBEDDED} EQUAL 1)
@@ -132,6 +142,7 @@ set(US_COMPILE_DEFS
   EMBEDDED=${EMBEDDED}
   WEB=${WEB}
   US_PROFILE=${PROFILE}
+  US_EMBED_ROMS=${EMBED_ROMS}
 )
 
 ### reSIDfp, vendored in lib/residfp from the libsidplayfp release tarball.
@@ -271,8 +282,14 @@ set(US_CORE_SOURCES
   ${CMAKE_CURRENT_LIST_DIR}/src/player/player.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/sid/mos6581_8580.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/vic/mos6569.cpp
-  ${CMAKE_CURRENT_LIST_DIR}/src/mem/roms/rom_data.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/src/mem/roms/stub_kernal.cpp
 )
+if(${EMBED_ROMS} EQUAL 1)
+  list(APPEND US_CORE_SOURCES ${CMAKE_CURRENT_LIST_DIR}/src/mem/roms/rom_data.cpp)
+  message(STATUS "C64 ROMs: stock images compiled in")
+else()
+  message(STATUS "C64 ROMs: none compiled in, stub KERNAL until supplied at runtime")
+endif()
 
 ### Which SID backend the C API is compiled against. The embedded one binds to
 ### the firmware's bus functions through weak symbols, and an undefined weak
@@ -657,7 +674,7 @@ endif()
 if(${DESKTOP} EQUAL 1 AND ${BUILD_TESTS} EQUAL 1)
   enable_testing()
 
-  set(US_TEST_NAMES bus ram cpu mmu cia vic sid player embedded prg keyboard web)
+  set(US_TEST_NAMES bus ram cpu mmu cia vic sid player embedded prg keyboard web roms)
 
   set(US_TEST_SOURCES "")
   foreach(t ${US_TEST_NAMES})

@@ -55,6 +55,7 @@ const TestEntry kTests[] = {
   { "prg", us_test_prg },
   { "keyboard", us_test_keyboard },
   { "web", us_test_web },
+  { "roms", us_test_roms },
 };
 
 constexpr size_t kTestCount = sizeof(kTests) / sizeof(kTests[0]);

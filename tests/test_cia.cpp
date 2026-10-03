@@ -558,6 +558,7 @@ int test_cascade_matches_stepping(void)
 
 int us_test_cia(void)
 {
+  US_NEEDS_STOCK_ROMS("cia/mos6526");
   US_TEST_BEGIN("cia/mos6526");
 
   test_timer_basics();

@@ -521,6 +521,7 @@ int test_skipping_matches_stepping(void)
 
 int us_test_vic(void)
 {
+  US_NEEDS_STOCK_ROMS("vic/mos6569");
   US_TEST_BEGIN("vic/mos6569");
 
   test_frame_timing();

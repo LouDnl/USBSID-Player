@@ -70,6 +70,9 @@ Please refer to the [releases page](https://github.com/LouDnl/USBSID-Player/rele
   interrupted audio context is resumed on return
 * Fix a cached older `usplayer-worker.js` being used by a newer adapter: the
   worker URL is versioned like the wasm
+* Change the licence to GPL-2.0-or-later (was GPL-2.0-only): every source
+  header says "version 2, or (at your option) any later version", so the
+  player can be combined with the GPL-3.0-or-later USBSID-Pico-driver
 
 #### Version: 1.3.0
 * Add Cynthcart support to the embedded player, runs through USBSID-Player's own C64 core instead of the old emudore based path

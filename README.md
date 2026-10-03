@@ -197,11 +197,18 @@ Web player:
 CLI player:  
 - [USBSID-Configtool](https://github.com/LouDnl/USBSID-Configtool) ~ in active development
 
+
 # Libraries used for non USBSID audio play (CLI & Web)
 - [ResidFp](https://github.com/libsidplayfp/libresidfp)
 - [miniaudio](https://github.com/mackron/miniaudio)
 - [Nuked-OPL3-fast](https://github.com/tgies/Nuked-OPL3-fast), a bit-exact perf fork of [Nuked-OPL3](https://github.com/nukeykt/Nuked-OPL3)
 - [ymfm](https://github.com/aaronsgiles/ymfm), optional FM/OPL engine for the `cli-ymfm` build (CLI only)
+
+
+# License
+USBSID-Player is licensed under the GNU General Public License, version 2 or (at your
+option) any later version (`GPL-2.0-or-later`), see [LICENSE](LICENSE). Vendored libraries in
+`lib/` keep their own licences.
 
 
 # Disclaimer

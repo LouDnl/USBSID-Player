@@ -341,8 +341,19 @@ if(US_HAVE_FM)
   list(APPEND US_CORE_INCLUDE_DIRS ${US_FM_INCLUDE_DIRS})
 endif()
 
+### The playback session for interactive frontends (src/host/session.h). It
+### runs an engine thread, which the browser build has none of.
+if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
+  list(APPEND US_CORE_SOURCES ${CMAKE_CURRENT_LIST_DIR}/src/host/session.cpp)
+  list(APPEND US_CORE_INCLUDE_DIRS ${CMAKE_CURRENT_LIST_DIR}/src/host)
+endif()
+
 add_library(usbsidcore STATIC ${US_CORE_SOURCES})
 target_include_directories(usbsidcore PUBLIC ${US_CORE_INCLUDE_DIRS})
+if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
+  find_package(Threads REQUIRED)
+  target_link_libraries(usbsidcore PUBLIC Threads::Threads)
+endif()
 ### -fno-rtti is a C++ flag, and reloc65.c is third party C that was never
 ### written to today's warning settings, so it gets its own set.
 target_compile_options(usbsidcore PRIVATE
@@ -505,6 +516,7 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
     set(US_SOFTSID_SOURCES
       ${CMAKE_CURRENT_LIST_DIR}/src/sid/sid_residfp.cpp
       ${CMAKE_CURRENT_LIST_DIR}/src/host/audio_out.cpp
+      ${CMAKE_CURRENT_LIST_DIR}/src/host/session_audio.cpp
       ${US_RESIDFP_SOURCES}
       ${US_FM_SOURCES}
     )
@@ -519,12 +531,15 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
     set(US_HAVE_NETDEVICE 0)
   else()
     set(US_HAVE_NETDEVICE 1)
-    set(US_NETDEVICE_SOURCES ${CMAKE_CURRENT_LIST_DIR}/src/sid/sid_netdevice.cpp)
+    set(US_NETDEVICE_SOURCES
+      ${CMAKE_CURRENT_LIST_DIR}/src/sid/sid_netdevice.cpp
+      ${CMAKE_CURRENT_LIST_DIR}/src/host/session_net.cpp)
   endif()
 
   add_executable(${EXECUTABLE}
     ${CMAKE_CURRENT_LIST_DIR}/src/host/main_cli.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sid/sid_usbsid.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/host/session_board.cpp
     ${US_NETDEVICE_SOURCES}
     ${US_DRIVER_DIR}/USBSID.cpp
     ${US_DRIVER_DIR}/USBSID_Manager.cpp
@@ -674,7 +689,7 @@ endif()
 if(${DESKTOP} EQUAL 1 AND ${BUILD_TESTS} EQUAL 1)
   enable_testing()
 
-  set(US_TEST_NAMES bus ram cpu mmu cia vic sid player embedded prg keyboard web roms)
+  set(US_TEST_NAMES bus ram cpu mmu cia vic sid player embedded prg keyboard web roms session)
 
   set(US_TEST_SOURCES "")
   foreach(t ${US_TEST_NAMES})

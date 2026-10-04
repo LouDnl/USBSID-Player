@@ -54,6 +54,13 @@ constexpr uint8_t kFmDigiAddrB = 0xa1;  /**< channel B's PCM port */
  * relies on a later stage to remove the resulting DC bias - this mix has no
  * such stage, so centering happens here instead. */
 constexpr int32_t kDigiScale = 32;
+
+#if !(defined(US_FM_YMFM) && US_FM_YMFM)
+/* Nuked's native rate and the fixed point fraction of its rate ratio, as
+ * OPL3_Reset() derives `rateratio` (opl3.c RSM_FRAC). */
+constexpr int32_t kNukedNativeRate = 49716;
+constexpr int kNukedRsmFrac = 10;
+#endif
 } /* namespace */
 
 void OplChip::chip_reset_(void)
@@ -111,6 +118,20 @@ void OplChip::configure(unsigned sample_rate)
    * mono in mix_into(). */
   scratch_.assign(kBlock * 2, 0);
   ready_ = true;
+}
+
+void OplChip::set_rate(unsigned sample_rate)
+{
+  if (sample_rate == 0 || sample_rate == sample_rate_) return;
+  sample_rate_ = sample_rate;
+  if (!ready_) return;
+#if defined(US_FM_YMFM) && US_FM_YMFM
+  native_step_ = static_cast<double>(chip_.sample_rate(kOplClock)) /
+                 static_cast<double>(sample_rate_);
+#else
+  chip_.rateratio = static_cast<int32_t>(
+    (static_cast<int64_t>(sample_rate_) << kNukedRsmFrac) / kNukedNativeRate);
+#endif
 }
 
 void OplChip::bus_write(uint8_t reg, uint8_t value)

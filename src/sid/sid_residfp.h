@@ -200,6 +200,29 @@ class ResidFpSidBackend final : public SidBackend
     float fm_gain(void) const { return fm_.gain(); }
 
     /**
+     * @brief Play faster or slower by changing the output rate, chips untouched.
+     *
+     * Resamples to `sample_rate / mult` instead of `sample_rate`: fewer samples
+     * per emulated second above 1, more below, played at the device rate. Pitch
+     * follows speed. Chip state, the FM/OPL included, is kept. Callable before
+     * configure() and not reset by it, same as set_sid_gain().
+     *
+     * @param mult speed multiplier, 1 is normal; clamped to 0.1 to 8, and
+     *             further to keep the output rate within 4 kHz to 192 kHz,
+     *             the range reSIDfp's two pass sinc resampler handles
+     * @returns the multiplier in effect after clamping
+     */
+    double set_speed(double mult);
+    /** @brief The speed multiplier in effect, see set_speed(): the request
+     * until configure(), the rate clamped result after. */
+    double speed(void) const
+    {
+      return (ready_ && out_rate_ != 0)
+        ? static_cast<double>(sample_rate_) / static_cast<double>(out_rate_)
+        : speed_;
+    }
+
+    /**
      * @brief Attach to a machine, setting what this backend needs of it.
      *
      * Sets `access_overhead` to 0, which is the one part of the contract that
@@ -306,9 +329,18 @@ class ResidFpSidBackend final : public SidBackend
      * counts toward both - see set_pan()'s own comment on why. */
     void recompute_pan_headroom(void);
 
+    /** @brief Output rate for `speed_` at `sample_rate_`, clamped. */
+    unsigned speed_rate_(void) const;
+
     reSIDfp::residfp * sid_[kMaxSoftSids] = {};
     uint8_t chips_ = 0;
     unsigned sample_rate_ = 0;
+    /* Rate the chips and the FM/OPL resample to: sample_rate_ / speed_. */
+    unsigned out_rate_ = 0;
+    double clock_hz_ = 0.0;
+    SoftSidQuality quality_ = SoftSidQuality::Good;
+    /** Requested multiplier, see set_speed(). Not touched by configure(). */
+    double speed_ = 1.0;
     bool ready_ = false;
     /* False while a stretch is being run through with nothing synthesised,
      * see set_render(). */

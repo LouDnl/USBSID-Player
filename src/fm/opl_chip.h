@@ -98,6 +98,17 @@ class OplChip
      */
     void configure(unsigned sample_rate);
 
+    /**
+     * @brief Change the output rate without resetting the chip.
+     *
+     * For playing faster or slower: registers, voices and pending writes are
+     * kept, only the resampling ratio changes. Before configure(), only
+     * remembered for it.
+     *
+     * @param sample_rate the new output rate, ignored when 0
+     */
+    void set_rate(unsigned sample_rate);
+
     /** @brief Is there a chip to write to? */
     bool ready(void) const { return ready_; }
 

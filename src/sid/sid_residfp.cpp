@@ -46,6 +46,14 @@ namespace {
  * memory and removes a whole class of question. */
 constexpr size_t kMaxDelta = 0x10000;
 
+/* Output rate bounds for set_speed(). Above ~215 kHz the two pass sinc
+ * resampler's intermediate rate drops below the output rate and it can no
+ * longer produce one sample per output slot. */
+constexpr double kMinOutRate = 4000.0;
+constexpr double kMaxOutRate = 192000.0;
+constexpr double kMinSpeed = 0.1;
+constexpr double kMaxSpeed = 8.0;
+
 /* Anything at or above this is not a real chip's register: it is
  * kFmOplParkBase's block (mos6581_8580.cpp), reached when a tune writes
  * $df40/$df50 and no SID claims them. kMaxSids * 0x20 is exactly
@@ -79,6 +87,9 @@ bool ResidFpSidBackend::configure(uint8_t chips, double clock_hz,
   const reSIDfp::ChipModel chip_model =
     (model == SoftSidModel::Csg8580) ? reSIDfp::CSG8580 : reSIDfp::MOS6581;
 
+  sample_rate_ = sample_rate;
+  out_rate_ = speed_rate_();
+
   for (uint8_t i = 0; i < chips; i++) {
     if (sid_[i] == nullptr) sid_[i] = new reSIDfp::residfp();
     if (!sid_[i]->setChipModel(chip_model)) return false;
@@ -86,7 +97,7 @@ bool ResidFpSidBackend::configure(uint8_t chips, double clock_hz,
      * model change after them would leave the resampler configured for the
      * previous one. */
     if (!sid_[i]->setSamplingParameters(clock_hz, method,
-                                        static_cast<double>(sample_rate))) {
+                                        static_cast<double>(out_rate_))) {
       return false;
     }
     sid_[i]->reset();
@@ -99,7 +110,8 @@ bool ResidFpSidBackend::configure(uint8_t chips, double clock_hz,
   }
 
   chips_ = chips;
-  sample_rate_ = sample_rate;
+  clock_hz_ = clock_hz;
+  quality_ = quality;
   stereo_ = stereo;
   /* Every chip starts Center - see set_pan()'s own comment - so a
    * stereo-configured backend nobody calls set_pan() on still plays as an
@@ -117,6 +129,48 @@ bool ResidFpSidBackend::configure(uint8_t chips, double clock_hz,
   fm_writes_ = 0;
   ready_ = true;
   return true;
+}
+
+unsigned ResidFpSidBackend::speed_rate_(void) const
+{
+  double rate = static_cast<double>(sample_rate_) / speed_;
+  if (rate < kMinOutRate) rate = kMinOutRate;
+  if (rate > kMaxOutRate) rate = kMaxOutRate;
+  return static_cast<unsigned>(std::lround(rate));
+}
+
+double ResidFpSidBackend::set_speed(double mult)
+{
+  if (!(mult > 0.0)) mult = 1.0;
+  if (mult < kMinSpeed) mult = kMinSpeed;
+  if (mult > kMaxSpeed) mult = kMaxSpeed;
+  speed_ = mult;
+  if (!ready_) return speed();
+
+  const unsigned rate = speed_rate_();
+  if (rate == out_rate_) return speed();
+
+  /* setSamplingParameters() swaps the resampler only: voices, envelopes and
+   * filter state carry on. configure() would reset the chips. */
+  const reSIDfp::SamplingMethod method =
+    (quality_ == SoftSidQuality::Good) ? reSIDfp::RESAMPLE : reSIDfp::DECIMATE;
+  for (uint8_t i = 0; i < chips_; i++) {
+    if (sid_[i] == nullptr) continue;
+    if (!sid_[i]->setSamplingParameters(clock_hz_, method,
+                                        static_cast<double>(rate))) {
+      /* Put back the chips already switched, keep the old rate. */
+      for (uint8_t j = 0; j < i; j++) {
+        if (sid_[j] != nullptr) {
+          sid_[j]->setSamplingParameters(clock_hz_, method,
+                                         static_cast<double>(out_rate_));
+        }
+      }
+      return speed();
+    }
+  }
+  out_rate_ = rate;
+  fm_.set_rate(out_rate_);
+  return speed();
 }
 
 void ResidFpSidBackend::set_pan(uint8_t chip, SidPan pan)
@@ -319,7 +373,7 @@ void ResidFpSidBackend::write(addr_t reg, data_t value, uint16_t cycles)
      * $df50 (the data port) - see translate(), mos6581_8580.cpp - which is
      * mapped back onto the kFmAddressReg/kFmDataReg pair OplChip::bus_write()
      * actually wants. */
-    if (!fm_.ready()) fm_.configure(sample_rate_);
+    if (!fm_.ready()) fm_.configure(out_rate_);
     const uint8_t opl_reg = ((reg & 0x1f) == 0x10) ? kFmDataReg : kFmAddressReg;
     fm_.bus_write(opl_reg, value);
     return;

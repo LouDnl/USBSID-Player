@@ -363,6 +363,26 @@ int usp_read_memory(int address)
 }
 
 /**
+ * @brief Copy a range of the emulated C64's RAM into a heap buffer.
+ *
+ * Same side effect free RAM read as usp_read_memory(), one call per range.
+ * Wraps at $ffff.
+ *
+ * @param out     destination in the wasm heap, from usp_alloc
+ * @param address first address, masked to 0 to 65535
+ * @param len     bytes to copy
+ * @returns bytes copied
+ */
+int usp_read_memory_block(uint8_t * out, int address, int len)
+{
+  if (out == nullptr || len <= 0) return 0;
+  for (int i = 0; i < len; i++) {
+    out[i] = emu_dma_read_ram(static_cast<uint16_t>((address + i) & 0xffff));
+  }
+  return len;
+}
+
+/**
  * @brief A CIA timer's latch, the value it reloads from.
  *
  * For estimating a CIA-driven tune's call rate: PAL cycles/frame divided by
@@ -507,6 +527,22 @@ void usp_audio_render(int on) { g_soft.set_render(on != 0); }
 
 /** @brief Is the synthesis running, as opposed to being run through? */
 int usp_audio_rendering(void) { return g_soft.rendering() ? 1 : 0; }
+
+/**
+ * @brief Play the software audio faster or slower, pitch following.
+ *
+ * Changes the rate reSIDfp and the FM/OPL resample to, not the device rate:
+ * each emulated frame yields fewer samples above 1, more below. Chip state is
+ * kept. Callable before usp_audio_configure(), which keeps it.
+ *
+ * @param mult speed multiplier, 1 is normal, clamped to 0.1 to 8 and to the
+ *             resampler's rate range
+ * @returns the multiplier in effect
+ */
+double usp_audio_set_speed(double mult) { return g_soft.set_speed(mult); }
+
+/** @brief The software audio speed multiplier in effect. */
+double usp_audio_speed(void) { return g_soft.speed(); }
 
 
 /**

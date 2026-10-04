@@ -609,8 +609,9 @@ if(${WEB} EQUAL 1)
     _usp_has_fm_opl _usp_has_embedded_songlengths _usp_embedded_songlength_ms
     _usp_benchmark
     _usp_irq_sources _usp_start_mode _usp_driver_address
-    _usp_read_memory _usp_cia_latch _usp_sid_register
+    _usp_read_memory _usp_read_memory_block _usp_cia_latch _usp_sid_register
     _usp_audio_render _usp_audio_rendering
+    _usp_audio_set_speed _usp_audio_speed
     _usbsid_web_ring_ptr _usbsid_web_ring_entries
     _usbsid_web_ring_head _usbsid_web_ring_tail _usbsid_web_ring_set_tail
     _usbsid_web_flush_count _usbsid_web_drop_count _usbsid_web_write_count

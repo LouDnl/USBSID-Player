@@ -9,6 +9,21 @@ Please refer to the [releases page](https://github.com/LouDnl/USBSID-Player/rele
   ("MihÃ¡ly" for "Mihály"): the parser keeps the Windows-1252 bytes the file
   stores, the web exports and the command line convert to UTF-8 once, with
   three byte sequences for 0x80-0x9f (euro sign and friends)
+* Add playing without the Commodore ROMs: a free stub KERNAL
+  (`src/mem/roms/stub_kernal.cpp`) with the stock reset, IOINIT and interrupt
+  entry sequences. CMake option `EMBED_ROMS=0` builds without the ROM images,
+  `usplayer_set_roms()` supplies real ones at runtime, `--no-roms` runs the
+  command line player on the stub. Programs with a SYS line start without
+  BASIC; a BASIC program without one needs the ROMs (`usplayer_needs_roms()`)
+* Add `src/host/session.h`: a playback session on an engine thread with
+  queued commands, song lengths, pause, subtunes, seek and mutes, playing
+  through phone audio, USBSID-Pico boards or a Network SID Device
+* Fix slow play and fast forward in web software audio (reSIDfp): speed
+  changes the synthesis output rate, pitch following, instead of seeking
+  silently. New exports `usp_audio_set_speed()`, `usp_audio_speed()`
+* Fix the memory view in web software audio with the worker: watched RAM
+  pages come with each register report. New export `usp_read_memory_block()`
+* Fix DeepSID buffer sizes below 200 ms being ignored in software audio
 
 #### Version: 1.4.0
 * Add multiboard playback: `--boards SERIAL,...` opens several USBSID-Pico

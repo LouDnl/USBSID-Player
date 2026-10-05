@@ -43,6 +43,9 @@ Please refer to the [releases page](https://github.com/LouDnl/USBSID-Player/rele
   draws per voice oscilloscopes, one column per SID chip
 * Fix `usp_audio_available()` counting wrong once rendered audio had been
   taken
+* Fix the web player's status line in software audio with the worker:
+  frames, fps, ms per frame, FM writes and clipped samples read 0 (they
+  came from the page's player, which never steps); the worker reports them
 * Fix reSIDfp output differing from run to run in native builds: the filter
   tables are built on one thread everywhere, their threads shared one dither
   noise sequence

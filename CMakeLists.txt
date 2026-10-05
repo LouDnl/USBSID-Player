@@ -107,13 +107,15 @@ endif()
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -g")
-set(CMAKE_C_FLAGS_RELEASE "-O3 -g")
+### NDEBUG as in CMake's own Release flags: vendored reSIDfp asserts are debug
+### checks, upstream ships without them. In wasm a failed one aborts the module.
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -g -DNDEBUG")
+set(CMAKE_C_FLAGS_RELEASE "-O3 -g -DNDEBUG")
 ### Debug info in a wasm module is DWARF that has to be downloaded, and the
 ### page has no debugger attached to it in normal use. Build it without.
 if(${WEB} EQUAL 1)
-  set(CMAKE_CXX_FLAGS_RELEASE "-O3")
-  set(CMAKE_C_FLAGS_RELEASE "-O3")
+  set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
+  set(CMAKE_C_FLAGS_RELEASE "-O3 -DNDEBUG")
 endif()
 
 project(${PROJECT_NAME} C CXX ASM)

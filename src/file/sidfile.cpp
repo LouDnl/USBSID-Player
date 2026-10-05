@@ -255,6 +255,8 @@ void pan_spread(SidPanLayout layout, uint8_t n, SidPan * out)
   }
 }
 
+} /* namespace */
+
 void compute_panning(SidPanLayout layout, SidPanMode mode, uint8_t n, SidPan * out)
 {
   if (n == 0) return;
@@ -279,8 +281,6 @@ void compute_panning(SidPanLayout layout, SidPanMode mode, uint8_t n, SidPan * o
       break;
   }
 }
-
-} /* namespace */
 
 uint32_t SidFile::embedded_song_length_ms(uint16_t song) const
 {

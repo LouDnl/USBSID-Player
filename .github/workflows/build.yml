@@ -98,6 +98,7 @@ jobs:
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-pkg-config
             mingw-w64-x86_64-ninja
+            patch
 
       - name: Configure and build ${{ matrix.buildname }}
         run: |

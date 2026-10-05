@@ -65,6 +65,16 @@ enum class SidPanMode : uint8_t { Direct = 0, Reverse = 1, Group = 2, Spread = 3
 enum class SidPan : uint8_t { Left, Center, Right };
 
 /**
+ * @brief Fill out[0..n-1] with the v5 panning tables' positions.
+ *
+ * @param layout  v5 panning layout
+ * @param mode    v5 panning mode
+ * @param n       chip count, 1 to kMaxSids; one chip is always Center
+ * @param out     receives n positions
+ */
+void compute_panning(SidPanLayout layout, SidPanMode mode, uint8_t n, SidPan * out);
+
+/**
  * @brief A parsed SID file.
  *
  * The payload is not copied: the caller owns the bytes and this points into

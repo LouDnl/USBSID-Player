@@ -55,6 +55,9 @@
 # "thread constructor failed".
 !lib/residfp
 !lib/residfp/**
+# Local reSIDfp changes, applied to a build tree copy, see patches/residfp/README.md.
+!patches
+!patches/**
 !lib/miniaudio
 !lib/miniaudio/**
 # Nuked OPL3 1.8, the FM/OPL side of a SID+FM tune. Two self contained C files,

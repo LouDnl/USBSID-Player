@@ -24,6 +24,28 @@ Please refer to the [releases page](https://github.com/LouDnl/USBSID-Player/rele
 * Fix the memory view in web software audio with the worker: watched RAM
   pages come with each register report. New export `usp_read_memory_block()`
 * Fix DeepSID buffer sizes below 200 ms being ignored in software audio
+* Add a per voice oscilloscope tap to software audio (reSIDfp):
+  `ResidFpSidBackend::set_scope()`, new exports `usp_audio_scope()`,
+  `usp_audio_scope_voices()`, `usp_audio_scope_take()`. The worker sends the
+  frames with each register report; DeepSID's Scope tab draws them
+* Compile reSIDfp from a patched copy in the build tree: local changes live in
+  `patches/residfp/` (see its README.md), `lib/residfp` is not edited by the
+  build. Windows CI installs MSYS2 `patch` for it
+* Add stereo and filter control to software audio in the web player:
+  `usp_audio_set_stereo()`, `usp_audio_channels()`, `usp_audio_set_panning()`
+  (SID v5 panning layout and mode, the tune's own by default, plus a position
+  for single SID tunes), `usp_audio_pan()`, `usp_audio_set_filter()` (reSIDfp
+  filter on/off, 6581 curve and range, 8580 curve, combined waveforms). The
+  AudioWorklet plays stereo chunks; mono chunks play as before
+* Move software audio's scope, panning and filter handling into
+  `web/usplayer-softaudio.js`, shared by both web adapters; the site adapter
+  configures stereo and carries scope frames. New `web/usplayer-scope.js`
+  draws per voice oscilloscopes, one column per SID chip
+* Fix `usp_audio_available()` counting wrong once rendered audio had been
+  taken
+* Fix reSIDfp output differing from run to run in native builds: the filter
+  tables are built on one thread everywhere, their threads shared one dither
+  noise sequence
 
 #### Version: 1.4.0
 * Add multiboard playback: `--boards SERIAL,...` opens several USBSID-Pico

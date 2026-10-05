@@ -61,6 +61,10 @@ constexpr double kMaxSpeed = 8.0;
  * boundary, not a guess. */
 constexpr addr_t kFmOplRange = static_cast<addr_t>(kMaxSids * 0x20);
 
+/* Scope frames kept for a reader that falls behind or stops reading: about a
+ * second at 48 kHz. Older frames are dropped. */
+constexpr size_t kScopeMaxFrames = 0x10000;
+
 } /* namespace */
 
 ResidFpSidBackend::ResidFpSidBackend(void) = default;
@@ -101,6 +105,7 @@ bool ResidFpSidBackend::configure(uint8_t chips, double clock_hz,
       return false;
     }
     sid_[i]->reset();
+    apply_filter_(i, true, filter_);
   }
   /* Any chips above the new count are not kept around configured for an old
    * rate, because a later configure() with more chips would then reuse them. */
@@ -124,6 +129,8 @@ bool ResidFpSidBackend::configure(uint8_t chips, double clock_hz,
   fm_scratch_.assign(stereo_ ? kMaxDelta : 0, 0);
   out_.clear();
   taken_ = 0;
+  scope_.clear();
+  scope_taken_ = 0;
   produced_ = 0;
   clipped_ = 0;
   fm_writes_ = 0;
@@ -171,6 +178,30 @@ double ResidFpSidBackend::set_speed(double mult)
   out_rate_ = rate;
   fm_.set_rate(out_rate_);
   return speed();
+}
+
+void ResidFpSidBackend::set_filter(const SoftSidFilter & filter)
+{
+  const SoftSidFilter was = filter_;
+  filter_ = filter;
+  for (uint8_t i = 0; i < chips_; i++) {
+    if (sid_[i] != nullptr) apply_filter_(i, false, was);
+  }
+}
+
+void ResidFpSidBackend::apply_filter_(uint8_t chip, bool all, const SoftSidFilter & was)
+{
+  reSIDfp::residfp * sid = sid_[chip];
+  const SoftSidFilter & f = filter_;
+  if (all || f.enabled != was.enabled) sid->enableFilter(f.enabled);
+  if (all || f.curve_6581 != was.curve_6581) sid->setFilter6581Curve(f.curve_6581);
+  if (all || f.range_6581 != was.range_6581) sid->setFilter6581Range(f.range_6581);
+  if (all || f.curve_8580 != was.curve_8580) sid->setFilter8580Curve(f.curve_8580);
+  if (all || f.waveforms != was.waveforms) {
+    sid->setCombinedWaveforms(
+      (f.waveforms == SoftSidWaveforms::Weak)   ? reSIDfp::WEAK :
+      (f.waveforms == SoftSidWaveforms::Strong) ? reSIDfp::STRONG : reSIDfp::AVERAGE);
+  }
 }
 
 void ResidFpSidBackend::set_pan(uint8_t chip, SidPan pan)
@@ -248,7 +279,14 @@ void ResidFpSidBackend::advance(uint32_t cycles)
      * (left), mix_r_ (right), or both, per pan_[] - hard panning, the same
      * three positions a v5 tune's own panning hint can ask for (set_pan()'s
      * own comment). Mono (the default): summed into mix_ only. */
+    if (scope_on_) sid_[0]->setScopeTap(tap_.data());
     const int n = sid_[0]->clock(step, scratch_.data());
+    size_t scope_base = 0;
+    if (scope_on_ && n > 0) {
+      scope_base = scope_.size();
+      scope_.resize(scope_base + static_cast<size_t>(n) * scope_voices(), 0);
+      store_scope_(0, n, scope_base);
+    }
     if (stereo_) {
       const bool l0 = (pan_[0] != SidPan::Right);
       const bool r0 = (pan_[0] != SidPan::Left);
@@ -266,8 +304,10 @@ void ResidFpSidBackend::advance(uint32_t cycles)
      * let it fall behind the others over time. */
     for (uint8_t c = 1; c < chips_; c++) {
       if (sid_[c] == nullptr) continue;
+      if (scope_on_) sid_[c]->setScopeTap(tap_.data());
       const int m = sid_[c]->clock(step, scratch_.data());
       const int k = (m < n) ? m : n;
+      if (scope_on_ && k > 0) store_scope_(c, k, scope_base);
       if (stereo_) {
         const bool lc = (pan_[c] != SidPan::Right);
         const bool rc = (pan_[c] != SidPan::Left);
@@ -354,6 +394,65 @@ void ResidFpSidBackend::advance(uint32_t cycles)
     out_.erase(out_.begin(), out_.begin() + static_cast<long>(taken_elems));
     taken_ = 0;
   }
+
+  /* Same for the scope frames, after dropping what nobody read in time. */
+  if (scope_on_) {
+    const size_t v = scope_voices();
+    const size_t waiting = scope_.size() / v - scope_taken_;
+    if (waiting > kScopeMaxFrames) scope_taken_ += waiting - kScopeMaxFrames;
+    if (scope_taken_ > 4096 && scope_taken_ * v >= scope_.size() / 2) {
+      scope_.erase(scope_.begin(),
+                   scope_.begin() + static_cast<long>(scope_taken_ * v));
+      scope_taken_ = 0;
+    }
+  }
+}
+
+void ResidFpSidBackend::store_scope_(uint8_t chip, int count, size_t base)
+{
+  const size_t v = scope_voices();
+  int16_t * dst = scope_.data() + base + 3u * chip;
+  const int16_t * src = tap_.data();
+  for (int s = 0; s < count; s++, dst += v, src += 3) {
+    dst[0] = src[0];
+    dst[1] = src[1];
+    dst[2] = src[2];
+  }
+}
+
+void ResidFpSidBackend::set_scope(bool on)
+{
+  if (on == scope_on_) return;
+  scope_on_ = on;
+  scope_.clear();
+  scope_taken_ = 0;
+  if (on) {
+    tap_.assign(kMaxDelta * 3, 0);
+    /* A silent scope frame per rendered frame not yet taken: keeps
+     * take_scope() in line with take(). */
+    if (ready_) scope_.assign(available() * scope_voices(), 0);
+    return;
+  }
+  for (uint8_t i = 0; i < kMaxSoftSids; i++) {
+    if (sid_[i] != nullptr) sid_[i]->setScopeTap(nullptr);
+  }
+  std::vector<int16_t>().swap(tap_);
+  std::vector<int16_t>().swap(scope_);
+}
+
+size_t ResidFpSidBackend::take_scope(int16_t * out, size_t frames, unsigned voices)
+{
+  const unsigned all = scope_voices();
+  if (out == nullptr || frames == 0 || all == 0 || !scope_on_) return 0;
+  if (voices > all) voices = all;
+  const size_t have = scope_.size() / all - scope_taken_;
+  const size_t n = (frames < have) ? frames : have;
+  const int16_t * src = scope_.data() + scope_taken_ * all;
+  for (size_t f = 0; f < n; f++, src += all, out += voices) {
+    std::copy(src, src + voices, out);
+  }
+  scope_taken_ += n;
+  return n;
 }
 
 void ResidFpSidBackend::write(addr_t reg, data_t value, uint16_t cycles)
@@ -441,6 +540,8 @@ void ResidFpSidBackend::discard(void)
 {
   out_.clear();
   taken_ = 0;
+  scope_.clear();
+  scope_taken_ = 0;
 }
 
 } /* namespace usbsid */

@@ -204,7 +204,7 @@ default:
   before_script:
     - choco install msys2 -y --no-progress
     - C:\tools\msys64\usr\bin\bash -lc "pacman -Syu --noconfirm"
-    - C:\tools\msys64\usr\bin\bash -lc "pacman -S --noconfirm --needed mingw-w64-x86_64-gcc mingw-w64-x86_64-libusb mingw-w64-x86_64-cmake mingw-w64-x86_64-pkg-config mingw-w64-x86_64-ninja zip"
+    - C:\tools\msys64\usr\bin\bash -lc "pacman -S --noconfirm --needed mingw-w64-x86_64-gcc mingw-w64-x86_64-libusb mingw-w64-x86_64-cmake mingw-w64-x86_64-pkg-config mingw-w64-x86_64-ninja zip patch"
     # Same selection as .driver_clone, which is bash only
     - |
       if (-not $env:USBSID_DRIVER_REPO) {

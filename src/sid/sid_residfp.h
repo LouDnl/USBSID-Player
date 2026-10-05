@@ -100,6 +100,23 @@ enum class SoftSidQuality : uint8_t {
 /** @brief Which chip to model. Taken from the tune's header when it says. */
 enum class SoftSidModel : uint8_t { Mos6581, Csg8580 };
 
+/** @brief reSIDfp's combined waveforms strength. */
+enum class SoftSidWaveforms : uint8_t { Average, Weak, Strong };
+
+/**
+ * @brief reSIDfp filter settings, applied to every chip.
+ *
+ * Defaults are reSIDfp's own. The 6581 range is one setting for every chip
+ * in the process, a reSIDfp limit.
+ */
+struct SoftSidFilter {
+  bool enabled = true;
+  double curve_6581 = 0.5;            /* 0 dark to 1 bright */
+  double range_6581 = 19.0 / 39.0;    /* 0 to 1, reSIDfp's uCox of 20e-6 */
+  double curve_8580 = 0.5;            /* 0 dark to 1 bright */
+  SoftSidWaveforms waveforms = SoftSidWaveforms::Average;
+};
+
 /**
  * @brief Synthesises what the emulation writes, instead of sending it anywhere.
  */
@@ -165,6 +182,26 @@ class ResidFpSidBackend final : public SidBackend
      * on either side just because a third, Center chip exists.
      */
     void set_pan(uint8_t chip, SidPan pan);
+
+    /** @brief Where one chip sits in the stereo mix, chip from 1; Center
+     * when there is no such chip. */
+    SidPan pan(uint8_t chip) const
+    {
+      return (chip >= 1 && chip <= chips_) ? pan_[chip - 1] : SidPan::Center;
+    }
+
+    /**
+     * @brief Set the filter of every chip, at once and after each configure().
+     *
+     * Only what differs from the current settings is applied: a 6581 curve
+     * or range change rebuilds reSIDfp tables.
+     *
+     * @param filter the new settings
+     */
+    void set_filter(const SoftSidFilter & filter);
+
+    /** @brief The filter settings in effect. */
+    const SoftSidFilter & filter(void) const { return filter_; }
 
     /**
      * @brief How much the SID mix is turned down (or up) before it is output.
@@ -256,7 +293,39 @@ class ResidFpSidBackend final : public SidBackend
     size_t take(int16_t * out, size_t frames);
 
     /** @brief How many rendered frames are waiting. */
-    size_t available(void) const { return produced_ - taken_; }
+    size_t available(void) const { return out_.size() / channels() - taken_; }
+
+    /* ---- the oscilloscope tap ------------------------------------------ */
+
+    /**
+     * @brief Record every voice's own output beside the mix, or stop.
+     *
+     * One scope frame per rendered frame, each holding scope_voices() int16
+     * values: chip 1 voices 1-3, then chip 2 voices 1-3, up to the last
+     * chip. Taken with
+     * take_scope() in step with take(). Off by default, and costs nothing
+     * then. Not reset by configure().
+     *
+     * @param on true to record, false to stop and drop what is recorded
+     */
+    void set_scope(bool on);
+
+    /** @brief Is the scope tap recording? */
+    bool scope(void) const { return scope_on_; }
+
+    /** @brief Values per scope frame: three per configured chip. */
+    unsigned scope_voices(void) const { return 3u * chips_; }
+
+    /**
+     * @brief Take up to `frames` scope frames, oldest first.
+     *
+     * @param out        room for `frames * voices` int16_t
+     * @param frames     the most frames to take
+     * @param voices     values to keep per frame, the first ones; clamped to
+     *                   scope_voices()
+     * @returns frames written
+     */
+    size_t take_scope(int16_t * out, size_t frames, unsigned voices);
 
     /** @brief Drop everything rendered but not taken. */
     void discard(void);
@@ -332,6 +401,25 @@ class ResidFpSidBackend final : public SidBackend
     /** @brief Output rate for `speed_` at `sample_rate_`, clamped. */
     unsigned speed_rate_(void) const;
 
+    /**
+     * @brief Apply filter settings to one chip.
+     *
+     * @param chip  0-based chip
+     * @param all   true for every setting, false for those differing from
+     *              `was`
+     * @param was   the settings the chip has
+     */
+    void apply_filter_(uint8_t chip, bool all, const SoftSidFilter & was);
+
+    /**
+     * @brief Copy one chip's tapped voices into the scope frames.
+     *
+     * @param chip  0-based chip, its slot in each frame
+     * @param count samples the chip produced this step
+     * @param base  index in scope_ of this step's first frame
+     */
+    void store_scope_(uint8_t chip, int count, size_t base);
+
     reSIDfp::residfp * sid_[kMaxSoftSids] = {};
     uint8_t chips_ = 0;
     unsigned sample_rate_ = 0;
@@ -358,6 +446,9 @@ class ResidFpSidBackend final : public SidBackend
 
     /** See set_sid_gain(). Not touched by configure(). */
     float sid_gain_ = 1.0f;
+
+    /** See set_filter(). Not touched by configure(). */
+    SoftSidFilter filter_;
 
     /* Rendered frames, oldest first: one int16_t each if mono, an
      * interleaved L/R pair each if stereo (see channels()). A vector and not
@@ -393,6 +484,14 @@ class ResidFpSidBackend final : public SidBackend
      * hand - see advance(). Unused, and left empty, when !stereo_, where
      * mix_into() runs directly on out_ exactly as it always did. */
     std::vector<int16_t> fm_scratch_;
+
+    /* Scope tap, see set_scope(). tap_ receives one chip's three voices per
+     * sample from reSIDfp, sized like scratch_; scope_ holds the interleaved
+     * frames not yet taken, scope_taken_ counts frames taken from its front. */
+    bool scope_on_ = false;
+    std::vector<int16_t> tap_;
+    std::vector<int16_t> scope_;
+    size_t scope_taken_ = 0;
 };
 
 } /* namespace usbsid */

@@ -458,6 +458,37 @@ int usp_songlength_count(const char * db, int db_len, const char * key)
 
 static usbsid::ResidFpSidBackend g_soft;
 static bool g_soft_on = false;
+/* Stereo mix from the following usp_audio_configure(), see usp_audio_set_stereo(). */
+static bool g_soft_stereo = false;
+
+/* Panning asked for with usp_audio_set_panning(), reapplied per configure. */
+static int g_pan_stereo = 0;
+static int g_pan_layout = -1;
+static int g_pan_mode = -1;
+static int g_pan_single = 1;
+
+/**
+ * @brief Put every chip where the panning settings say.
+ *
+ * Mono: all Center. One chip: g_pan_single. Several: the v5 tables for the
+ * chosen layout and mode, the tune's own where -1.
+ */
+static void apply_panning(void)
+{
+  const uint8_t n = g_soft.chips();
+  usbsid::SidPan pans[usbsid::kMaxSids];
+  for (uint8_t c = 0; c < usbsid::kMaxSids; c++) pans[c] = usbsid::SidPan::Center;
+  if (g_pan_stereo && n == 1) {
+    pans[0] = (g_pan_single == 0) ? usbsid::SidPan::Left
+            : (g_pan_single == 2) ? usbsid::SidPan::Right : usbsid::SidPan::Center;
+  } else if (g_pan_stereo && n > 1) {
+    const int layout = (g_pan_layout < 0) ? usplayer_pan_layout() : g_pan_layout;
+    const int mode = (g_pan_mode < 0) ? usplayer_pan_mode() : g_pan_mode;
+    usbsid::compute_panning(static_cast<usbsid::SidPanLayout>(layout & 3),
+                            static_cast<usbsid::SidPanMode>(mode & 3), n, pans);
+  }
+  for (uint8_t c = 0; c < n; c++) g_soft.set_pan(static_cast<uint8_t>(c + 1), pans[c]);
+}
 
 /**
  * @brief Build the software SID and route the emulation into it.
@@ -478,10 +509,12 @@ int usp_audio_configure(int chips, int rate, int quality, int model)
                         quality ? usbsid::SoftSidQuality::Good
                                 : usbsid::SoftSidQuality::Fast,
                         model ? usbsid::SoftSidModel::Csg8580
-                              : usbsid::SoftSidModel::Mos6581)) {
+                              : usbsid::SoftSidModel::Mos6581,
+                        g_soft_stereo)) {
     g_soft_on = false;
     return 0;
   }
+  apply_panning();
   /* attach() is also what sets access_overhead to 0, which a software SID needs
    * and a board does not. See sid_residfp.h. */
   g_soft.attach(usbsid::usplayer_machine());
@@ -499,11 +532,12 @@ int usp_audio_available(void)
 }
 
 /**
- * @brief Take up to `max` rendered samples into a heap buffer.
+ * @brief Take up to `max` rendered frames into a heap buffer.
  *
- * @param out  an int16 buffer in the wasm heap, from usp_alloc
- * @returns how many were written, which is fewer than asked for when the
- *          emulation has not run far enough yet
+ * @param out  an int16 buffer in the wasm heap, from usp_alloc, with room for
+ *             `max * usp_audio_channels()` samples, L/R interleaved in stereo
+ * @returns how many frames were written, which is fewer than asked for when
+ *          the emulation has not run far enough yet
  */
 int usp_audio_take(int16_t * out, int max)
 {
@@ -513,6 +547,99 @@ int usp_audio_take(int16_t * out, int max)
 
 /** @brief Drop everything rendered but not taken, on a stop or a seek. */
 void usp_audio_discard(void) { if (g_soft_on) g_soft.discard(); }
+
+/**
+ * @brief Mix to two channels from the following usp_audio_configure() on.
+ *
+ * Off by default. Stereo frames are L/R pairs, see usp_audio_take().
+ *
+ * @param on 1 for stereo, 0 for mono
+ */
+void usp_audio_set_stereo(int on) { g_soft_stereo = (on != 0); }
+
+/** @brief Samples per frame of usp_audio_take(): 1 mono, 2 stereo. */
+int usp_audio_channels(void) { return g_soft_on ? static_cast<int>(g_soft.channels()) : 1; }
+
+/**
+ * @brief Place the chips in the stereo mix, at once and after each configure.
+ *
+ * Needs a stereo configure, see usp_audio_set_stereo().
+ *
+ * @param stereo  0 puts every chip Center (mono), 1 pans
+ * @param layout  v5 panning layout 0-3 for several chips, -1 for the tune's own
+ * @param mode    v5 panning mode 0-3 for several chips, -1 for the tune's own
+ * @param single  one chip tunes: 0 left, 1 center, 2 right
+ */
+void usp_audio_set_panning(int stereo, int layout, int mode, int single)
+{
+  g_pan_stereo = stereo;
+  g_pan_layout = layout;
+  g_pan_mode = mode;
+  g_pan_single = single;
+  if (g_soft_on) apply_panning();
+}
+
+/** @brief Where a chip sits: 0 left, 1 center, 2 right. Chip from 1. */
+int usp_audio_pan(int chip)
+{
+  return static_cast<int>(g_soft.pan(static_cast<uint8_t>(chip)));
+}
+
+/**
+ * @brief Set the reSIDfp filter of every chip, kept across configures.
+ *
+ * @param enabled    0 bypasses the filter
+ * @param curve6581  6581 filter curve, 0 dark to 1 bright, default 0.5
+ * @param range6581  6581 filter range, 0 to 1, default 19/39
+ * @param curve8580  8580 filter curve, 0 dark to 1 bright, default 0.5
+ * @param waveforms  combined waveforms: 0 average, 1 weak, 2 strong
+ */
+void usp_audio_set_filter(int enabled, double curve6581, double range6581,
+                          double curve8580, int waveforms)
+{
+  usbsid::SoftSidFilter f;
+  f.enabled = (enabled != 0);
+  f.curve_6581 = curve6581;
+  f.range_6581 = range6581;
+  f.curve_8580 = curve8580;
+  f.waveforms = (waveforms == 1) ? usbsid::SoftSidWaveforms::Weak
+              : (waveforms == 2) ? usbsid::SoftSidWaveforms::Strong
+                                 : usbsid::SoftSidWaveforms::Average;
+  g_soft.set_filter(f);
+}
+
+/**
+ * @brief Record each voice's own output for an oscilloscope, or stop.
+ *
+ * Kept across usp_audio_configure(). See ResidFpSidBackend::set_scope().
+ *
+ * @param on 1 to record, 0 to stop
+ */
+void usp_audio_scope(int on) { g_soft.set_scope(on != 0); }
+
+/** @brief Values per scope frame: three per chip, 0 when not configured. */
+int usp_audio_scope_voices(void)
+{
+  return g_soft_on ? static_cast<int>(g_soft.scope_voices()) : 0;
+}
+
+/**
+ * @brief Take scope frames in step with usp_audio_take().
+ *
+ * Take as many frames as usp_audio_take() returned, right after it.
+ *
+ * @param out     an int16 buffer in the wasm heap, `max * voices` long
+ * @param max     the most frames to take
+ * @param voices  values per frame to keep, the first ones (chip 1 voices
+ *                1-3 first)
+ * @returns frames written
+ */
+int usp_audio_scope_take(int16_t * out, int max, int voices)
+{
+  if (!g_soft_on || out == nullptr || max <= 0 || voices <= 0) return 0;
+  return static_cast<int>(g_soft.take_scope(out, static_cast<size_t>(max),
+                                            static_cast<unsigned>(voices)));
+}
 
 /**
  * @brief Run the emulation without synthesising anything.

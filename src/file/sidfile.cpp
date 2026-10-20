@@ -535,6 +535,8 @@ bool sidfile_parse(const data_t * bytes, size_t len, SidFile & out)
           out.sid_addr[out.sid_count++] = static_cast<addr_t>(addr);
         }
       }
+      /* Reject a count above the addresses the configuration generates */
+      if (out.sid_count < total) return false;
     }
   } else {
     if (out.version >= 3) {

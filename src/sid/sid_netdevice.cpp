@@ -27,6 +27,7 @@
 #include "sid_netdevice.h"
 
 #include <cstdio>
+#include <chrono>
 #include <cstring>
 
 #include <netdb.h>
@@ -47,6 +48,10 @@ namespace {
 constexpr uint8_t kCmdFlush           = 0;
 constexpr uint8_t kCmdTrySetSidCount  = 1;
 constexpr uint8_t kCmdTryReset        = 3;
+constexpr uint8_t kCmdTrySetClock     = 9;
+constexpr uint8_t kCmdGetConfigCount  = 10;
+constexpr uint8_t kCmdGetConfigInfo   = 11;
+constexpr uint8_t kCmdTrySetSidModel  = 14;
 constexpr uint8_t kCmdTryWrite        = 5;
 constexpr uint8_t kCmdGetVersion      = 7;
 /* v5: 16-bit register address, used for FM/OPL ($df00-$dfff) and chip 8+
@@ -72,10 +77,18 @@ constexpr uint8_t kRespBusy    = 1;
 constexpr uint8_t kRespError   = 2;
 constexpr uint8_t kRespRead    = 3;
 constexpr uint8_t kRespVersion = 4;
+constexpr uint8_t kRespCount   = 5;
+constexpr uint8_t kRespInfo    = 6;
 
-/* ~1ms retry delay per spec guidance, bounded to ~2s total so a server
- * stuck BUSY forever reads as dead rather than a hang. Sender thread only. */
-constexpr int kMaxBusyRetries = 2000;
+/* Name prefix of the firmware's own NSD server in GET_CONFIG_INFO
+ * (repo/src/nsd.c handle_get_config_info). */
+constexpr char kHardwareName[] = "USBSID-Pico";
+
+/* ~1ms retry delay per spec guidance, bounded to ~2s of wall time so a
+ * server stuck BUSY forever reads as dead rather than a hang. Playback runs
+ * ahead and sits on the server's BUSY by design, so steady state must never
+ * reach this. Sender thread only. */
+constexpr std::chrono::milliseconds kMaxBusyTime{2000};
 
 } /* namespace */
 
@@ -100,8 +113,16 @@ void NetworkSidBackend::sender_loop(void)
       op = std::move(queue_.front());
       queue_.pop_front();
     }
-    if (!request_ok(op.cmd, op.sid_number, op.payload.data(),
-                     static_cast<uint16_t>(op.payload.size())) && !connected_) {
+    const bool ok = request_ok(op.cmd, op.sid_number, op.payload.data(),
+                               static_cast<uint16_t>(op.payload.size()));
+    if (op.cycles > 0) {
+      /* Accepted (or given up on): the server owns this time now. */
+      std::lock_guard<std::mutex> lock(queue_mutex_);
+      const uint32_t cur = inflight_cycles_;
+      inflight_cycles_ = (cur > op.cycles) ? cur - op.cycles : 0;
+      room_cv_.notify_all();
+    }
+    if (!ok && !connected_) {
       /* request_ok() returns false both when the link actually died (it
        * called fail(), which cleared connected_) and when the server merely
        * rejected this one request with ERROR (link still fine - see its own
@@ -116,17 +137,18 @@ void NetworkSidBackend::sender_loop(void)
 bool NetworkSidBackend::send_request(uint8_t cmd, uint8_t sid_number,
                                       const uint8_t * payload, uint16_t payload_len)
 {
-  const uint8_t header[4] = {
-    cmd, sid_number,
-    static_cast<uint8_t>(payload_len >> 8),
-    static_cast<uint8_t>(payload_len & 0xff)
-  };
-  if (::send(sock_, header, sizeof(header), 0) != static_cast<ssize_t>(sizeof(header))) {
-    return false;
-  }
+  /* Header and payload leave in one send(): a server reading one command per
+   * read() (sid-device) otherwise sees the payload as a command of its own. */
+  send_buf_.resize(4 + payload_len);
+  send_buf_[0] = cmd;
+  send_buf_[1] = sid_number;
+  send_buf_[2] = static_cast<uint8_t>(payload_len >> 8);
+  send_buf_[3] = static_cast<uint8_t>(payload_len & 0xff);
+  if (payload_len > 0) std::memcpy(&send_buf_[4], payload, payload_len);
   size_t sent = 0;
-  while (sent < payload_len) {
-    const ssize_t n = ::send(sock_, payload + sent, payload_len - sent, 0);
+  while (sent < send_buf_.size()) {
+    const ssize_t n = ::send(sock_, send_buf_.data() + sent, send_buf_.size() - sent,
+                             MSG_NOSIGNAL);
     if (n <= 0) return false;
     sent += static_cast<size_t>(n);
   }
@@ -166,12 +188,20 @@ void NetworkSidBackend::drain_extra(void)
 bool NetworkSidBackend::request_ok(uint8_t cmd, uint8_t sid_number,
                                     const uint8_t * payload, uint16_t payload_len)
 {
-  for (int attempt = 0; attempt < kMaxBusyRetries; attempt++) {
+  const auto deadline = std::chrono::steady_clock::now() + kMaxBusyTime;
+  for (;;) {
+    /* Stopping or already failed: leave within one RTT instead of riding
+     * out the BUSY loop (Ctrl-C, disconnect()). */
+    if (!running_ || !connected_) return false;
     if (!send_request(cmd, sid_number, payload, payload_len)) { fail(); return false; }
     uint8_t resp = 0;
     if (!recv_exact(&resp, 1)) { fail(); return false; }
     if (resp == kRespOk) return true;
-    if (resp == kRespBusy) { usleep(1000); continue; }
+    if (resp == kRespBusy) {
+      if (std::chrono::steady_clock::now() >= deadline) break;
+      usleep(1000);
+      continue;
+    }
     if (resp == kRespRead) {
       /* "one byte value follows" (spec) - always exactly one, whether or
        * not this client asked for it. Discard: this client does not issue
@@ -186,7 +216,7 @@ bool NetworkSidBackend::request_ok(uint8_t cmd, uint8_t sid_number,
      * rejected this one request outright, not a sign the link is dead. */
     return false;
   }
-  fail(); /* never drained in a bounded time - treat like a dead connection */
+  fail(); /* BUSY for kMaxBusyTime: stuck server, treat like a dead connection */
   return false;
 }
 
@@ -195,22 +225,57 @@ void NetworkSidBackend::fail(void)
   if (sock_ >= 0) ::close(sock_);
   sock_ = -1;
   connected_ = false;
+  inflight_cycles_ = 0; /* nothing queued will be sent any more */
+  room_cv_.notify_all(); /* a waiting wait_for_room() must see the link die */
 }
 
 /* ==================== Emulation thread only ==================== */
 
 void NetworkSidBackend::enqueue(uint8_t cmd, uint8_t sid_number,
-                                 const uint8_t * payload, uint16_t payload_len)
+                                 const uint8_t * payload, uint16_t payload_len,
+                                 uint32_t cycles)
 {
   QueuedOp op;
   op.cmd = cmd;
   op.sid_number = sid_number;
+  op.cycles = cycles;
   if (payload_len > 0) op.payload.assign(payload, payload + payload_len);
   {
     std::lock_guard<std::mutex> lock(queue_mutex_);
     queue_.push_back(std::move(op));
+    inflight_cycles_ += cycles;
   }
   queue_cv_.notify_one();
+}
+
+void NetworkSidBackend::drop_queued(void)
+{
+  std::lock_guard<std::mutex> lock(queue_mutex_);
+  for (const QueuedOp & op : queue_) {
+    const uint32_t cur = inflight_cycles_;
+    inflight_cycles_ = (cur > op.cycles) ? cur - op.cycles : 0;
+  }
+  queue_.clear();
+  room_cv_.notify_all();
+}
+
+template <typename Stop> void NetworkSidBackend::wait_room(const Stop & stop)
+{
+  std::unique_lock<std::mutex> lock(queue_mutex_);
+  while (inflight_cycles_ > kMaxInflightCycles && !stop && connected_ && running_) {
+    /* Timed: `stop` is a signal flag nobody notifies. */
+    room_cv_.wait_for(lock, std::chrono::milliseconds(20));
+  }
+}
+
+void NetworkSidBackend::wait_for_room(const std::atomic<bool> & stop) { wait_room(stop); }
+void NetworkSidBackend::wait_for_room(const volatile sig_atomic_t & stop) { wait_room(stop); }
+
+void NetworkSidBackend::send_pending(void)
+{
+  if (!connected_) return;
+  do_flush();
+  do_flush_ex();
 }
 
 uint16_t NetworkSidBackend::append_delay_quads(uint32_t total, bool for_ex)
@@ -227,7 +292,7 @@ uint16_t NetworkSidBackend::append_delay_quads(uint32_t total, bool for_ex)
     pending_quads_.push_back(0x00);
     buffered_cycles_ += 0xffff;
     total -= 0xffff;
-    if (pending_quads_.size() >= kMaxQuadsPerPacket * 4) do_flush();
+    do_flush(); /* big delay ends the packet, see flush_if_big_delay() */
   }
   /* Dummy quads always land in pending_quads_ - flush them now if the
    * caller's entry is headed for pending_ex_ instead. */
@@ -235,11 +300,25 @@ uint16_t NetworkSidBackend::append_delay_quads(uint32_t total, bool for_ex)
   return static_cast<uint16_t>(total);
 }
 
+/* A quad with delay >= kBigDelay must be the LAST quad of its packet. The
+ * USBSID-Pico firmware (nsd.c) pushes a packet's quads before adding the
+ * packet's cycles to its pending counter, while core 1 drains and decrements
+ * as soon as a quad is poppable, clamping at 0. A long delay early in a
+ * packet leaks cycles that way and latches BUSY forever. Cheap, so it applies
+ * to every server. */
+void NetworkSidBackend::flush_if_big_delay(uint16_t delay, bool for_ex)
+{
+  if (delay < kBigDelay) return;
+  if (for_ex) do_flush_ex();
+  else        do_flush();
+}
+
 void NetworkSidBackend::do_flush(void)
 {
   if (pending_quads_.empty()) return;
   /* sid_number is 0: the chip rides in each quad's own register byte. */
-  enqueue(kCmdTryWrite, 0, pending_quads_.data(), static_cast<uint16_t>(pending_quads_.size()));
+  enqueue(kCmdTryWrite, 0, pending_quads_.data(), static_cast<uint16_t>(pending_quads_.size()),
+          buffered_cycles_);
   pending_quads_.clear();
   buffered_cycles_ = 0;
   frames_since_flush_ = 0;
@@ -248,7 +327,8 @@ void NetworkSidBackend::do_flush(void)
 void NetworkSidBackend::do_flush_ex(void)
 {
   if (pending_ex_.empty()) return;
-  enqueue(kCmdTryWriteEx, 0, pending_ex_.data(), static_cast<uint16_t>(pending_ex_.size()));
+  enqueue(kCmdTryWriteEx, 0, pending_ex_.data(), static_cast<uint16_t>(pending_ex_.size()),
+          buffered_cycles_);
   pending_ex_.clear();
   buffered_cycles_ = 0;
   frames_since_flush_ = 0;
@@ -281,7 +361,8 @@ void NetworkSidBackend::handle_fmopl_write(addr_t reg, data_t value, uint16_t cy
   pending_ex_.push_back(value);
   buffered_cycles_ += delay;
 
-  if (pending_ex_.size() >= kMaxExEntriesPerPacket * 5 || buffered_cycles_ >= kFlushCyclesThreshold) {
+  flush_if_big_delay(delay, /* for_ex = */ true);
+  if (pending_ex_.size() >= kMaxExEntriesPerPacket * 5 || buffered_cycles_ >= flush_cycles_) {
     do_flush_ex();
   }
 }
@@ -336,9 +417,91 @@ bool NetworkSidBackend::connect(const char * host, uint16_t port)
   }
   version_ = resp[1];
 
+  if (!query_configs()) return false; /* link died, fail() already ran */
+  flush_cycles_ = hardware_ ? kFlushCyclesThreshold : kSoftFlushCyclesThreshold;
+  max_frames_ = hardware_ ? kMaxFramesBetweenFlushes : kSoftMaxFramesBetweenFlushes;
+
   running_ = true;
   sender_thread_ = std::thread(&NetworkSidBackend::sender_loop, this);
+  /* Chips exist on a software server only after count and model: the default
+   * (one chip, 6581, PAL) goes out before anything else can be queued. */
+  send_chip_setup();
   return true;
+}
+
+bool NetworkSidBackend::query_configs(void)
+{
+  /* Synchronous like GET_VERSION, before the sender thread exists. An ERROR
+   * or unexpected reply is not fatal (server without these commands: it
+   * counts as software); only a dead link is. */
+  hardware_ = false;
+  config_count_ = 0;
+  uint8_t resp = 0;
+  if (!send_request(kCmdGetConfigCount, 0, nullptr, 0) || !recv_exact(&resp, 1)) {
+    fail();
+    return false;
+  }
+  if (resp != kRespCount) { if (resp == kRespError) drain_extra(); return true; }
+  uint8_t count = 0;
+  if (!recv_exact(&count, 1)) { fail(); return false; }
+  if (count > kMaxConfigs) count = kMaxConfigs;
+
+  for (uint8_t i = 0; i < count; i++) {
+    if (!send_request(kCmdGetConfigInfo, i, nullptr, 0) || !recv_exact(&resp, 1)) {
+      fail();
+      return false;
+    }
+    if (resp != kRespInfo) { if (resp == kRespError) drain_extra(); return true; }
+    uint8_t model = 0;
+    if (!recv_exact(&model, 1)) { fail(); return false; }
+    /* Null-terminated name, up to 255 bytes; only config 0's is kept. */
+    std::string name;
+    for (int n = 0; n < 256; n++) {
+      uint8_t ch = 0;
+      if (!recv_exact(&ch, 1)) { fail(); return false; }
+      if (ch == 0) break;
+      if (i == 0) name.push_back(static_cast<char>(ch));
+    }
+    models_[i] = model;
+    config_count_ = static_cast<uint8_t>(i + 1);
+    if (i == 0) hardware_ = (name.compare(0, sizeof(kHardwareName) - 1, kHardwareName) == 0);
+  }
+  return true;
+}
+
+uint8_t NetworkSidBackend::model_index(void) const
+{
+  /* Config whose model byte (0 = 6581, 1 = 8580) matches the tune. Always
+   * below config_count_, the server's own list length. */
+  uint8_t index = (want_model_ < config_count_) ? want_model_ : 0; /* fallback: the usual 6581, 8580 order */
+  for (uint8_t i = 0; i < config_count_; i++) {
+    if (models_[i] == want_model_) { index = i; break; }
+  }
+  return index;
+}
+
+void NetworkSidBackend::send_chip_setup(void)
+{
+  if (!connected_ || hardware_) return;
+  const uint8_t chips = (sid_count_ > kMaxWireChips)
+    ? static_cast<uint8_t>(kMaxWireChips) : sid_count_;
+  enqueue(kCmdTrySetSidCount, chips, nullptr, 0);
+  /* A server that listed no configs has nothing to index: leave the model
+   * alone rather than send a command it may not know. */
+  if (config_count_ > 0) {
+    const uint8_t index = model_index();
+    for (uint8_t c = 0; c < chips; c++) enqueue(kCmdTrySetSidModel, c, &index, 1);
+  }
+  const uint8_t clock = ntsc_ ? 1 : 0;
+  enqueue(kCmdTrySetClock, 0, &clock, 1);
+}
+
+void NetworkSidBackend::configure_tune(bool ntsc, SidModel model)
+{
+  if (!connected_ || hardware_) return;
+  ntsc_ = ntsc;
+  want_model_ = (model == SidModel::Mos8580) ? 1 : 0;
+  send_chip_setup();
 }
 
 void NetworkSidBackend::disconnect(void)
@@ -346,10 +509,7 @@ void NetworkSidBackend::disconnect(void)
   /* Stop the sender thread and drop whatever it had not sent yet - a
    * teardown should not wait for a slow link. */
   running_ = false;
-  {
-    std::lock_guard<std::mutex> lock(queue_mutex_);
-    queue_.clear();
-  }
+  drop_queued();
   queue_cv_.notify_all();
   if (sender_thread_.joinable()) sender_thread_.join();
 
@@ -362,6 +522,11 @@ void NetworkSidBackend::disconnect(void)
   sock_ = -1;
   connected_ = false;
   version_ = 0;
+  hardware_ = false;
+  config_count_ = 0;
+  flush_cycles_ = kFlushCyclesThreshold;
+  max_frames_ = kMaxFramesBetweenFlushes;
+  inflight_cycles_ = 0;
 
   extra_cycles_ = 0;
   pending_quads_.clear();
@@ -380,6 +545,10 @@ void NetworkSidBackend::set_sid_count(uint8_t count)
   /* TRY_SET_SID_COUNT's header SID number field carries the count itself,
    * not a chip index. Clamped to kMaxWireChips (8), the server's own
    * ceiling for this command, separate from write()'s TRY_WRITE_EX range. */
+  if (!hardware_) {
+    send_chip_setup(); /* count, then the model of every chip, then clock */
+    return;
+  }
   const uint8_t wire_count = (sid_count_ > kMaxWireChips)
     ? static_cast<uint8_t>(kMaxWireChips) : sid_count_;
   enqueue(kCmdTrySetSidCount, wire_count, nullptr, 0);
@@ -421,7 +590,8 @@ void NetworkSidBackend::write(addr_t reg, data_t value, uint16_t cycles)
     pending_ex_.push_back(static_cast<uint8_t>(reg & 0xff));
     pending_ex_.push_back(value);
     buffered_cycles_ += delay;
-    if (pending_ex_.size() >= kMaxExEntriesPerPacket * 5 || buffered_cycles_ >= kFlushCyclesThreshold) {
+    flush_if_big_delay(delay, /* for_ex = */ true);
+    if (pending_ex_.size() >= kMaxExEntriesPerPacket * 5 || buffered_cycles_ >= flush_cycles_) {
       do_flush_ex();
     }
     return;
@@ -433,8 +603,9 @@ void NetworkSidBackend::write(addr_t reg, data_t value, uint16_t cycles)
   pending_quads_.push_back(value);
   buffered_cycles_ += delay;
 
+  flush_if_big_delay(delay, /* for_ex = */ false);
   /* Send early on either cap: byte limit, or buffered tune time. */
-  if (pending_quads_.size() >= kMaxQuadsPerPacket * 4 || buffered_cycles_ >= kFlushCyclesThreshold) {
+  if (pending_quads_.size() >= kMaxQuadsPerPacket * 4 || buffered_cycles_ >= flush_cycles_) {
     do_flush();
   }
 }
@@ -445,7 +616,18 @@ void NetworkSidBackend::wait(uint16_t cycles)
   if (!connected_) return;
   const uint32_t total = extra_cycles_ + cycles;
   extra_cycles_ = append_delay_quads(total, /* for_ex = */ false);
-  if (pending_quads_.size() >= kMaxQuadsPerPacket * 4 || buffered_cycles_ >= kFlushCyclesThreshold) {
+  if (!hardware_ && extra_cycles_ > 0) {
+    /* A software server only advances on the delays it is sent: the idle
+     * remainder goes out as a dummy quad instead of waiting in extra_cycles_. */
+    pending_quads_.push_back(static_cast<uint8_t>(extra_cycles_ >> 8));
+    pending_quads_.push_back(static_cast<uint8_t>(extra_cycles_ & 0xff));
+    pending_quads_.push_back(kDummyDelayReg);
+    pending_quads_.push_back(0x00);
+    buffered_cycles_ += extra_cycles_;
+    flush_if_big_delay(static_cast<uint16_t>(extra_cycles_), /* for_ex = */ false);
+    extra_cycles_ = 0;
+  }
+  if (pending_quads_.size() >= kMaxQuadsPerPacket * 4 || buffered_cycles_ >= flush_cycles_) {
     do_flush();
   }
 }
@@ -460,7 +642,7 @@ void NetworkSidBackend::flush(void)
   if (pending_quads_.empty() && pending_ex_.empty()) return;
   /* At most one of the two is ever non-empty; both calls below are
    * harmless no-ops on whichever one isn't. */
-  if (++frames_since_flush_ >= kMaxFramesBetweenFlushes) {
+  if (++frames_since_flush_ >= max_frames_) {
     do_flush();
     do_flush_ex();
   }
@@ -477,14 +659,17 @@ void NetworkSidBackend::reset(void)
   opl_pending_valid_ = false;
   buffered_cycles_ = 0;
   frames_since_flush_ = 0;
-  {
-    std::lock_guard<std::mutex> lock(queue_mutex_);
-    queue_.clear();
-  }
+  drop_queued();
   /* FLUSH clears the server's queue and mutes it; TRY_RESET below follows
    * per spec. Queued, not sent directly: only the sender thread touches
    * the socket. */
   enqueue(kCmdFlush, 0, nullptr, 0);
+  /* drop_queued() above also dropped any count and model queued earlier, and
+   * a software server resets every chip it has: count and model first, or
+   * TRY_RESET meets a missing chip (JSidplay2's NetSIDDev throws a
+   * NullPointerException there). Every init_tune() lands here, so a subtune
+   * change is covered as well. */
+  send_chip_setup();
   const uint8_t volume = 0x0f; /* full volume, filter off: a real reset state */
   enqueue(kCmdTryReset, 0, &volume, 1);
 }

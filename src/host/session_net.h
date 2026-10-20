@@ -4,7 +4,7 @@
  *
  * host/session_net.h
  * Session output to a Network SID Device server (a USBSID-Pico with
- * ENABLE_NET=1, or any NSD v4/v5 server). Paced on the wall clock.
+ * ENABLE_NET=1, or any NSD v4/v5 server). Paced by the server's backpressure.
  *
  * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
@@ -54,7 +54,7 @@ class NetSessionSink final : public SessionSink
     bool attach(Machine & machine) override;
     bool prepare(Machine & machine, const SidFile * tune) override;
     bool frame_done(const std::atomic<bool> & stopping) override;
-    bool wall_clock(void) const override { return true; }
+    bool wall_clock(void) const override { return false; }
 
   private:
     std::string host_;

@@ -35,9 +35,11 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <csignal>
 #include <cstdint>
 #include <deque>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -78,10 +80,32 @@ class NetworkSidBackend final : public SidBackend
     uint8_t protocol_version(void) const { return version_; }
 
     /**
-     * @brief TRY_SET_SID_COUNT (1..kMaxWireChips, clamped). Call once after
-     * connect(), before the tune's init writes. Bookkeeping only on the
-     * server; actual chip addressing is governed separately by sid_count()
-     * and TRY_WRITE vs TRY_WRITE_EX.
+     * @brief False when the server names itself "USBSID-Pico" in
+     * GET_CONFIG_INFO (the firmware's own NSD server, real hardware timing);
+     * true for anything else, a software emulation such as WilfredC64's
+     * `sid-device`. Decided once in connect(). A software server wants small
+     * batches, idle time sent as well, and no access overhead.
+     */
+    bool is_software(void) const { return !hardware_; }
+
+    /**
+     * @brief Software servers only: remember the tune's clock and chip model
+     * and resend the full chip setup (see send_chip_setup()). The model is
+     * the config index whose GET_CONFIG_INFO model matches `model`, 6581 for
+     * Unknown/Any. Call before the tune's init writes. No-op against the
+     * firmware's server, which keeps its own clock and chips.
+     */
+    void configure_tune(bool ntsc, SidModel model);
+
+    /**
+     * @brief TRY_SET_SID_COUNT (1..kMaxWireChips, clamped). Call after
+     * connect() and on every chip count change, before the tune's init
+     * writes. Against a software server it is followed at once by
+     * TRY_SET_SID_MODEL for every chip and TRY_SET_CLOCK (send_chip_setup()):
+     * the count command empties the server's chip array and resets its
+     * clock. Bookkeeping only on the firmware's server; actual chip
+     * addressing is governed separately by sid_count() and TRY_WRITE vs
+     * TRY_WRITE_EX.
      */
     void set_sid_count(uint8_t count);
     uint8_t sid_count(void) const { return sid_count_; }
@@ -103,6 +127,21 @@ class NetworkSidBackend final : public SidBackend
     /** @brief Requests still waiting for the sender thread. Diagnostic. */
     size_t queue_depth(void) const;
 
+    /**
+     * @brief The server is the clock: block while more than kMaxInflightCycles
+     * of TRY_WRITE time is queued or unaccepted, so playback runs ahead of
+     * real time and the server's own BUSY bounds the lead. Returns early on
+     * `stop`, a disconnect or a sender failure (polled every 20 ms, so a
+     * stop flag set without a notify still unblocks it).
+     */
+    void wait_for_room(const std::atomic<bool> & stop);
+    /** @brief Same, for a plain stop flag that is not an std::atomic<bool>. */
+    void wait_for_room(const volatile sig_atomic_t & stop);
+
+    /** @brief Send whatever is buffered now instead of waiting for the next
+     * frame cap, e.g. so a pause's silence reaches the server at once. */
+    void send_pending(void);
+
   private:
     /* Largest chip index TRY_WRITE's register byte can fold in (chip 0-7).
      * A chip at or above this uses TRY_WRITE_EX instead - see write(). */
@@ -111,18 +150,31 @@ class NetworkSidBackend final : public SidBackend
     static constexpr int kMaxChips = kMaxSids;
     /* Largest quad count per TRY_WRITE (255 = 1020 B, under NSD_MAX_PAYLOAD). */
     static constexpr size_t kMaxQuadsPerPacket = 255;
+    /* A quad delay at or above this ends its packet (flush_if_big_delay()). */
+    static constexpr uint16_t kBigDelay = 256;
     /* Buffered cycle threshold before write()/wait() force a send, tuned
      * under repo/src/nsd.c's NSD_CYCLES_HIGH BUSY threshold. */
     static constexpr uint32_t kFlushCyclesThreshold = 45000;
     /* Upper bound on how long something stays buffered below the cycle
      * threshold above (~60ms PAL). */
     static constexpr uint16_t kMaxFramesBetweenFlushes = 3;
+    /* Software server (sid-device): its queue reads BUSY past 63*312*10
+     * cycles and playback starts after 63*312*5, so batches stay at half a
+     * frame sized chunk and go out every frame. */
+    static constexpr uint32_t kSoftFlushCyclesThreshold = 9828;
+    static constexpr uint16_t kSoftMaxFramesBetweenFlushes = 1;
+    /* GET_CONFIG_INFO is queried for at most this many configurations. */
+    static constexpr int kMaxConfigs = 32;
+    /* wait_for_room() blocks past this much queued tune time (2 PAL frames).
+     * The server's BUSY then bounds the total lead. */
+    static constexpr uint32_t kMaxInflightCycles = 63 * 312 * 2;
 
     /* One outgoing request, queued between write()/flush() and the sender
      * thread sending it. */
     struct QueuedOp {
       uint8_t cmd;
       uint8_t sid_number;
+      uint32_t cycles = 0; /* TRY_WRITE time, counted in inflight_cycles_ */
       std::vector<uint8_t> payload;
     };
 
@@ -143,13 +195,20 @@ class NetworkSidBackend final : public SidBackend
     /** @brief Send one request, retrying on BUSY. */
     bool request_ok(uint8_t cmd, uint8_t sid_number,
                      const uint8_t * payload, uint16_t payload_len);
+    /** @brief Synchronous GET_CONFIG_COUNT/INFO and server type detection. */
+    bool query_configs(void);
+    /** @brief Drop every queued request and its in-flight cycles. */
+    void drop_queued(void);
+    /** @brief Common body of both wait_for_room() overloads. */
+    template <typename Stop> void wait_room(const Stop & stop);
     /** @brief Any send/recv failure: the connection is dead, stop touching it. */
     void fail(void);
 
     /* Emulation thread only. */
     /** @brief Append one request to the queue for the sender thread. */
     void enqueue(uint8_t cmd, uint8_t sid_number,
-                 const uint8_t * payload, uint16_t payload_len);
+                 const uint8_t * payload, uint16_t payload_len,
+                 uint32_t cycles = 0);
     /**
      * @brief Bring `total` under 0x10000 by appending dummy delay quads
      * (register $1E, open bus, delay 0xffff each) to pending_quads_, then
@@ -157,6 +216,7 @@ class NetworkSidBackend final : public SidBackend
      * joins next; the other stream is flushed first to preserve order.
      */
     uint16_t append_delay_quads(uint32_t total, bool for_ex);
+    void flush_if_big_delay(uint16_t delay, bool for_ex);
     /** @brief Send whatever is buffered, if anything is. */
     void do_flush(void);
     /** @brief v5 only: send whatever is buffered in the TRY_WRITE_EX stream. */
@@ -169,6 +229,18 @@ class NetworkSidBackend final : public SidBackend
      */
     void handle_fmopl_write(addr_t reg, data_t value, uint16_t cycles);
 
+    /**
+     * @brief Software servers only: TRY_SET_SID_COUNT, TRY_SET_SID_MODEL for
+     * every chip 0..count-1, TRY_SET_CLOCK, in that order. A software server
+     * (JSidplay2's NetSIDDev, sid-device) has no chip behind a sid number
+     * until its model is set, and TRY_SET_SID_COUNT drops every chip and the
+     * clock, so this always goes out as one block, before any TRY_RESET or
+     * write. Emulation thread only; queued, not sent directly.
+     */
+    void send_chip_setup(void);
+    /** @brief Config index to use for want_model_ (see configure_tune()). */
+    uint8_t model_index(void) const;
+
     int      sock_ = -1;
     /* Written by the sender thread on failure, read by the emulation
      * thread before enqueueing. */
@@ -176,11 +248,28 @@ class NetworkSidBackend final : public SidBackend
     uint8_t  version_ = 0;
     uint8_t  sid_count_ = 1;
 
+    /* Set by query_configs() in connect(). Without a usable answer the server
+     * counts as software. models_[i] is GET_CONFIG_INFO's model byte. */
+    bool     hardware_ = false;
+    uint8_t  config_count_ = 0;
+    uint8_t  models_[kMaxConfigs] = { 0 };
+    /* Last tune's clock and model byte (0 = 6581, 1 = 8580): defaults until
+     * configure_tune() runs, resent by every send_chip_setup(). */
+    bool     ntsc_ = false;
+    uint8_t  want_model_ = 0;
+    uint32_t flush_cycles_ = kFlushCyclesThreshold;
+    uint16_t max_frames_ = kMaxFramesBetweenFlushes;
+    std::vector<uint8_t> send_buf_; /* header + payload, one send() */
+
     std::thread             sender_thread_;
     mutable std::mutex      queue_mutex_;
     std::condition_variable queue_cv_;
     std::deque<QueuedOp>    queue_;
     std::atomic<bool>       running_{false};
+    /* Cycles of TRY_WRITE(_EX) requests queued or being sent. Changed under
+     * queue_mutex_ so room_cv_ never misses a wake. */
+    std::atomic<uint32_t>   inflight_cycles_{0};
+    std::condition_variable room_cv_;
 
     /* Emulation thread only, no lock needed. extra_cycles_ carries a gap
      * forward to whatever needs it next; pending_quads_ is the one shared

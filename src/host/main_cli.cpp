@@ -349,7 +349,8 @@ void usage(const char * argv0)
     "                    given, an FM/OPL not named this way is not played\n"
     "                    (--output=usbsid only; default: the tune's first N\n"
     "                    SIDs on the first N sockets, in order)\n"
-    "  -oh, --overhead N  cycles one hardware access costs (default 1)\n"
+    "  -oh, --overhead N Cycles one hardware access costs (default 1; 0 for\n"
+    "                    netdevice software servers)\n"
     "  -sl, --songlengths F  HVSC Songlengths database, to stop when the song\n"
     "                    ends. Found by itself in $SONGLENGTHS,\n"
     "                    ~/Songlengths.md5, $HVSCROOT or $HVSC_BASE\n"
@@ -586,6 +587,7 @@ int main(int argc, char ** argv)
   bool force_address = false;
   data_t forced_address = 0;
   int overhead = 1;
+  bool overhead_given = false;
   const char * songlengths_path = nullptr;
   bool use_songlengths = true;
   VideoModel forced_model = VideoModel::Count; /* means "not forced" */
@@ -648,7 +650,7 @@ int main(int argc, char ** argv)
       forced_address = static_cast<data_t>(strtol(argv[++i], nullptr, 16));
     }
     else if ((!strcmp(a, "-oh") || !strcmp(a, "--overhead")) && i + 1 < argc)
-      overhead = atoi(argv[++i]);
+    { overhead = atoi(argv[++i]); overhead_given = true; }
     else if (!strcmp(a, "-o") || !strncmp(a, "--output", 8)) {
       /* Both spellings, because both get typed: --output=wav and --output wav;
        * -o only ever takes the space separated form. */
@@ -884,6 +886,13 @@ int main(int argc, char ** argv)
       printf("  device   : Network SID Device at %s:%d, protocol v%d, %u SID%s\n",
              net_host, net_port, net.protocol_version(), net.sid_count(),
              net.sid_count() == 1 ? "" : "s");
+      /* A software server (not USBSID-Pico) is its own clock and takes no
+       * bus access cost: no overhead unless --overhead asked for one, and
+       * idle frames are sent as time too (SidConfig::render_idle). */
+      if (net.is_software()) {
+        if (!overhead_given) overhead = 0;
+        machine.sid().config().render_idle = true;
+      }
       machine.set_sid_backend(net);
       active_backend = &net;
     } else {
@@ -1136,6 +1145,11 @@ int main(int argc, char ** argv)
      * Setting it afterwards ran the whole init at whatever rate the previous
      * tune left behind. */
     if (usb.is_open()) usb.set_clock_rate(machine.vic().timing().clock_hz);
+#if US_HAVE_NETDEVICE
+    if (output == OutputMode::NetDevice) {
+      net.configure_tune(machine.vic().timing().clock_hz > 1000000, info.sid_model);
+    }
+#endif
     /* A BASIC RSID has been turned into a program by load_sid, because that is
      * what it is: there is nothing to initialise, it is started by RUN. Ask the
      * player which it decided on rather than assuming from the file's name. */
@@ -1155,6 +1169,11 @@ int main(int argc, char ** argv)
       return 1;
     }
     if (usb.is_open()) usb.set_clock_rate(machine.vic().timing().clock_hz);
+#if US_HAVE_NETDEVICE
+    if (output == OutputMode::NetDevice) {
+      net.configure_tune(machine.vic().timing().clock_hz > 1000000, SidModel::Unknown);
+    }
+#endif
     /* This boots a machine and types RUN at the prompt, so it takes a moment */
     if (!player.init_prg()) {
       printf("cannot start the program\n");
@@ -1331,6 +1350,16 @@ int main(int argc, char ** argv)
    * held for as long as the pause. The register file is kept so resuming puts
    * back exactly what was sounding. */
   const auto silence = [&]() {
+#if US_HAVE_NETDEVICE
+    if (output == OutputMode::NetDevice) {
+      /* The server keeps playing what it was sent, and holds the last latched
+       * state after that: volume to zero on every chip, sent at once. */
+      for (uint8_t c = 0; c < net.sid_count(); c++)
+        net.write(static_cast<addr_t>(c * 0x20 + 0x18), 0x00, 4);
+      net.send_pending();
+      return;
+    }
+#endif
     if (no_device) return;
     /* Two halves, and both are wanted. The board's own MUTE stops it making a
      * sound at all, which is the immediate thing; zeroing the registers is what
@@ -1342,6 +1371,15 @@ int main(int argc, char ** argv)
     usb.mute(true);
   };
   const auto restore_registers = [&]() {
+#if US_HAVE_NETDEVICE
+    if (output == OutputMode::NetDevice) {
+      for (uint8_t c = 0; c < net.sid_count(); c++)
+        net.write(static_cast<addr_t>(c * 0x20 + 0x18),
+                  machine.sid().peek(static_cast<addr_t>(c * 0x20 + 0x18)), 4);
+      net.send_pending();
+      return;
+    }
+#endif
     if (no_device) return;
     /* Unmute first, then put the registers back, so the board is listening by
      * the time the values that make the sound arrive. */
@@ -1349,6 +1387,16 @@ int main(int argc, char ** argv)
     for (data_t r = 0; r <= 0x18; r++)
       usb.write(machine.sid().physical_reg(r), machine.sid().peek(r), 4);
     usb.flush();
+  };
+
+  /* Once per frame. A Network SID Device server is its own clock: the run
+   * ahead is held back by net.wait_for_room(), the pacer only keeps the time
+   * display. Everything else sleeps to the frame schedule. */
+  const auto pace = [&](uint64_t f) {
+#if US_HAVE_NETDEVICE
+    if (output == OutputMode::NetDevice) { net.wait_for_room(g_stop); return; }
+#endif
+    pacer.wait_for_frame(f);
   };
 
   bool paused = false;
@@ -1429,8 +1477,8 @@ int main(int argc, char ** argv)
     if (paused) {
       /* Pacing is what keeps a paused player from spinning a core, and with no
        * device there is no pacer to do it, so sleep instead. */
-      if (!no_device) pacer.wait_for_frame(frame);
-      else            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      if (!no_device && output != OutputMode::NetDevice) pacer.wait_for_frame(frame);
+      else std::this_thread::sleep_for(std::chrono::milliseconds(10));
       if (status_line) {
         const uint32_t song_ms = song_length_ms(lengths, player.tune(), player.song(), use_songlengths);
         if (song_ms > 0) {
@@ -1557,7 +1605,7 @@ int main(int argc, char ** argv)
     }
 
     /* Not while seeking: the whole point is to get ahead of the clock. */
-    if (!no_device && !fast) pacer.wait_for_frame(frame);
+    if (!no_device && !fast) pace(frame);
   }
 
   player.stop();

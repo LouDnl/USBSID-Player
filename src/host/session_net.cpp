@@ -42,23 +42,30 @@ NetSessionSink::~NetSessionSink(void)
 bool NetSessionSink::attach(Machine & machine)
 {
   if (!net_.is_connected() && !net_.connect(host_.c_str(), port_)) return false;
+  /* Software server: no access overhead, idle frames sent as time */
+  if (net_.is_software()) {
+    machine.sid().config().access_overhead = 0;
+    machine.sid().config().render_idle = true;
+  }
   machine.set_sid_backend(net_);
   return true;
 }
 
 bool NetSessionSink::prepare(Machine & machine, const SidFile * tune)
 {
-  (void)machine;
   /* A program says nothing about its chips: two, as the command line does */
   const uint8_t chips = (sids_ > 0) ? sids_
                       : static_cast<uint8_t>((tune != nullptr) ? tune->sid_count : 2);
   net_.set_sid_count(chips);
+  net_.configure_tune(machine.vic().timing().clock_hz > 1000000,
+                      (tune != nullptr) ? tune->sid_model : SidModel::Unknown);
   return net_.is_connected();
 }
 
 bool NetSessionSink::frame_done(const std::atomic<bool> & stopping)
 {
-  (void)stopping;
+  /* The server is the clock: backpressure, not the wall clock, paces this. */
+  net_.wait_for_room(stopping);
   return net_.is_connected();
 }
 

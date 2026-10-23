@@ -117,7 +117,9 @@ void ASIDBackend::sendSIDEnvironment(bool isPAL)
 
   // No UI exist to request buffering or change speed multiplier
   const bool isBufferingRequested = false;
-  const int speedMultiplier = nosids; // 1x
+  // Send speed multiplier minus 1 (0 = 1x). Tune speed does not reach
+  // the backend: always 1x.
+  const int speedMultiplier = 0;
 
   // Time between two frames
   /* int64_t: long is 32-bit on Windows (LLP64) and 1000000*63*312 overflows it. */

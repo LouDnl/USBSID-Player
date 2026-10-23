@@ -18,7 +18,7 @@ USBSID-Player is a Cycle Exact Commodore64 emulating PSID/RSID & PRG tune player
 # Usage
 Output `nsd` and `--net-*` options are only available on Linux and MacOs.
 ```shell
-usage: usbsid [options] <file.sid|file.prg|file.p00>
+usage: usplayer [options] <file.sid|file.prg|file.p00>
 
   a SID file plays; a program is loaded where it says and started the
   way you would start it, with RUN or with SYS
@@ -120,16 +120,16 @@ cd USBSID-Player
 cmake -S . -B build_cli \
   -DDESKTOP=1 -DEMBEDDED=0 -DWEB=0 -DREQUIRE_AUDIO=1 && \
 	cmake --build build_cli --parallel $(nproc) && \
-  cp build_cli/usbsid .
+  cp build_cli/usplayer .
 ```
 ## Usage examples for the command line player
 Linux example.
 ```bash
-./usbsid --song 1 tune.sid          # play from a subtune
-./usbsid --output wav --wav out.wav tune.sid
-./usbsid --output nsd --net-host 192.168.1.42 tune.sid  # play over a Network SID Device server
-./usbsid -i tune.sid                # print the tune's own info and exit
-./usbsid -h                         # the full option list
+./usplayer --song 1 tune.sid          # play from a subtune
+./usplayer --output wav --wav out.wav tune.sid
+./usplayer --output nsd --net-host 192.168.1.42 tune.sid  # play over a Network SID Device server
+./usplayer -i tune.sid                # print the tune's own info and exit
+./usplayer -h                         # the full option list
 ```
 Needs `libusb-1.0` + `libusb-1.0-0-dev` and, on Linux, `libudev` + `libudev-dev` for USB access, both found via `pkg-config`. `-dev` for building, the other for running.
 
@@ -169,19 +169,19 @@ The suite is part of the command line build (`BUILD_TESTS` defaults to 1), in th
 ```bash
 cmake -S . -B build_cli \
   -DDESKTOP=1 -DEMBEDDED=0 -DWEB=0 -DBUILD_TESTS=1 && \
-	cmake --build build_cli --target usbsid-test --parallel $(nproc) && \
-  ./build_cli/usbsid-test
+	cmake --build build_cli --target usplayer-test --parallel $(nproc) && \
+  ./build_cli/usplayer-test
 ```
 Every component also has its own `test_<name>` executable registered with CTest, run them all with `ctest --test-dir build_cli` after a full `cmake --build build_cli`.
 
 ## Build the command line player with ymfm
-Uses [ymfm](https://github.com/aaronsgiles/ymfm) instead of Nuked-OPL3-fast as the FM/OPL engine. Command line player only, CMake refuses `FM_YMFM=1` together with `WEB=1` or `EMBEDDED=1`. `EXECUTABLE` gives the binary its own name and keeps it from replacing the regular `usbsid`:
+Uses [ymfm](https://github.com/aaronsgiles/ymfm) instead of Nuked-OPL3-fast as the FM/OPL engine. Command line player only, CMake refuses `FM_YMFM=1` together with `WEB=1` or `EMBEDDED=1`. `EXECUTABLE` gives the binary its own name and keeps it from replacing the regular `usplayer`:
 ```bash
 cmake -S . -B build_ymfm \
   -DDESKTOP=1 -DEMBEDDED=0 -DWEB=0 -DREQUIRE_AUDIO=1 \
-  -DFM_YMFM=1 -DEXECUTABLE=usbsid-ymfm && \
+  -DFM_YMFM=1 -DEXECUTABLE=usplayer-ymfm && \
 	cmake --build build_ymfm --parallel $(nproc) && \
-  cp build_ymfm/usbsid-ymfm .
+  cp build_ymfm/usplayer-ymfm .
 ```
 
 

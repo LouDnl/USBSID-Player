@@ -2,6 +2,9 @@
 Please refer to the [releases page](https://github.com/LouDnl/USBSID-Player/releases) for more information on version changes
 
 #### Version: 1.5.0
+* Rename the CLI player binary `usbsid` to `usplayer` (`usplayer.exe` on
+  Windows). The test binary becomes `usplayer-test` and the ymfm build
+  `usplayer-ymfm`
 * Change the licence to GPL-2.0-or-later (was GPL-2.0-only): every source
   header says "version 2, or (at your option) any later version", so the
   player can be combined with the GPL-3.0-or-later USBSID-Pico-driver

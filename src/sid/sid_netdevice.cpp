@@ -48,6 +48,7 @@ constexpr uint8_t kCmdTryReset        = 3;
 constexpr uint8_t kCmdTrySetClock     = 9;
 constexpr uint8_t kCmdGetConfigCount  = 10;
 constexpr uint8_t kCmdGetConfigInfo   = 11;
+constexpr uint8_t kCmdSetSidPosition  = 12;
 constexpr uint8_t kCmdTrySetSidModel  = 14;
 constexpr uint8_t kCmdTryWrite        = 5;
 constexpr uint8_t kCmdGetVersion      = 7;
@@ -110,8 +111,15 @@ void NetworkSidBackend::sender_loop(void)
       op = std::move(queue_.front());
       queue_.pop_front();
     }
-    const bool ok = request_ok(op.cmd, op.sid_number, op.payload.data(),
-                               static_cast<uint16_t>(op.payload.size()));
+    if ((op.cmd == kCmdSetSidPosition || op.cmd == kCmdTrySetSidModel) &&
+        op.sid_number >= wire_limit_) {
+      continue; /* chip the server refused in the preceding count fallback */
+    }
+    bool ok = request_ok(op.cmd, op.sid_number, op.payload.data(),
+                         static_cast<uint16_t>(op.payload.size()));
+    if (op.cmd == kCmdTrySetSidCount && connected_) {
+      ok = negotiate_sid_count(op.sid_number, ok);
+    }
     if (op.cycles > 0) {
       /* Accepted (or given up on): the server owns this time now. */
       std::lock_guard<std::mutex> lock(queue_mutex_);
@@ -136,6 +144,35 @@ void NetworkSidBackend::sender_loop(void)
       return;
     }
   }
+}
+
+bool NetworkSidBackend::negotiate_sid_count(uint8_t requested, bool ok)
+{
+  /* Servers cap TRY_SET_SID_COUNT differently (sid-device answers ERROR past
+   * its own limit). Step down 8, 4, 1 on ERROR and cap sid_count_ to what was
+   * accepted, so write()'s chip >= sid_count_ guard drops the rest instead of
+   * the server folding chips past its count onto its last one. */
+  uint8_t accepted = requested;
+  for (const uint8_t step : { 8, 4, 1 }) {
+    if (ok || !connected_ || !running_) break;
+    if (step >= accepted) continue;
+    accepted = step;
+    ok = request_ok(kCmdTrySetSidCount, accepted, nullptr, 0);
+  }
+  if (!ok) {
+    /* Link died, or even a count of 1 was refused: keep what was asked for. */
+    wire_limit_ = 255;
+    return false;
+  }
+  wire_limit_ = accepted;
+  if (accepted < requested) {
+    uint8_t cur = sid_count_;
+    while (cur > accepted && !sid_count_.compare_exchange_weak(cur, accepted)) {}
+    std::fprintf(stderr, "netdevice: server accepts %u SIDs, chips %u..%u muted\n",
+                 static_cast<unsigned>(accepted), static_cast<unsigned>(accepted + 1),
+                 static_cast<unsigned>(requested));
+  }
+  return true;
 }
 
 bool NetworkSidBackend::send_request(uint8_t cmd, uint8_t sid_number,
@@ -514,9 +551,13 @@ uint8_t NetworkSidBackend::model_index(void) const
 void NetworkSidBackend::send_chip_setup(void)
 {
   if (!connected_ || hardware_) return;
-  const uint8_t chips = (sid_count_ > kMaxWireChips)
-    ? static_cast<uint8_t>(kMaxWireChips) : sid_count_;
+  const uint8_t chips = sid_count_;
   enqueue(kCmdTrySetSidCount, chips, nullptr, 0);
+  /* Center every chip. sid-device zeroes each chip's mix gain on
+   * TRY_SET_SID_COUNT and a multi-SID mix stays silent until
+   * SET_SID_POSITION sets it (0 = center, full level left and right). */
+  const uint8_t center = 0;
+  for (uint8_t c = 0; c < chips; c++) enqueue(kCmdSetSidPosition, c, &center, 1);
   /* A server that listed no configs has nothing to index: leave the model
    * alone rather than send a command it may not know. */
   if (config_count_ > 0) {
@@ -577,15 +618,13 @@ void NetworkSidBackend::set_sid_count(uint8_t count)
   sid_count_ = count;
   if (!connected_) return;
   /* TRY_SET_SID_COUNT's header SID number field carries the count itself,
-   * not a chip index. Clamped to kMaxWireChips (8), the server's own
-   * ceiling for this command, separate from write()'s TRY_WRITE_EX range. */
+   * not a chip index. Sent as asked (up to kMaxChips); the sender thread
+   * steps down 8, 4, 1 on ERROR and lowers sid_count_ (negotiate_sid_count()). */
   if (!hardware_) {
     send_chip_setup(); /* count, then the model of every chip, then clock */
     return;
   }
-  const uint8_t wire_count = (sid_count_ > kMaxWireChips)
-    ? static_cast<uint8_t>(kMaxWireChips) : sid_count_;
-  enqueue(kCmdTrySetSidCount, wire_count, nullptr, 0);
+  enqueue(kCmdTrySetSidCount, sid_count_, nullptr, 0);
 }
 
 void NetworkSidBackend::set_fm_opl(bool enable)

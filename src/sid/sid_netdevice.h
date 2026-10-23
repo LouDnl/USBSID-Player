@@ -98,12 +98,13 @@ class NetworkSidBackend final : public SidBackend
     void configure_tune(bool ntsc, SidModel model);
 
     /**
-     * @brief TRY_SET_SID_COUNT (1..kMaxWireChips, clamped). Call after
+     * @brief TRY_SET_SID_COUNT (1..kMaxChips). A server that answers ERROR gets 8, 4,
+     * then 1 and sid_count() drops to what it accepted. Call after
      * connect() and on every chip count change, before the tune's init
      * writes. Against a software server it is followed at once by
-     * TRY_SET_SID_MODEL for every chip and TRY_SET_CLOCK (send_chip_setup()):
-     * the count command empties the server's chip array and resets its
-     * clock. Bookkeeping only on the firmware's server; actual chip
+     * SET_SID_POSITION and TRY_SET_SID_MODEL for every chip and TRY_SET_CLOCK
+     * (send_chip_setup()): the count command empties the server's chip
+     * array and resets its clock. Bookkeeping only on the firmware's server; actual chip
      * addressing is governed separately by sid_count() and TRY_WRITE vs
      * TRY_WRITE_EX.
      */
@@ -143,9 +144,6 @@ class NetworkSidBackend final : public SidBackend
     void send_pending(void);
 
   private:
-    /* Largest chip index TRY_WRITE's register byte can fold in (chip 0-7).
-     * A chip at or above this uses TRY_WRITE_EX instead - see write(). */
-    static constexpr int kMaxWireChips = 8;
     /* sid_count_'s ceiling: kMaxSids (15, sidfile.h). */
     static constexpr int kMaxChips = kMaxSids;
     /* Largest quad count per TRY_WRITE (255 = 1020 B, under NSD_MAX_PAYLOAD). */
@@ -185,6 +183,8 @@ class NetworkSidBackend final : public SidBackend
     void sender_loop(void);
     bool send_request(uint8_t cmd, uint8_t sid_number,
                        const uint8_t * payload, uint16_t payload_len);
+    /** @brief Resolve TRY_SET_SID_COUNT's reply, falling back 8, 4, 1 on ERROR. */
+    bool negotiate_sid_count(uint8_t requested, bool ok);
     bool recv_exact(uint8_t * buf, size_t len);
     /**
      * @brief Best-effort drain of whatever a response appended past the
@@ -233,12 +233,14 @@ class NetworkSidBackend final : public SidBackend
     void handle_fmopl_write(addr_t reg, data_t value, uint16_t cycles);
 
     /**
-     * @brief Software servers only: TRY_SET_SID_COUNT, TRY_SET_SID_MODEL for
-     * every chip 0..count-1, TRY_SET_CLOCK, in that order. A software server
-     * (JSidplay2's NetSIDDev, sid-device) has no chip behind a sid number
-     * until its model is set, and TRY_SET_SID_COUNT drops every chip and the
-     * clock, so this always goes out as one block, before any TRY_RESET or
-     * write. Emulation thread only; queued, not sent directly.
+     * @brief Software servers only: TRY_SET_SID_COUNT, SET_SID_POSITION
+     * (center) and TRY_SET_SID_MODEL for every chip 0..count-1, then
+     * TRY_SET_CLOCK. A software server (JSidplay2's NetSIDDev, sid-device) has
+     * no chip behind a sid number until its model is set, and
+     * TRY_SET_SID_COUNT drops every chip, position and the clock (sid-device
+     * mixes 2+ chips silent until positioned), so this always goes out as one
+     * block, before any TRY_RESET or write. Emulation thread only; queued,
+     * not sent directly.
      */
     void send_chip_setup(void);
     /** @brief Config index to use for want_model_ (see configure_tune()). */
@@ -249,7 +251,8 @@ class NetworkSidBackend final : public SidBackend
      * thread before enqueueing. */
     std::atomic<bool> connected_{false};
     uint8_t  version_ = 0;
-    uint8_t  sid_count_ = 1;
+    std::atomic<uint8_t> sid_count_{1}; /* sender thread may lower it, see negotiate_sid_count() */
+    uint8_t  wire_limit_ = 255; /* sender thread: count the server accepted */
 
     /* Set by query_configs() in connect(). Without a usable answer the server
      * counts as software. models_[i] is GET_CONFIG_INFO's model byte. */

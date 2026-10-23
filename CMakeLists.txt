@@ -779,6 +779,7 @@ if(${DESKTOP} EQUAL 1 AND ${BUILD_TESTS} EQUAL 1)
   enable_testing()
 
   set(US_TEST_NAMES bus ram cpu mmu cia vic sid player embedded prg keyboard web roms session)
+  list(APPEND US_TEST_NAMES netdevice)
 
   set(US_TEST_SOURCES "")
   foreach(t ${US_TEST_NAMES})
@@ -798,6 +799,14 @@ if(${DESKTOP} EQUAL 1 AND ${BUILD_TESTS} EQUAL 1)
     add_test(NAME ${t} COMMAND test_${t})
   endforeach()
 
+  ### The network backend is CLI-only and not in usbsidcore
+  target_sources(test_netdevice PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src/sid/sid_netdevice.cpp)
+  find_package(Threads REQUIRED)
+  target_link_libraries(test_netdevice PRIVATE Threads::Threads)
+  if(WIN32)
+    target_link_libraries(test_netdevice PRIVATE ws2_32)
+  endif()
+
   ### Aggregate runner with subcommands
   add_executable(usbsid-test
     ${CMAKE_CURRENT_LIST_DIR}/tests/usbsid_test.cpp
@@ -808,4 +817,9 @@ if(${DESKTOP} EQUAL 1 AND ${BUILD_TESTS} EQUAL 1)
   target_compile_options(usbsid-test PRIVATE ${US_COMPILE_OPTS})
   target_compile_definitions(usbsid-test PRIVATE
     US_ASSET_DIR="${CMAKE_CURRENT_LIST_DIR}/assets")
+  target_sources(usbsid-test PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src/sid/sid_netdevice.cpp)
+  target_link_libraries(usbsid-test PRIVATE Threads::Threads)
+  if(WIN32)
+    target_link_libraries(usbsid-test PRIVATE ws2_32)
+  endif()
 endif()

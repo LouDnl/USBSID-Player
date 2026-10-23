@@ -57,6 +57,7 @@ const TestEntry kTests[] = {
   { "web", us_test_web },
   { "roms", us_test_roms },
   { "session", us_test_session },
+  { "netdevice", us_test_netdevice },
 };
 
 constexpr size_t kTestCount = sizeof(kTests) / sizeof(kTests[0]);

@@ -64,6 +64,10 @@ Please refer to the [releases page](https://github.com/LouDnl/USBSID-Player/rele
   multiplier, it carries the tune speed multiplier (CIA1 timer A latch read over
   the first frames of each song, resent on change), a failed `asid_init` leaked its `RtMidiOut`, and
   `sendSIDEnvironment`/`sendSIDType` crashed when sent before init or after a failed init
+* Fix NTSC CIA1 timer A default ($9542, bytes swapped) to $4295: NTSC tunes relying
+  on the default timer played at the wrong speed. Add a test for the PAL and NTSC latch
+* Set `UNIX_COMPILE` (Linux, macOS) or `WINDOWS_COMPILE` (Windows) per platform, only
+  on the CLI target with RtMidi (was `UNIX_COMPILE` on every platform)
 
 #### Version: 1.4.0
 * Add multiboard playback: `--boards SERIAL,...` opens several USBSID-Pico

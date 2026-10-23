@@ -152,6 +152,9 @@ class NetworkSidBackend final : public SidBackend
     static constexpr size_t kMaxQuadsPerPacket = 255;
     /* A quad delay at or above this ends its packet (flush_if_big_delay()). */
     static constexpr uint16_t kBigDelay = 256;
+    /* Big-delay limit on a USBSID-Pico server, both streams. Above the gaps
+     * between writes inside one frame, below a frame's own idle gap. */
+    static constexpr uint16_t kBigDelayHardware = 4096;
     /* Buffered cycle threshold before write()/wait() force a send, tuned
      * under repo/src/nsd.c's NSD_CYCLES_HIGH BUSY threshold. */
     static constexpr uint32_t kFlushCyclesThreshold = 45000;
@@ -284,6 +287,14 @@ class NetworkSidBackend final : public SidBackend
      * the other first, preserving TCP order without two accumulators.
      * opl_pending_reg_/_valid_ hold the index-port half of the pair. */
     bool     opl_pending_valid_ = false;
+    /* Per connection (cleared by connect()/disconnect(), not by reset()):
+     * TRY_SET_FM_OPL(1) was queued. fm_opl_refused_ is set by the sender
+     * thread when the server answered it with ERROR. */
+    bool     fm_opl_sent_ = false;
+    /* Hardware v5 with FM in use: SID writes ride TRY_WRITE_EX alongside FM
+     * writes, one stream. Emulation thread only. */
+    bool     ex_stream_ = false;
+    std::atomic<bool> fm_opl_refused_{false};
     uint8_t  opl_pending_reg_ = 0;
     std::vector<uint8_t> pending_ex_;
     static constexpr size_t kMaxExEntriesPerPacket = 204; /* 5*204 = 1020 B, under NSD_MAX_PAYLOAD */

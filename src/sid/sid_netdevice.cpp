@@ -119,6 +119,13 @@ void NetworkSidBackend::sender_loop(void)
       inflight_cycles_ = (cur > op.cycles) ? cur - op.cycles : 0;
       room_cv_.notify_all();
     }
+    if (!ok && connected_ && op.cmd == kCmdTrySetFmOpl) {
+      /* ERROR reply: the server refuses FM OPL (no FM socket configured, or a
+       * software server without cmd 21). Link stays up, SID keeps playing. */
+      if (!fm_opl_refused_.exchange(true)) {
+        std::fprintf(stderr, "netdevice: server refused FM OPL (TRY_SET_FM_OPL), FM stays silent\n");
+      }
+    }
     if (!ok && !connected_) {
       /* request_ok() returns false both when the link actually died (it
        * called fail(), which cleared connected_) and when the server merely
@@ -312,7 +319,12 @@ uint16_t NetworkSidBackend::append_delay_quads(uint32_t total, bool for_ex)
  * to every server. */
 void NetworkSidBackend::flush_if_big_delay(uint16_t delay, bool for_ex)
 {
-  if (delay < kBigDelay) return;
+  /* USBSID-Pico server: a request arriving while the board plays a long
+   * delay gets its reply after that delay, up to a frame of wall time per
+   * request. Keep a frame in one request: only a gap past the gaps inside
+   * a frame ends the packet. */
+  const uint16_t limit = hardware_ ? kBigDelayHardware : kBigDelay;
+  if (delay < limit) return;
   if (for_ex) do_flush_ex();
   else        do_flush();
 }
@@ -340,10 +352,25 @@ void NetworkSidBackend::do_flush_ex(void)
 
 void NetworkSidBackend::handle_fmopl_write(addr_t reg, data_t value, uint16_t cycles)
 {
+  /* The server disables FM OPL on every new connection (spec): the first FM
+   * write of a connection sends TRY_SET_FM_OPL(1). Pending SID and FM bytes
+   * go out first so the enable lands in order. Queued like any request; an
+   * ERROR reply is logged once by sender_loop() and not retried. */
+  if (version_ >= 5 && !fm_opl_sent_) {
+    send_pending();
+    set_fm_opl(true);
+    fm_opl_sent_ = true;
+    /* From here SID writes ride TRY_WRITE_EX too (pending SID data went out
+     * above, order kept). */
+    ex_stream_ = hardware_;
+  }
   /* reg & 0x1f: 0 is the index port, 0x10 is the data port. */
   if ((reg & 0x1f) == 0x00) {
     /* Index half: remember the OPL register number, nothing on the wire
-     * yet. cycles_since_last_event() keeps the clock moving regardless. */
+     * yet. The gap before this write is carried in extra_cycles_ and goes
+     * out with the next write (the data half or any SID write), so the
+     * server's clock does not lose it. */
+    extra_cycles_ += cycles;
     opl_pending_reg_ = value;
     opl_pending_valid_ = true;
     return;
@@ -417,6 +444,9 @@ bool NetworkSidBackend::connect(const char * host, uint16_t port)
     return false;
   }
   version_ = resp[1];
+  ex_stream_ = false;
+  fm_opl_sent_ = false;
+  fm_opl_refused_ = false;
 
   if (!query_configs()) return false; /* link died, fail() already ran */
   flush_cycles_ = hardware_ ? kFlushCyclesThreshold : kSoftFlushCyclesThreshold;
@@ -523,6 +553,9 @@ void NetworkSidBackend::disconnect(void)
   sock_ = kNetInvalidSock;
   connected_ = false;
   version_ = 0;
+  ex_stream_ = false;
+  fm_opl_sent_ = false;
+  fm_opl_refused_ = false;
   hardware_ = false;
   config_count_ = 0;
   flush_cycles_ = kFlushCyclesThreshold;
@@ -577,7 +610,7 @@ void NetworkSidBackend::write(addr_t reg, data_t value, uint16_t cycles)
 
   /* Chip 0-7 fits TRY_WRITE's byte-folded register; chip 8+ needs
    * TRY_WRITE_EX, which only a v5+ server understands. */
-  const bool for_ex = (reg >= kWireByteRange);
+  const bool for_ex = (reg >= kWireByteRange) || ex_stream_;
   if (for_ex && version_ < 5) return; /* no way to represent this chip at all */
 
   uint32_t total = extra_cycles_ + cycles;
@@ -616,7 +649,7 @@ void NetworkSidBackend::wait(uint16_t cycles)
 {
   if (!connected_) return;
   const uint32_t total = extra_cycles_ + cycles;
-  extra_cycles_ = append_delay_quads(total, /* for_ex = */ false);
+  extra_cycles_ = append_delay_quads(total, ex_stream_);
   if (!hardware_ && extra_cycles_ > 0) {
     /* A software server only advances on the delays it is sent: the idle
      * remainder goes out as a dummy quad instead of waiting in extra_cycles_. */
@@ -673,6 +706,11 @@ void NetworkSidBackend::reset(void)
   send_chip_setup();
   const uint8_t volume = 0x0f; /* full volume, filter off: a real reset state */
   enqueue(kCmdTryReset, 0, &volume, 1);
+  /* FM OPL state is per connection and survives FLUSH/TRY_RESET on the
+   * server, but drop_queued() above may have thrown away a TRY_SET_FM_OPL
+   * that was queued and not yet sent. Re-queue it (idempotent: enabling an
+   * already enabled device returns OK). */
+  if (fm_opl_sent_ && !fm_opl_refused_) set_fm_opl(true);
 }
 
 size_t NetworkSidBackend::queue_depth(void) const

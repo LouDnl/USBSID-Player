@@ -630,7 +630,8 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
     ${CMAKE_CURRENT_LIST_DIR}/src/sid/sid_netdevice.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/host/session_net.cpp)
 
-  ### RtMidi backend per real platform (UNIX_COMPILE is set on all of them).
+  ### RtMidi backend per real platform (WINDOWS_COMPILE on Windows,
+  ### UNIX_COMPILE on Linux and macOS; both only read by RtMidi.cpp).
   ### Midi ASID backend (--output asid) requires ALSA on Linux
   ### Linux ALSA, macOS CoreMIDI, Windows WinMM; set on the target below.
   if(US_HAVE_RTMIDI)
@@ -662,9 +663,13 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
     )
   target_compile_definitions(${EXECUTABLE} PRIVATE US_SOFTSID=${US_HAVE_RESIDFP})
   target_compile_definitions(${EXECUTABLE} PRIVATE US_HAVE_NETDEVICE=${US_HAVE_NETDEVICE})
-  target_compile_definitions(${EXECUTABLE} PRIVATE UNIX_COMPILE=1) # TODO: Make platform dependent :)
   target_compile_definitions(${EXECUTABLE} PRIVATE US_HAVE_RTMIDI=${US_HAVE_RTMIDI})
   if(US_HAVE_RTMIDI)
+    if(WIN32)
+      target_compile_definitions(${EXECUTABLE} PRIVATE WINDOWS_COMPILE)
+    else()
+      target_compile_definitions(${EXECUTABLE} PRIVATE UNIX_COMPILE)
+    endif()
     if(APPLE)
       target_compile_definitions(${EXECUTABLE} PRIVATE __MACOSX_CORE__)
       target_link_libraries(${EXECUTABLE} PRIVATE
@@ -697,7 +702,6 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
   endif()
   ### the driver is third party and predates these warning settings
   target_compile_options(${EXECUTABLE} PRIVATE -Wall -fno-rtti)
-  target_compile_definitions(${EXECUTABLE} PRIVATE UNIX_COMPILE)
   ### Only the file name is usplayer (usplayer.exe); the target stays ${EXECUTABLE}.
   ### A custom -DEXECUTABLE (the ymfm build) keeps its own file name.
   if(EXECUTABLE STREQUAL PROJECT_NAME)

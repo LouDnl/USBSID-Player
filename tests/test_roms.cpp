@@ -40,7 +40,7 @@
 #include "tests.h"
 
 #ifndef US_TUNE_DIR
-#define US_TUNE_DIR "/mnt/loud/DocThierry/retro/Commodore64/sidtunes/favorites"
+#define US_TUNE_DIR "../sid-tunes/favorites"
 #endif
 
 using namespace usbsid;

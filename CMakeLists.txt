@@ -326,6 +326,22 @@ else()
   set(US_HAVE_FM 0)
 endif()
 
+### RtMidi, used as output for ASID compatible devices
+### 4 files are vendored into the repository, 1 source file, 2 headers and
+### the license file from the RtMidi repository at https://github.com/thestk/rtmidi
+set(US_RTMIDI_DIR ${CMAKE_CURRENT_LIST_DIR}/lib/rtmidi)
+if(EXISTS ${US_RTMIDI_DIR}/RtMidi.cpp)
+  set(US_RTMIDI_SOURCES
+    ${US_RTMIDI_DIR}/RtMidi.cpp)
+  set(US_RTMIDI_INCLUDE_DIR
+    ${US_RTMIDI_DIR})
+  set(US_HAVE_RTMIDI 1)
+else()
+  set(US_RTMIDI_INCLUDE_DIR "")
+  set(US_RTMIDI_SOURCES "")
+  set(US_HAVE_RTMIDI 0)
+endif()
+
 ### Core library. Everything except the frontends lives here so the tests, the
 ### CLI and the embedded API all link identical objects.
 set(US_CORE_SOURCES
@@ -409,6 +425,10 @@ endif()
 ### desktop is the CLI rather than the core library.
 if(US_HAVE_FM)
   list(APPEND US_CORE_INCLUDE_DIRS ${US_FM_INCLUDE_DIRS})
+endif()
+### The RtMidi headers
+if(US_HAVE_RTMIDI)
+  list(APPEND US_CORE_INCLUDE_DIRS ${US_RTMIDI_INCLUDE_DIR})
 endif()
 
 ### The playback session for interactive frontends (src/host/session.h). It
@@ -609,6 +629,17 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
   set(US_NETDEVICE_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/src/sid/sid_netdevice.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/host/session_net.cpp)
+
+  ### RtMidi backend per real platform (UNIX_COMPILE is set on all of them).
+  ### Midi ASID backend (--output asid) requires ALSA on Linux
+  ### Linux ALSA, macOS CoreMIDI, Windows WinMM; set on the target below.
+  if(US_HAVE_RTMIDI)
+    list(APPEND US_RTMIDI_SOURCES
+      ${CMAKE_CURRENT_LIST_DIR}/src/sid/sid_asid.cpp)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+      pkg_check_modules(alsa REQUIRED IMPORTED_TARGET alsa)
+      list(APPEND US_LINK_LIBS PkgConfig::alsa)
+    endif()
   endif()
 
   add_executable(${EXECUTABLE}
@@ -619,15 +650,32 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
     ${US_DRIVER_DIR}/USBSID.cpp
     ${US_DRIVER_DIR}/USBSID_Manager.cpp
     ${US_SOFTSID_SOURCES}
+    ${US_RTMIDI_SOURCES}
   )
   target_link_libraries(${EXECUTABLE} PRIVATE usbsidcore ${US_LINK_LIBS})
   target_include_directories(${EXECUTABLE} PRIVATE
     ${US_DRIVER_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/lib/miniaudio
     ${US_RESIDFP_INCLUDE_DIRS}
-    ${US_FM_INCLUDE_DIRS})
+    ${US_FM_INCLUDE_DIRS}
+    ${US_RTMIDI_INCLUDE_DIR}
+    )
   target_compile_definitions(${EXECUTABLE} PRIVATE US_SOFTSID=${US_HAVE_RESIDFP})
   target_compile_definitions(${EXECUTABLE} PRIVATE US_HAVE_NETDEVICE=${US_HAVE_NETDEVICE})
+  target_compile_definitions(${EXECUTABLE} PRIVATE UNIX_COMPILE=1) # TODO: Make platform dependent :)
+  target_compile_definitions(${EXECUTABLE} PRIVATE US_HAVE_RTMIDI=${US_HAVE_RTMIDI})
+  if(US_HAVE_RTMIDI)
+    if(APPLE)
+      target_compile_definitions(${EXECUTABLE} PRIVATE __MACOSX_CORE__)
+      target_link_libraries(${EXECUTABLE} PRIVATE
+        "-framework CoreMIDI" "-framework CoreAudio" "-framework CoreFoundation")
+    elseif(WIN32)
+      target_compile_definitions(${EXECUTABLE} PRIVATE __WINDOWS_MM__)
+      target_link_libraries(${EXECUTABLE} PRIVATE winmm)
+    else()
+      target_compile_definitions(${EXECUTABLE} PRIVATE __LINUX_ALSA__)
+    endif()
+  endif()
   target_compile_definitions(${EXECUTABLE} PRIVATE US_PLAYER_VERSION="${US_PLAYER_VERSION}")
   ### std::thread (sid_netdevice.cpp's sender thread) needs this on every
   ### platform, reSIDfp or not - it used to ride in on reSIDfp's own Linux
@@ -784,7 +832,7 @@ if(${DESKTOP} EQUAL 1 AND ${BUILD_TESTS} EQUAL 1)
   enable_testing()
 
   set(US_TEST_NAMES bus ram cpu mmu cia vic sid player embedded prg keyboard web roms session)
-  list(APPEND US_TEST_NAMES netdevice)
+  list(APPEND US_TEST_NAMES netdevice asid)
 
   set(US_TEST_SOURCES "")
   foreach(t ${US_TEST_NAMES})
@@ -812,6 +860,16 @@ if(${DESKTOP} EQUAL 1 AND ${BUILD_TESTS} EQUAL 1)
     target_link_libraries(test_netdevice PRIVATE ws2_32)
   endif()
 
+  ### The ASID backend is CLI-only and not in usbsidcore. The test supplies
+  ### the RtMidi symbols itself (recording sink), RtMidi.cpp is not linked.
+  if(US_HAVE_RTMIDI)
+    foreach(t asid)
+      target_sources(test_${t} PRIVATE
+        ${CMAKE_CURRENT_LIST_DIR}/src/sid/sid_asid.cpp)
+      target_compile_definitions(test_${t} PRIVATE US_TEST_HAVE_ASID=1)
+    endforeach()
+  endif()
+
   ### Aggregate runner with subcommands
   add_executable(usplayer-test
     ${CMAKE_CURRENT_LIST_DIR}/tests/usbsid_test.cpp
@@ -823,6 +881,11 @@ if(${DESKTOP} EQUAL 1 AND ${BUILD_TESTS} EQUAL 1)
   target_compile_definitions(usplayer-test PRIVATE
     US_ASSET_DIR="${CMAKE_CURRENT_LIST_DIR}/assets")
   target_sources(usplayer-test PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src/sid/sid_netdevice.cpp)
+  if(US_HAVE_RTMIDI)
+    target_sources(usplayer-test PRIVATE
+      ${CMAKE_CURRENT_LIST_DIR}/src/sid/sid_asid.cpp)
+    target_compile_definitions(usplayer-test PRIVATE US_TEST_HAVE_ASID=1)
+  endif()
   target_link_libraries(usplayer-test PRIVATE Threads::Threads)
   if(WIN32)
     target_link_libraries(usplayer-test PRIVATE ws2_32)

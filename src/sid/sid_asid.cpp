@@ -109,7 +109,7 @@ void ASIDBackend::asid_close(void)
     port_is_open = false;
 }
 
-void ASIDBackend::sendSIDEnvironment(bool isPAL)
+void ASIDBackend::sendSIDEnvironment(bool isPAL, int multiplier)
 {
   // Physical out buffer, including protocol overhead
   unsigned char ASidOutBuffer[8];
@@ -119,9 +119,10 @@ void ASIDBackend::sendSIDEnvironment(bool isPAL)
 
   // No UI exist to request buffering or change speed multiplier
   const bool isBufferingRequested = false;
-  // Send speed multiplier minus 1 (0 = 1x). Tune speed does not reach
-  // the backend: always 1x.
-  const int speedMultiplier = 0;
+  // Speed field is the multiplier minus 1, 1x to 16x
+  if (multiplier < 1) multiplier = 1;
+  if (multiplier > 16) multiplier = 16;
+  const int speedMultiplier = multiplier - 1;
 
   // Time between two frames
   /* int64_t: long is 32-bit on Windows (LLP64) and 1000000*63*312 overflows it. */

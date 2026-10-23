@@ -46,6 +46,24 @@ namespace usbsid {
 #define ASID_FM_MAX_PAIRS 16
 
 /**
+ * @brief Play calls per frame for the ASID environment message.
+ *
+ * Raster driven tunes play once per frame. A CIA driven tune is called every
+ * latch + 1 cycles. The multiplier is the frame length over that period,
+ * rounded and clamped to 1..16.
+ */
+inline int asid_speed_multiplier(bool uses_cia, uint16_t cia_latch,
+                                 uint32_t cycles_per_frame)
+{
+  if (!uses_cia) return 1;
+  const uint32_t period = static_cast<uint32_t>(cia_latch) + 1;
+  uint32_t m = (2 * cycles_per_frame + period) / (2 * period);
+  if (m < 1) m = 1;
+  if (m > 16) m = 16;
+  return static_cast<int>(m);
+}
+
+/**
  * @brief Sends register writes to any ASID supporting Midi endpoint.
  *
  */
@@ -91,7 +109,8 @@ class ASIDBackend final : public SidBackend
     void flush(void) override;
     void reset(void) override;
 
-    void sendSIDEnvironment(bool isPAL);
+    /* multiplier: play calls per frame, clamped to 1..16 */
+    void sendSIDEnvironment(bool isPAL, int multiplier = 1);
     void sendSIDType(bool is6581);
 
     int asid_flush(void);

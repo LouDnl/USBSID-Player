@@ -382,6 +382,44 @@ int test_environment_message(void)
       US_CHECK_EQ_U(g_sent[0][3], 0x01, "speed field ignores the SID count, NTSC bit set");
     }
   }
+  /* speed field = multiplier - 1 in bits 4-1, clamped to 1..16, PAL/NTSC in bit 0 */
+  {
+    const int mults[]   = { 1, 2, 4, 16, 0, -3, 17, 99 };
+    const int fields[]  = { 0, 1, 3, 15, 0, 0, 15, 15 };
+    for (size_t i = 0; i < sizeof(mults) / sizeof(mults[0]); i++) {
+      for (int pal = 0; pal < 2; pal++) {
+        Rig r(1);
+        r.be.sendSIDEnvironment(pal != 0, mults[i]);
+        if (g_sent.size() == 1) {
+          const unsigned want = static_cast<unsigned>((fields[i] << 1) | (pal ? 0 : 1));
+          US_CHECK_EQ_U(g_sent[0][3], want, "speed field and standard bit");
+          US_CHECK_EQ_U(g_sent[0].size(), 8, "environment length unchanged");
+        } else {
+          US_CHECK(false, "env with multiplier sent");
+        }
+      }
+    }
+  }
+  return 0;
+}
+
+int test_speed_multiplier(void)
+{
+  const uint32_t pal = 19656, ntsc = 17095;
+  US_CHECK_EQ_U(asid_speed_multiplier(false, 0x0010, pal), 1, "raster tune is 1x whatever the latch");
+  US_CHECK_EQ_U(asid_speed_multiplier(true, 0x4025, pal), 1, "CIA at PAL 50 Hz default is 1x");
+  US_CHECK_EQ_U(asid_speed_multiplier(true, 0x4294, ntsc), 1, "CIA at NTSC 60 Hz default is 1x");
+  US_CHECK_EQ_U(asid_speed_multiplier(true, 9827, pal), 2, "CIA latch for 2x PAL");
+  US_CHECK_EQ_U(asid_speed_multiplier(true, 4913, pal), 4, "CIA latch for 4x PAL");
+  US_CHECK_EQ_U(asid_speed_multiplier(true, 4273, ntsc), 4, "CIA latch for 4x NTSC");
+  US_CHECK_EQ_U(asid_speed_multiplier(true, 1228, pal), 16, "CIA latch for 16x PAL");
+  US_CHECK_EQ_U(asid_speed_multiplier(true, 100, pal), 16, "faster than 16x clamps to 16");
+  US_CHECK_EQ_U(asid_speed_multiplier(true, 0, pal), 16, "latch 0 clamps to 16");
+  US_CHECK_EQ_U(asid_speed_multiplier(true, 0xffff, pal), 1, "slow timer clamps to 1");
+  /* 19656 / 6553 = 3.0 exactly; 19656 / 7000 = 2.8 rounds up; 19656 / 8000 = 2.45 rounds down */
+  US_CHECK_EQ_U(asid_speed_multiplier(true, 6552, pal), 3, "exact ratio 3");
+  US_CHECK_EQ_U(asid_speed_multiplier(true, 6999, pal), 3, "2.8 rounds up to 3");
+  US_CHECK_EQ_U(asid_speed_multiplier(true, 7999, pal), 2, "2.45 rounds down to 2");
   return 0;
 }
 
@@ -767,6 +805,7 @@ int us_test_asid(void)
   test_init_start_message();
   test_close_stop_message();
   test_environment_message();
+  test_speed_multiplier();
   test_type_message();
   test_single_register_bytes();
   test_msb_packing();

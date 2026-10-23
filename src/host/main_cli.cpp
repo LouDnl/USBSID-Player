@@ -1231,7 +1231,7 @@ int main(int argc, char ** argv)
     if (usb.is_open()) usb.set_clock_rate(machine.vic().timing().clock_hz);
 #if US_HAVE_RTMIDI
     if (output == OutputMode::ASID) {
-      asid.sendSIDEnvironment(machine.vic().timing().clock_hz < 1000000);
+      asid.sendSIDEnvironment(machine.vic().timing().clock_hz < 1000000, 1);
       asid.sendSIDType(info.sid_model == SidModel::Mos6581);
     }
 #endif
@@ -1493,6 +1493,9 @@ int main(int argc, char ** argv)
   bool fast = false;
   uint64_t frame = 0;          /* monotonic: the pacer and -t depend on it */
   uint64_t song_frame0 = 0;    /* where the current song started, for the clock */
+#if US_HAVE_RTMIDI
+  int asid_mult_sent = 1;      /* speed multiplier in the last ASID environment message */
+#endif
   uint64_t status_at = 0;
   uint8_t mute_chip = 1;       /* which SID the digit keys address */
 
@@ -1692,6 +1695,22 @@ int main(int argc, char ** argv)
 
     player.run_frame();
     ++frame;
+
+#if US_HAVE_RTMIDI
+    /* The tune's init sets the CIA timer while it runs. The play rate is
+     * read from CIA1 over the first frames of each song. The environment
+     * message is resent only when the multiplier changes. */
+    if (output == OutputMode::ASID && is_sid && frame - song_frame0 <= 8) {
+      const int mult = asid_speed_multiplier(
+        player.tune().song_uses_cia(player.song()),
+        machine.cia1().latch_a(),
+        vic_cycles_per_frame(machine.video_model()));
+      if (mult != asid_mult_sent) {
+        asid.sendSIDEnvironment(machine.vic().timing().clock_hz < 1000000, mult);
+        asid_mult_sent = mult;
+      }
+    }
+#endif
 
     /* Move what was synthesised this frame out to the device or the file.
      *

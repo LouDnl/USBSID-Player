@@ -813,18 +813,18 @@ if(${DESKTOP} EQUAL 1 AND ${BUILD_TESTS} EQUAL 1)
   endif()
 
   ### Aggregate runner with subcommands
-  add_executable(usbsid-test
+  add_executable(usplayer-test
     ${CMAKE_CURRENT_LIST_DIR}/tests/usbsid_test.cpp
     ${US_TEST_SOURCES}
   )
-  target_link_libraries(usbsid-test PRIVATE usbsidcore)
-  target_include_directories(usbsid-test PRIVATE ${CMAKE_CURRENT_LIST_DIR}/tests)
-  target_compile_options(usbsid-test PRIVATE ${US_COMPILE_OPTS})
-  target_compile_definitions(usbsid-test PRIVATE
+  target_link_libraries(usplayer-test PRIVATE usbsidcore)
+  target_include_directories(usplayer-test PRIVATE ${CMAKE_CURRENT_LIST_DIR}/tests)
+  target_compile_options(usplayer-test PRIVATE ${US_COMPILE_OPTS})
+  target_compile_definitions(usplayer-test PRIVATE
     US_ASSET_DIR="${CMAKE_CURRENT_LIST_DIR}/assets")
-  target_sources(usbsid-test PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src/sid/sid_netdevice.cpp)
-  target_link_libraries(usbsid-test PRIVATE Threads::Threads)
+  target_sources(usplayer-test PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src/sid/sid_netdevice.cpp)
+  target_link_libraries(usplayer-test PRIVATE Threads::Threads)
   if(WIN32)
-    target_link_libraries(usbsid-test PRIVATE ws2_32)
+    target_link_libraries(usplayer-test PRIVATE ws2_32)
   endif()
 endif()

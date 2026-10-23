@@ -55,6 +55,7 @@ class NetSessionSink final : public SessionSink
     bool prepare(Machine & machine, const SidFile * tune) override;
     bool frame_done(const std::atomic<bool> & stopping) override;
     bool wall_clock(void) const override { return false; }
+    bool lags_audio(void) const override { return true; }
 
   private:
     std::string host_;

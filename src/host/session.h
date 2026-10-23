@@ -34,6 +34,7 @@
 #define _US_HOST_SESSION_H_
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
@@ -104,6 +105,14 @@ class SessionSink
 
     /** @brief True when the session paces frames on the wall clock. */
     virtual bool wall_clock(void) const = 0;
+
+    /**
+     * @brief True when the output plays behind the emulation by a queue.
+     *
+     * The session then shows a wall clock elapsed time, clamped to the
+     * emulated one, and lets the last song play out before it ends.
+     */
+    virtual bool lags_audio(void) const { return false; }
 
     /** @brief Silence the output for a pause or a seek. */
     virtual void silence(Machine & machine) { (void)machine; }
@@ -317,6 +326,8 @@ class Session
     uint32_t song_length_ms(void) const;
     void fail(const char * message);
     void update_status(void);
+    uint64_t shown_frames(void) const;
+    void anchor_shown(uint64_t shown);
 
     std::unique_ptr<Machine> machine_;
     Player player_;
@@ -342,6 +353,12 @@ class Session
     uint16_t chip_mute_ = 0;
     uint8_t voice_mute_[kMaxSids] = { 0 };
     char error_[96] = { 0 };
+
+    /* Shown elapsed time for outputs that lag the emulation, see shown_frames() */
+    mutable std::chrono::steady_clock::time_point shown_t0_ =
+      std::chrono::steady_clock::now();
+    mutable uint64_t shown_base_ = 0;  /* song frames shown at the anchor */
+    mutable uint64_t shown_last_ = 0;  /* last song frames shown */
 
     std::function<void(void)> thread_setup_;
     std::thread thread_;

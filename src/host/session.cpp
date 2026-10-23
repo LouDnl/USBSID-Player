@@ -134,6 +134,7 @@ bool Session::load(const data_t * bytes, size_t len, uint16_t song)
   }
   loaded_ = true;
   frame_ = song_frame0_ = 0;
+  anchor_shown(0);
   update_status();
   return true;
 }
@@ -175,6 +176,7 @@ void Session::pause(bool paused)
 {
   run_or_queue([this, paused](void) {
     if (!player_.playing() || paused == paused_ || ended_ || failed_) return;
+    shown_frames(); /* freeze at what is shown now */
     paused_ = paused;
     player_.pause(paused);
     if (paused) {
@@ -182,6 +184,7 @@ void Session::pause(bool paused)
     } else {
       sink_->restore(*machine_);
       pacer_.rebase(frame_);
+      anchor_shown(shown_last_);
     }
   });
 }
@@ -254,7 +257,13 @@ void Session::set_engine_thread_setup(std::function<void(void)> setup)
 SessionStatus Session::status(void) const
 {
   std::lock_guard<std::mutex> lk(lock_);
-  return status_;
+  SessionStatus s = status_;
+  /* The engine can sit in a blocking frame_done(): keep the shown time moving */
+  if (s.playing && !s.paused && sink_ && sink_->lags_audio() && s.frame_rate > 0.0) {
+    s.elapsed_ms = static_cast<uint32_t>(1000.0 * static_cast<double>(shown_frames()) /
+                                         s.frame_rate);
+  }
+  return s;
 }
 
 /* ---- engine ------------------------------------------------------------- */
@@ -287,11 +296,16 @@ void Session::engine(void)
     } else {
       const uint32_t length = song_length_ms();
       const double rate = pacer_.frame_rate();
+      const bool advance = options_.auto_advance && !player_.is_prg() &&
+                           player_.song() < player_.songs();
+      /* Without a next song, a sink that lags the audio ends on the shown
+       * time, which lets its queued tail play out; emulation continues until then. */
+      const bool shown_end = !advance && sink_->lags_audio();
+      const uint64_t played = shown_end ? shown_frames() : frame_ - song_frame0_;
       if (length > 0 && rate > 0.0 &&
-          1000.0 * static_cast<double>(frame_ - song_frame0_) / rate >=
+          1000.0 * static_cast<double>(played) / rate >=
           static_cast<double>(length)) {
-        if (options_.auto_advance && !player_.is_prg() &&
-            player_.song() < player_.songs()) {
+        if (advance) {
           player_.next_subtune();
           after_song_start();
         } else {
@@ -344,6 +358,7 @@ bool Session::begin(void)
   paused_ = false;
   seek_to_ = 0;
   frame_ = song_frame0_ = 0;
+  anchor_shown(0);
 
   if (!loaded_) { fail("nothing loaded"); return false; }
   if (!sink_) { fail("no output chosen"); return false; }
@@ -378,6 +393,7 @@ void Session::after_song_start(void)
 {
   song_frame0_ = frame_;
   ended_ = false;
+  anchor_shown(0);
   if (seek_to_ != 0) {
     seek_to_ = 0;
     machine_->set_sid_backend(sink_->backend());
@@ -411,6 +427,7 @@ void Session::finish_seek(void)
   machine_->set_sid_backend(sink_->backend());
   sink_->restore(*machine_);
   pacer_.rebase(frame_);
+  anchor_shown(frame_ - song_frame0_);
 }
 
 /** @brief Length of the current song in ms, 0 for no limit. Lock held. */
@@ -431,6 +448,38 @@ void Session::fail(const char * message)
   snprintf(error_, sizeof(error_), "%s", message);
 }
 
+/**
+ * @brief Song frames to show as elapsed time. Lock held.
+ *
+ * An output that lags the emulation (a server queue) gets a wall clock since
+ * the last anchor, clamped to the emulated frames and never going back. It
+ * stands still while paused and follows the emulation during a seek and after
+ * the end. Other outputs show the emulated frames.
+ */
+uint64_t Session::shown_frames(void) const
+{
+  const uint64_t emu = frame_ - song_frame0_;
+  const double rate = pacer_.frame_rate();
+  if (!sink_ || !sink_->lags_audio() || rate <= 0.0) return emu;
+  if (ended_ || seek_to_ != 0) { shown_last_ = emu; return emu; }
+  if (paused_) return shown_last_;
+  const double secs = std::chrono::duration<double>(
+    std::chrono::steady_clock::now() - shown_t0_).count();
+  uint64_t v = shown_base_ + static_cast<uint64_t>(secs * rate);
+  if (v > emu) v = emu;
+  if (v < shown_last_) v = shown_last_;
+  shown_last_ = v;
+  return v;
+}
+
+/** @brief Restart the shown clock from a song frame count. Lock held. */
+void Session::anchor_shown(uint64_t shown)
+{
+  shown_base_ = shown;
+  shown_last_ = shown;
+  shown_t0_ = std::chrono::steady_clock::now();
+}
+
 /** @brief Copy the state into status_. Lock held. */
 void Session::update_status(void)
 {
@@ -448,7 +497,7 @@ void Session::update_status(void)
   s.songs = player_.is_prg() ? 0 : player_.songs();
   s.frame_rate = pacer_.frame_rate();
   s.elapsed_ms = (s.frame_rate > 0.0)
-    ? static_cast<uint32_t>(1000.0 * static_cast<double>(frame_ - song_frame0_) / s.frame_rate)
+    ? static_cast<uint32_t>(1000.0 * static_cast<double>(shown_frames()) / s.frame_rate)
     : 0;
   s.length_ms = loaded_ ? song_length_ms() : 0;
   s.frames = frame_;

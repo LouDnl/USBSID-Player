@@ -1339,7 +1339,7 @@ int main(int argc, char ** argv)
   const bool status_line = keys && !us_log.timers && !us_log.memstate;
 
   if (keys) {
-    printf("  keys     : space pause, n/p subtune, f fast forward, "
+    printf("  keys     : space pause, n/p subtune, r restart song, f fast forward, "
            "1/2/3 mute a voice, c next sid, s stop, q or ctrl-c quit\n");
   } else {
     printf("  press ctrl-c to stop\n");
@@ -1406,12 +1406,109 @@ int main(int argc, char ** argv)
   uint64_t status_at = 0;
   uint8_t mute_chip = 1;       /* which SID the digit keys address */
 
+  /* Clock shown to the user. A Network SID Device server throttles the
+   * emulation, which runs ahead in bursts, so the emulated frame count both
+   * jerks and leads what is audible. For that output the clock is wall time
+   * since the last anchor, clamped to the emulated time and never going back.
+   * Every other output shows the emulated frame count unchanged. */
+  using disp_clock = std::chrono::steady_clock;
+  disp_clock::time_point disp_t0 = disp_clock::now();
+  disp_clock::time_point disp_status_next = disp_t0; /* next status print */
+  uint64_t disp_base = 0;      /* frames shown at the anchor */
+  uint64_t disp_last = 0;      /* last frames shown, frozen while paused */
+  const auto disp_anchor = [&](uint64_t shown) {
+    disp_base = shown;
+    disp_last = shown;
+    disp_t0 = disp_clock::now();
+    disp_status_next = disp_t0;
+  };
+  const auto disp_frames = [&]() -> uint64_t {
+    const uint64_t emu = frame - song_frame0;
+    if (output != OutputMode::NetDevice) return emu;
+    if (paused) return disp_last;
+    if (fast) { disp_last = emu; return emu; }
+    const double secs =
+      std::chrono::duration<double>(disp_clock::now() - disp_t0).count();
+    uint64_t v = disp_base + static_cast<uint64_t>(secs * pacer.frame_rate());
+    if (v > emu) v = emu;
+    if (v < disp_last) v = disp_last;
+    disp_last = v;
+    return v;
+  };
+
+  /* A new song was initialised (n, p or r). The clock, display anchor
+   * and pacer restart from this frame. A pause is lifted too: init_tune()
+   * already clears the player's own pause flag, and player.pause(false) is
+   * repeated only to keep the CLI state and the player's agreeing. silence()
+   * muted the board when the pause began and nothing else unmutes it, so the
+   * registers are restored (a freshly reset chip, then the tune's init writes
+   * its own values). Not while seeking: the fast-forward exit restores the
+   * chip itself, and a restore here would unmute the board mid-seek. */
+  const auto song_started = [&]() {
+    song_frame0 = frame;
+    disp_anchor(0);
+    if (!no_device) pacer.rebase(frame);
+    if (paused) {
+      paused = false;
+      player.pause(false);
+      if (!fast) restore_registers();
+    }
+  };
+
+  /* Status line cadence: wall time for a Network SID Device (the emulated
+   * frame count bursts there), every 5 emulated frames for everything else. */
+  const auto status_due = [&]() -> bool {
+    if (output == OutputMode::NetDevice) return disp_clock::now() >= disp_status_next;
+    return (frame - status_at) >= 5;
+  };
+  const auto print_status = [&]() {
+    status_at = frame;
+    disp_status_next = disp_clock::now() + std::chrono::milliseconds(100);
+    /* The song's own length beside the clock when the database knows it, so
+     * "how far in" is answerable at a glance rather than by arithmetic. */
+    const uint32_t song_ms = song_length_ms(lengths, player.tune(), player.song(), use_songlengths);
+    char total[24] = { 0 };
+    if (song_ms > 0) {
+      snprintf(total, sizeof(total), " / %u:%02u.%u",
+               song_ms / 60000u, (song_ms / 1000u) % 60u, (song_ms / 100u) % 10u);
+    }
+    /* Which voices are sounding, as three characters: the voice number when
+     * it is on and a dash when it is muted. Only shown once something has been
+     * muted, so the ordinary line stays short. */
+    const uint8_t mask = machine.sid().voice_mute(mute_chip);
+    char voices[24] = { 0 };
+    const uint8_t sids = (sid_config.count == 0) ? 1 : sid_config.count;
+    if (mask != 0 || sids > 1) {
+      snprintf(voices, sizeof(voices), "  sid %u %c%c%c", mute_chip,
+               (mask & 1) ? '-' : '1', (mask & 2) ? '-' : '2',
+               (mask & 4) ? '-' : '3');
+    }
+    printf("\r  %s  %s%s  song %u/%u%s  %llu frames\033[K",
+           fast ? ">> seeking" : (paused ? "||" : " >"),
+           play_time(disp_frames(), pacer.frame_rate()), total,
+           player.song(), player.songs(), voices,
+           static_cast<unsigned long long>(frame));
+    fflush(stdout);
+  };
+
+  /* -t counts absolute frames. A Network SID Device queues audio behind the
+   * emulation, so there the limit is reached when the shown time gets to it,
+   * which lets the queued tail play out. Emulation keeps running meanwhile. */
+  const auto limit_reached = [&]() -> bool {
+    if (frame_limit == 0) return false;
+    if (output == OutputMode::NetDevice) return song_frame0 + disp_frames() >= frame_limit;
+    return frame >= frame_limit;
+  };
+
   bool net_lost = false; /* the Network SID Device went away: exit status 1 */
+  while (!g_stop && !limit_reached()) {
     if (keys) {
       const int k = console_key();
       switch (k) {
         case ' ':
+          disp_frames(); /* freeze or resume from what is shown now */
           paused = !paused;
+          if (!paused) disp_anchor(disp_last);
           player.pause(paused);
           if (paused) silence(); else restore_registers();
           break;
@@ -1427,13 +1524,14 @@ int main(int argc, char ** argv)
           const uint16_t before = player.song();
           if (k == 'n' || k == kKeyRight) player.next_subtune();
           else                            player.previous_subtune();
-          if (player.song() != before) {
-            song_frame0 = frame;
-            if (!no_device) pacer.rebase(frame);
-            paused = false;
-          }
+          if (player.song() != before) song_started();
           break;
         }
+        /* Restart the song being played, from its start. Unlike n/p this also
+         * works on a tune with a single song, which has nothing to move to. */
+        case 'r':
+          if (player.restart_song(player.song())) song_started();
+          break;
         case 'f':
           /* Fast forward is a **seek**, not audible fast playback: over USBSID
            * every write carries the gap that precedes it and the board sits
@@ -1447,10 +1545,13 @@ int main(int argc, char ** argv)
           if (fast) {
             silence();
             machine.set_sid_backend(ff_null);
-          } else if (active_backend != nullptr) {
-            machine.set_sid_backend(*active_backend);
-            pacer.rebase(frame);
-            restore_registers();
+          } else {
+            disp_anchor(frame - song_frame0);
+            if (active_backend != nullptr) {
+              machine.set_sid_backend(*active_backend);
+              pacer.rebase(frame);
+              restore_registers();
+            }
           }
           break;
         /* Mute a voice of the selected chip. Twelve toggles is too many keys, so
@@ -1480,15 +1581,16 @@ int main(int argc, char ** argv)
       if (!no_device && output != OutputMode::NetDevice) pacer.wait_for_frame(frame);
       else std::this_thread::sleep_for(std::chrono::milliseconds(10));
       if (status_line) {
+        const uint64_t shown = disp_frames();
         const uint32_t song_ms = song_length_ms(lengths, player.tune(), player.song(), use_songlengths);
         if (song_ms > 0) {
-          printf("\r  ||  %s / %u:%02u.%u  song %u/%u        ",
-                 play_time(frame - song_frame0, pacer.frame_rate()),
+          printf("\r  ||  %s / %u:%02u.%u  song %u/%u\033[K",
+                 play_time(shown, pacer.frame_rate()),
                  song_ms / 60000u, (song_ms / 1000u) % 60u, (song_ms / 100u) % 10u,
                  player.song(), player.songs());
         } else {
-          printf("\r  ||  %s  song %u/%u        ",
-                 play_time(frame - song_frame0, pacer.frame_rate()),
+          printf("\r  ||  %s  song %u/%u\033[K",
+                 play_time(shown, pacer.frame_rate()),
                  player.song(), player.songs());
         }
         fflush(stdout);
@@ -1538,34 +1640,7 @@ int main(int argc, char ** argv)
       }
     }
 
-    if (status_line && (frame - status_at) >= 5) {
-      status_at = frame;
-      /* The song's own length beside the clock when the database knows it, so
-       * "how far in" is answerable at a glance rather than by arithmetic. */
-      const uint32_t song_ms = song_length_ms(lengths, player.tune(), player.song(), use_songlengths);
-      char total[24] = { 0 };
-      if (song_ms > 0) {
-        snprintf(total, sizeof(total), " / %u:%02u.%u",
-                 song_ms / 60000u, (song_ms / 1000u) % 60u, (song_ms / 100u) % 10u);
-      }
-      /* Which voices are sounding, as three characters: the voice number when
-       * it is on and a dash when it is muted. Only shown once something has been
-       * muted, so the ordinary line stays short. */
-      const uint8_t mask = machine.sid().voice_mute(mute_chip);
-      char voices[24] = { 0 };
-      const uint8_t sids = (sid_config.count == 0) ? 1 : sid_config.count;
-      if (mask != 0 || sids > 1) {
-        snprintf(voices, sizeof(voices), "  sid %u %c%c%c", mute_chip,
-                 (mask & 1) ? '-' : '1', (mask & 2) ? '-' : '2',
-                 (mask & 4) ? '-' : '3');
-      }
-      printf("\r  %s  %s%s  song %u/%u%s  %llu frames    ",
-             fast ? ">> seeking" : (paused ? "||" : " >"),
-             play_time(frame - song_frame0, pacer.frame_rate()), total,
-             player.song(), player.songs(), voices,
-             static_cast<unsigned long long>(frame));
-      fflush(stdout);
-    }
+    if (status_line && status_due()) print_status();
 
     if (US_UNLIKELY(us_log.timers)) {
       printf("[TIM] frame %llu raster %u  cia1 a:%04x b:%04x icr:%02x  "
@@ -1590,14 +1665,24 @@ int main(int argc, char ** argv)
       if (ms > 0) {
         const double played_ms =
           1000.0 * static_cast<double>(frame - song_frame0) / pacer.frame_rate();
-        if (played_ms >= static_cast<double>(ms)) {
-          if (player.song() < player.songs()) {
+        /* The last song ends on the shown time for a Network SID Device, which lets
+         * its queued tail play out. Moving on stays on emulated time. */
+        const double shown_ms =
+          1000.0 * static_cast<double>(disp_frames()) / pacer.frame_rate();
+        const bool more = player.song() < player.songs();
+        const bool over = (!more && output == OutputMode::NetDevice)
+          ? shown_ms >= static_cast<double>(ms)
+          : played_ms >= static_cast<double>(ms);
+        if (over) {
+          if (more) {
             player.next_subtune();
             song_frame0 = frame;
+            disp_anchor(0);
             if (!no_device) pacer.rebase(frame);
           } else {
+            if (status_line) print_status();
             printf("\r  done     %s, the last song has played out        \n",
-                   play_time(frame - song_frame0, pacer.frame_rate()));
+                   play_time(disp_frames(), pacer.frame_rate()));
             break;
           }
         }
@@ -1620,6 +1705,7 @@ int main(int argc, char ** argv)
   }
 
   player.stop();
+  if (status_line) print_status(); /* last status shows the final shown time */
   printf("\n  stopped after %llu frames\n",
          static_cast<unsigned long long>(frame));
 

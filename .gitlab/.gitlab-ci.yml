@@ -170,7 +170,7 @@ default:
   image: ubuntu:latest
   before_script:
     - apt-get update
-    - apt-get install -y git pkg-config cmake build-essential libusb-1.0-0 libusb-1.0-0-dev libudev1 libudev-dev
+    - apt-get install -y git pkg-config cmake build-essential libusb-1.0-0 libusb-1.0-0-dev libudev1 libudev-dev libasound2-dev
     - !reference [.driver_clone, script]
 
 .player_macos_setup:
@@ -484,7 +484,7 @@ release:web:
     # driver found" long after the wasm built fine. The suite is a DESKTOP=1
     # build and needs libusb.
     - apt-get update
-    - apt-get install -y git pkg-config cmake build-essential libusb-1.0-0 libusb-1.0-0-dev libudev1 libudev-dev
+    - apt-get install -y git pkg-config cmake build-essential libusb-1.0-0 libusb-1.0-0-dev libudev1 libudev-dev libasound2-dev
     - !reference [.driver_clone, script]
   script:
     - emcmake cmake -S . -B build-web -DWEB=1 -DREQUIRE_AUDIO=1

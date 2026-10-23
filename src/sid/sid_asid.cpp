@@ -37,7 +37,7 @@ ASIDBackend::ASIDBackend(void)
 
 ASIDBackend::~ASIDBackend(void)
 {
-  if (port_is_open) asid_close();
+  asid_close();
 }
 
 void ASIDBackend::list_ports(void)
@@ -61,6 +61,8 @@ bool ASIDBackend::asid_init(int midi_port, int no_sids)
   // printf("Opening Midi port %d for ASID\n", midi_port);
 
   asidport = midi_port;
+  if (midiout) { delete midiout; midiout = nullptr; }
+  port_is_open = false;
   midiout = new RtMidiOut();
   nports = midiout->getPortCount();
   // Uncomment for debug prints
@@ -70,6 +72,8 @@ bool ASIDBackend::asid_init(int midi_port, int no_sids)
   // }
   if (asidport >= nports) {
     printf("Requested Midi port %d is not available\n", asidport);
+    delete midiout;
+    midiout = nullptr;
     return false;
   }
 
@@ -90,15 +94,16 @@ bool ASIDBackend::asid_init(int midi_port, int no_sids)
 
 void ASIDBackend::asid_close(void)
 {
-    if (!port_is_open) return;
-
-    basic_message.clear();
-    basic_message.push_back(0xf0);
-    basic_message.push_back(0x2d);
-    basic_message.push_back(0x4d);
-    basic_message.push_back(0xf7);
-    asid_clear();
-    midiout->sendMessage(&basic_message);
+    if (port_is_open && midiout) {
+      basic_message.clear();
+      basic_message.push_back(0xf0);
+      basic_message.push_back(0x2d);
+      basic_message.push_back(0x4d);
+      basic_message.push_back(0xf7);
+      asid_clear();
+      midiout->sendMessage(&basic_message);
+    }
+    /* Free the handle on every path, an unopened port still owns one. */
     delete midiout;
     midiout = nullptr;
     port_is_open = false;

@@ -46,6 +46,7 @@ int us_test_web(void);
 int us_test_roms(void);
 int us_test_session(void);
 int us_test_netdevice(void);
+int us_test_asid(void);
 
 /* Standalone main, defined by each test source under US_TEST_STANDALONE */
 #ifdef US_TEST_STANDALONE

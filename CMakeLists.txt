@@ -464,6 +464,15 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
   find_package(PkgConfig REQUIRED)
   pkg_check_modules(libusb REQUIRED IMPORTED_TARGET libusb-1.0)
   set(US_LINK_LIBS PkgConfig::libusb)
+  ### MSYS2/MinGW: pkg-config resolves to libusb-1.0.dll.a (the DLL import
+  ### library), so name the static archive instead.
+  if(MINGW)
+    find_library(US_LIBUSB_STATIC NAMES libusb-1.0.a HINTS ${libusb_LIBRARY_DIRS})
+    if(US_LIBUSB_STATIC)
+      set(US_LINK_LIBS ${US_LIBUSB_STATIC})
+      include_directories(${libusb_INCLUDE_DIRS})
+    endif()
+  endif()
   if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     pkg_check_modules(udev REQUIRED IMPORTED_TARGET libudev)
     list(APPEND US_LINK_LIBS PkgConfig::udev)
@@ -627,6 +636,12 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
   target_link_libraries(${EXECUTABLE} PRIVATE Threads::Threads)
   if(WIN32)
     target_link_libraries(${EXECUTABLE} PRIVATE ws2_32)
+  endif()
+  ### MSYS2/MinGW: link libstdc++, libgcc, winpthread and libusb (libusb-1.0.a)
+  ### statically, so usbsid.exe starts without the MSYS2 DLLs beside it or on
+  ### PATH (a missing DLL exits 0xC0000135 before main, with no output).
+  if(MINGW)
+    target_link_options(${EXECUTABLE} PRIVATE -static -static-libgcc -static-libstdc++)
   endif()
   ### miniaudio needs these on Linux and they are harmless elsewhere
   if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND US_HAVE_RESIDFP)

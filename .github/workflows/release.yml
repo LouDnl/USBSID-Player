@@ -25,10 +25,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest,   shell: bash,          buildname: usbsid, asset: linux-x86_64 }
-          - { os: macos-14,        shell: bash,          buildname: usbsid, asset: macos-arm64 }
-          - { os: macos-15-intel,  shell: bash,          buildname: usbsid, asset: macos-x86_64 }
-          - { os: windows-2022,    shell: 'msys2 {0}',   buildname: usbsid, asset: windows-x86_64 }
+          - { os: ubuntu-latest,   shell: bash,          buildname: usbsid, asset: linux-x86_64,   executable: usplayer }
+          - { os: macos-14,        shell: bash,          buildname: usbsid, asset: macos-arm64,    executable: usplayer }
+          - { os: macos-15-intel,  shell: bash,          buildname: usbsid, asset: macos-x86_64,   executable: usplayer }
+          - { os: windows-2022,    shell: 'msys2 {0}',   buildname: usbsid, asset: windows-x86_64, executable: usplayer }
     defaults:
       run:
         shell: ${{ matrix.shell }}
@@ -96,7 +96,7 @@ jobs:
       - name: Package ${{ matrix.asset }}
         run: |
           # cmake -B build puts the binary in build/, not beside the sources.
-          SRC=repo/build/${{ matrix.buildname }}
+          SRC=repo/build/${{ matrix.executable }}
           if [ -f "$SRC.exe" ]; then SRC="$SRC.exe"; fi
           if [ ! -f "$SRC" ]; then
             echo "no binary at $SRC"; ls -R repo/build | head -40; exit 1
@@ -216,9 +216,9 @@ jobs:
           # same checkout, and the two toolchains must not share a cache.
           cmake -S . -B build -DDESKTOP=1 -DWEB=0 \
             -DBUILD_TESTS=1 -DSTRICT=1 -DREQUIRE_AUDIO=1
-          cmake --build build --target usbsid-test \
+          cmake --build build --target usplayer-test \
             -j "$(getconf _NPROCESSORS_ONLN)"
-          ./build/usbsid-test
+          ./build/usplayer-test
 
       - name: Package the web bundle
         run: |

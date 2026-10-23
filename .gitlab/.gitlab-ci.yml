@@ -225,7 +225,7 @@ default:
 # links on macOS and Windows too.
 # REQUIRE_AUDIO=1 turns "Software audio: OFF, lib/residfp is empty" from a
 # STATUS line into a configure error.
-# The test binary is called usbsid-test whatever -DEXECUTABLE says.
+# The test binary is called usplayer-test whatever -DEXECUTABLE says.
 # ============================================================================
 
 .player_dev_unix:
@@ -239,18 +239,18 @@ default:
         -DBUILD_TESTS=1 -DPROFILE=0 -DSTRICT=1 -DREQUIRE_AUDIO=1 \
         -DEXECUTABLE=usbsid
       cmake --build build -j "$JOBS"
-      ls -lh build/usbsid* || true
+      ls -lh build/usplayer* || true
     - |
-      BIN=build/usbsid-test
+      BIN=build/usplayer-test
       [ -f "$BIN.exe" ] && BIN="$BIN.exe"
       if [ ! -f "$BIN" ]; then
         echo "ERROR: no test binary at $BIN"; ls -l build; exit 1
       fi
       "./$BIN"
   artifacts:
-    # Exactly the player, a usbsid* glob would also pick up usbsid-test
+    # Exactly the player, a usplayer* glob would also pick up usplayer-test
     paths:
-      - build/usbsid
+      - build/usplayer
     expire_in: 1 week
 
 build:linux:
@@ -291,8 +291,8 @@ build:windows:
         -DBUILD_TESTS=1 -DPROFILE=0 -DSTRICT=1 -DREQUIRE_AUDIO=1 \
         -DEXECUTABLE=usbsid
       cmake --build build -j "$JOBS"
-      ls -lh build/usbsid* || true
-      BIN=build/usbsid-test
+      ls -lh build/usplayer* || true
+      BIN=build/usplayer-test
       [ -f "$BIN.exe" ] && BIN="$BIN.exe"
       if [ ! -f "$BIN" ]; then
         echo "ERROR: no test binary at $BIN"; ls -l build; exit 1
@@ -306,7 +306,7 @@ build:windows:
   artifacts:
     name: "usbsid-windows-${CI_COMMIT_REF_SLUG}-${CI_PIPELINE_IID}"
     paths:
-      - build/usbsid.exe
+      - build/usplayer.exe
     expire_in: 1 week
 
 # The browser player. Without a job here a web only change could break the
@@ -386,7 +386,7 @@ web:
         -DBUILD_TESTS=0 -DPROFILE=0 -DSTRICT=1 -DREQUIRE_AUDIO=1 \
         -DEXECUTABLE=usbsid
       cmake --build build -j "$JOBS"
-      SRC=build/usbsid
+      SRC=build/usplayer
       if [ ! -f "$SRC" ]; then
         echo "no binary at $SRC"; ls -R build | head -40; exit 1
       fi
@@ -446,7 +446,7 @@ release:windows:
         -DBUILD_TESTS=0 -DPROFILE=0 -DSTRICT=1 -DREQUIRE_AUDIO=1 \
         -DEXECUTABLE=usbsid
       cmake --build build -j "$JOBS"
-      SRC=build/usbsid.exe
+      SRC=build/usplayer.exe
       if [ ! -f "$SRC" ]; then
         echo "no binary at $SRC"; ls -R build | head -40; exit 1
       fi
@@ -508,8 +508,8 @@ release:web:
     # this is a native build in the same checkout and the two toolchains must
     # not share a cache.
     - cmake -S . -B build -DDESKTOP=1 -DWEB=0 -DBUILD_TESTS=1 -DSTRICT=1 -DREQUIRE_AUDIO=1
-    - cmake --build build --target usbsid-test -j "${BUILD_THREADS}"
-    - ./build/usbsid-test
+    - cmake --build build --target usplayer-test -j "${BUILD_THREADS}"
+    - ./build/usplayer-test
     # The build copies usbsid.js, .mjs and .wasm into web/, so the directory is
     # already the deliverable. web/README.md is the bundle's own.
     - cp docs/WEB.md web/ 2>/dev/null || true

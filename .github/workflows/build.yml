@@ -28,10 +28,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest, shell: bash, buildname: usbsid }
-          - { os: macos-14,  shell: bash, buildname: usbsid }
-          - { os: macos-15-intel,  shell: bash, buildname: usbsid }
-          - { os: windows-2022,  shell: 'msys2 {0}', buildname: usbsid }
+          - { os: ubuntu-latest,   shell: bash,          buildname: usbsid, executable: usplayer }
+          - { os: macos-14,        shell: bash,          buildname: usbsid, executable: usplayer }
+          - { os: macos-15-intel,  shell: bash,          buildname: usbsid, executable: usplayer }
+          - { os: windows-2022,    shell: 'msys2 {0}',   buildname: usbsid, executable: usplayer }
     defaults:
       run:
         shell: ${{ matrix.shell }}
@@ -122,7 +122,7 @@ jobs:
             -DBUILD_TESTS=$TESTS -DPROFILE=0 -DSTRICT=1 -DREQUIRE_AUDIO=1 \
             -DEXECUTABLE=${{ matrix.buildname }}
           cmake --build build -j "$JOBS"
-          ls -lh build/${{ matrix.buildname }}* || true
+          ls -lh build/${{ matrix.executable }}* || true
           popd
 
       - name: Run the test suite
@@ -132,9 +132,9 @@ jobs:
           # was compiled and then thrown away. It is the one check that says the
           # emulation still sends what it always sent.
           #
-          # The name is `usbsid-test` whatever -DEXECUTABLE says: CMakeLists
+          # The name is `usplayer-test` whatever -DEXECUTABLE says: CMakeLists
           # hardcodes it, so it does not follow matrix.buildname.
-          BIN=build/usbsid-test
+          BIN=build/usplayer-test
           [ -f "$BIN.exe" ] && BIN="$BIN.exe"
           if [ ! -f "$BIN" ]; then
             echo "::error::no test binary at $BIN"; ls -l build; exit 1
@@ -146,11 +146,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.buildname }}-${{ matrix.os }}
-          # Exactly the player. A `${{ matrix.buildname }}*` glob also picks up
-          # usbsid-test wherever the suite is built.
+          # Exactly the player. A `${{ matrix.executable }}*` glob also picks up
+          # usplayer-test wherever the suite is built.
           path: |
-            repo/build/${{ matrix.buildname }}
-            repo/build/${{ matrix.buildname }}.exe
+            repo/build/${{ matrix.executable }}
+            repo/build/${{ matrix.executable }}.exe
           if-no-files-found: error
 
   ### The browser player. It had no CI at all, which is how a web only change

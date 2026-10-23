@@ -638,7 +638,7 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
     target_link_libraries(${EXECUTABLE} PRIVATE ws2_32)
   endif()
   ### MSYS2/MinGW: link libstdc++, libgcc, winpthread and libusb (libusb-1.0.a)
-  ### statically, so usbsid.exe starts without the MSYS2 DLLs beside it or on
+  ### statically, so usplayer.exe starts without the MSYS2 DLLs beside it or on
   ### PATH (a missing DLL exits 0xC0000135 before main, with no output).
   if(MINGW)
     target_link_options(${EXECUTABLE} PRIVATE -static -static-libgcc -static-libstdc++)
@@ -650,6 +650,11 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
   ### the driver is third party and predates these warning settings
   target_compile_options(${EXECUTABLE} PRIVATE -Wall -fno-rtti)
   target_compile_definitions(${EXECUTABLE} PRIVATE UNIX_COMPILE)
+  ### Only the file name is usplayer (usplayer.exe); the target stays ${EXECUTABLE}.
+  ### A custom -DEXECUTABLE (the ymfm build) keeps its own file name.
+  if(EXECUTABLE STREQUAL PROJECT_NAME)
+    set_target_properties(${EXECUTABLE} PROPERTIES OUTPUT_NAME usplayer)
+  endif()
 endif()
 
 ### The browser player. No libusb, no CLI, no threads: one wasm module and the

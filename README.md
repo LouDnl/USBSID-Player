@@ -174,6 +174,8 @@ cmake -S . -B build_cli \
 ```
 Every component also has its own `test_<name>` executable registered with CTest, run them all with `ctest --test-dir build_cli` after a full `cmake --build build_cli`.
 
+The `asid` suite (`tests/test_asid.cpp`, also `ctest -R asid` or `./build.sh test` for the whole suite) checks the SysEx messages of the ASID backend against stub RtMidi symbols and needs no MIDI port. It is built when RtMidi is available and reports `[SKIP]` otherwise.
+
 ## Build the command line player with ymfm
 Uses [ymfm](https://github.com/aaronsgiles/ymfm) instead of Nuked-OPL3-fast as the FM/OPL engine. Command line player only, CMake refuses `FM_YMFM=1` together with `WEB=1` or `EMBEDDED=1`. `EXECUTABLE` gives the binary its own name and keeps it from replacing the regular `usplayer`:
 ```bash

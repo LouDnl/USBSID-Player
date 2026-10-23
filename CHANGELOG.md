@@ -52,6 +52,18 @@ Please refer to the [releases page](https://github.com/LouDnl/USBSID-Player/rele
 * Fix reSIDfp output differing from run to run in native builds: the filter
   tables are built on one thread everywhere, their threads shared one dither
   noise sequence
+* Add ASID backend unit tests (`tests/test_asid.cpp`, suite entry `asid`,
+  ctest target `test_asid`): 22 test functions, 293 checks over the SysEx
+  messages the ASID backend sends (start/stop, environment, SID type,
+  register mapping and MSB packing checked against a copy of the firmware
+  decoder, chip addresses 1-4, per frame dedup, control register shadow
+  slots, filter and volume flush, FM/OPL 0x60 messages). Stub RtMidi symbols
+  record the SysEx and need no MIDI port. Built when RtMidi is available
+  (`US_HAVE_RTMIDI`), otherwise the test reports `[SKIP]`
+* Fix ASID backend: the SID environment message carried the SID count as the speed
+  multiplier, it carries the tune speed multiplier (CIA1 timer A latch read over
+  the first frames of each song, resent on change), a failed `asid_init` leaked its `RtMidiOut`, and
+  `sendSIDEnvironment`/`sendSIDType` crashed when sent before init or after a failed init
 
 #### Version: 1.4.0
 * Add multiboard playback: `--boards SERIAL,...` opens several USBSID-Pico

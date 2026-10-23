@@ -115,6 +115,8 @@ void ASIDBackend::sendSIDEnvironment(bool isPAL)
   unsigned char ASidOutBuffer[8];
   int index = 0;
 
+  if (!midiout || !port_is_open) return;
+
   // No UI exist to request buffering or change speed multiplier
   const bool isBufferingRequested = false;
   // Send speed multiplier minus 1 (0 = 1x). Tune speed does not reach
@@ -161,12 +163,13 @@ void ASIDBackend::sendSIDEnvironment(bool isPAL)
   ASidOutBuffer[index++] = 0xf7;
 
   // Send to physical MIDI port
-  if (midiout->isPortOpen())
-    midiout->sendMessage(ASidOutBuffer, index);
+  midiout->sendMessage(ASidOutBuffer, index);
 }
 
 void ASIDBackend::sendSIDType(bool is6581)
 {
+  if (!midiout || !port_is_open) return;
+
   // Physical out buffer, including protocol overhead
   unsigned char ASidOutBuffer[6];
   int index = 0;
@@ -184,8 +187,7 @@ void ASIDBackend::sendSIDType(bool is6581)
   ASidOutBuffer[index++] = 0xf7;
 
   // Send to physical MIDI port
-  if (midiout->isPortOpen())
-    midiout->sendMessage(ASidOutBuffer, index);
+  midiout->sendMessage(ASidOutBuffer, index);
 }
 
 /**

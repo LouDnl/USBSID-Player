@@ -29,7 +29,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-### Executable name stays `usbsid`, same as player-repo (PROPOSAL 9.1.1)
+### The target stays `${EXECUTABLE}` (default `usbsid`), the file it builds is `usplayer` (see OUTPUT_NAME below)
 set(PROJECT_NAME usbsid)
 set(EXECUTABLE ${PROJECT_NAME} CACHE STRING "EXECUTABLE")
 

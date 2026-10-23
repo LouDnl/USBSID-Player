@@ -6,9 +6,9 @@
  * Aggregate test runner. Same test functions as the standalone executables,
  * reachable as subcommands:
  *
- *   usbsid-test            run everything
- *   usbsid-test bus        run one component
- *   usbsid-test list       list the subcommands
+ *   usplayer-test          run everything
+ *   usplayer-test bus      run one component
+ *   usplayer-test list     list the subcommands
  *
  * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD

@@ -4,7 +4,7 @@
  *
  * tests.h
  * Entry point of every component test. Each test is both a standalone
- * executable (for CTest) and a subcommand of the aggregate usbsid-test binary.
+ * executable (for CTest) and a subcommand of the aggregate usplayer-test binary.
  *
  * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD

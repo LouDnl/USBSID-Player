@@ -30,12 +30,9 @@
 #include <chrono>
 #include <cstring>
 
-#include <netdb.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <unistd.h>
+#include <thread>
+
+#include "net_compat.h"
 
 namespace usbsid {
 
@@ -147,8 +144,7 @@ bool NetworkSidBackend::send_request(uint8_t cmd, uint8_t sid_number,
   if (payload_len > 0) std::memcpy(&send_buf_[4], payload, payload_len);
   size_t sent = 0;
   while (sent < send_buf_.size()) {
-    const ssize_t n = ::send(sock_, send_buf_.data() + sent, send_buf_.size() - sent,
-                             MSG_NOSIGNAL);
+    const net_ssize_t n = net_send(sock_, send_buf_.data() + sent, send_buf_.size() - sent);
     if (n <= 0) return false;
     sent += static_cast<size_t>(n);
   }
@@ -159,7 +155,7 @@ bool NetworkSidBackend::recv_exact(uint8_t * buf, size_t len)
 {
   size_t got = 0;
   while (got < len) {
-    const ssize_t n = ::recv(sock_, buf + got, len - got, 0);
+    const net_ssize_t n = net_recv(sock_, buf + got, len - got);
     if (n <= 0) return false; /* closed, error, or the receive timeout firing */
     got += static_cast<size_t>(n);
   }
@@ -180,7 +176,7 @@ void NetworkSidBackend::drain_extra(void)
    * does, so this path is untested against it. */
   uint8_t discard[256];
   for (int i = 0; i < 8; i++) {
-    const ssize_t n = ::recv(sock_, discard, sizeof(discard), MSG_DONTWAIT);
+    const net_ssize_t n = net_recv_nowait(sock_, discard, sizeof(discard));
     if (n <= 0) break;
   }
 }
@@ -199,7 +195,7 @@ bool NetworkSidBackend::request_ok(uint8_t cmd, uint8_t sid_number,
     if (resp == kRespOk) return true;
     if (resp == kRespBusy) {
       if (std::chrono::steady_clock::now() >= deadline) break;
-      usleep(1000);
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
       continue;
     }
     if (resp == kRespRead) {
@@ -222,8 +218,8 @@ bool NetworkSidBackend::request_ok(uint8_t cmd, uint8_t sid_number,
 
 void NetworkSidBackend::fail(void)
 {
-  if (sock_ >= 0) ::close(sock_);
-  sock_ = -1;
+  net_close(sock_);
+  sock_ = kNetInvalidSock;
   connected_ = false;
   inflight_cycles_ = 0; /* nothing queued will be sent any more */
   room_cv_.notify_all(); /* a waiting wait_for_room() must see the link die */
@@ -370,6 +366,7 @@ void NetworkSidBackend::handle_fmopl_write(addr_t reg, data_t value, uint16_t cy
 bool NetworkSidBackend::connect(const char * host, uint16_t port)
 {
   disconnect();
+  if (!net_startup()) return false;
 
   struct addrinfo hints;
   std::memset(&hints, 0, sizeof(hints));
@@ -382,27 +379,23 @@ bool NetworkSidBackend::connect(const char * host, uint16_t port)
   struct addrinfo * res = nullptr;
   if (::getaddrinfo(host, port_str, &hints, &res) != 0 || res == nullptr) return false;
 
-  int sock = -1;
+  net_sock_t sock = kNetInvalidSock;
   for (struct addrinfo * p = res; p != nullptr; p = p->ai_next) {
-    sock = ::socket(p->ai_family, p->ai_socktype, p->ai_protocol);
-    if (sock < 0) continue;
-    if (::connect(sock, p->ai_addr, p->ai_addrlen) == 0) break;
-    ::close(sock);
-    sock = -1;
+    sock = net_socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+    if (sock == kNetInvalidSock) continue;
+    if (net_connect(sock, p->ai_addr, p->ai_addrlen)) break;
+    net_close(sock);
+    sock = kNetInvalidSock;
   }
   ::freeaddrinfo(res);
-  if (sock < 0) return false;
+  if (sock == kNetInvalidSock) return false;
 
   /* Request/response protocol: Nagle would add up to 40ms per round trip. */
-  const int one = 1;
-  ::setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+  net_set_nodelay(sock);
+  net_nosigpipe(sock);
 
   /* A dead/wedged server must not hang the sender thread forever. */
-  struct timeval tv;
-  tv.tv_sec = 2;
-  tv.tv_usec = 0;
-  ::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-  ::setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+  net_set_timeouts(sock, 2);
 
   sock_ = sock;
   connected_ = true;
@@ -518,8 +511,8 @@ void NetworkSidBackend::disconnect(void)
      * retried: FLUSH stops the server continuing to make noise. */
     send_request(kCmdFlush, 0, nullptr, 0);
   }
-  if (sock_ >= 0) ::close(sock_);
-  sock_ = -1;
+  net_close(sock_);
+  sock_ = kNetInvalidSock;
   connected_ = false;
   version_ = 0;
   hardware_ = false;

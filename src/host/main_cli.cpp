@@ -666,9 +666,9 @@ int main(int argc, char ** argv)
 #if US_HAVE_NETDEVICE
         output = OutputMode::NetDevice;
 #else
-        /* No Winsock port of sid_netdevice.cpp yet; it uses BSD sockets
-         * directly. See US_HAVE_NETDEVICE in CMakeLists.txt. */
-        printf("--output=nsd: not available in this build (no Windows port yet)\n");
+        /* Build without the network backend. See US_HAVE_NETDEVICE in
+         * CMakeLists.txt. */
+        printf("--output=nsd: not available in this build\n");
         return 2;
 #endif
       }

@@ -593,18 +593,13 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
     )
   endif()
 
-  ### Network SID Device client backend (--output netdevice). Uses BSD
-  ### sockets directly (netdb.h, sys/socket.h, ...) with no Winsock port, so
-  ### it is off on Windows for now rather than failing the MinGW build; see
+  ### Network SID Device client backend (--output netdevice). BSD sockets on
+  ### Linux/macOS, Winsock2 on Windows (src/sid/net_compat.h); see
   ### US_HAVE_NETDEVICE below and its guards in main_cli.cpp.
-  set(US_NETDEVICE_SOURCES "")
-  if(WIN32)
-    set(US_HAVE_NETDEVICE 0)
-  else()
-    set(US_HAVE_NETDEVICE 1)
-    set(US_NETDEVICE_SOURCES
-      ${CMAKE_CURRENT_LIST_DIR}/src/sid/sid_netdevice.cpp
-      ${CMAKE_CURRENT_LIST_DIR}/src/host/session_net.cpp)
+  set(US_HAVE_NETDEVICE 1)
+  set(US_NETDEVICE_SOURCES
+    ${CMAKE_CURRENT_LIST_DIR}/src/sid/sid_netdevice.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/host/session_net.cpp)
   endif()
 
   add_executable(${EXECUTABLE}
@@ -630,6 +625,9 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
   ### only need for it, which left it unlinked on a build with neither.
   find_package(Threads REQUIRED)
   target_link_libraries(${EXECUTABLE} PRIVATE Threads::Threads)
+  if(WIN32)
+    target_link_libraries(${EXECUTABLE} PRIVATE ws2_32)
+  endif()
   ### miniaudio needs these on Linux and they are harmless elsewhere
   if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND US_HAVE_RESIDFP)
     target_link_libraries(${EXECUTABLE} PRIVATE ${CMAKE_DL_LIBS} m)

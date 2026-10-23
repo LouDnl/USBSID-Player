@@ -241,7 +241,7 @@ class NetworkSidBackend final : public SidBackend
     /** @brief Config index to use for want_model_ (see configure_tune()). */
     uint8_t model_index(void) const;
 
-    int      sock_ = -1;
+    std::intptr_t sock_ = -1; /* net_sock_t, see net_compat.h */
     /* Written by the sender thread on failure, read by the emulation
      * thread before enqueueing. */
     std::atomic<bool> connected_{false};

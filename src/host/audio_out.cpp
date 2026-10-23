@@ -63,6 +63,13 @@ void us_audio_callback(ma_device * dev, void * output, const void * input,
   self->fill(static_cast<int16_t *>(output), frames * self->channels());
 }
 
+/** @brief Steady clock in microseconds. Lock free, safe on the audio thread. */
+int64_t steady_us(void)
+{
+  return std::chrono::duration_cast<std::chrono::microseconds>(
+    std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
 } /* namespace */
 
 AudioOut::~AudioOut(void)
@@ -73,6 +80,7 @@ AudioOut::~AudioOut(void)
 void AudioOut::fill(int16_t * out, size_t frames)
 {
   if (out == nullptr) return;
+  last_fill_us_.store(steady_us(), std::memory_order_relaxed);
   const size_t got = pop(out, frames);
   if (got < frames) {
     /* Silence for the rest, and say so. Inventing silence is the only thing a
@@ -119,6 +127,8 @@ bool AudioOut::open(unsigned rate, unsigned channels, unsigned buffer_ms)
   head_.store(0, std::memory_order_relaxed);
   tail_.store(0, std::memory_order_relaxed);
   underruns_.store(0, std::memory_order_relaxed);
+  /* Stall time counts from the start, a device that never calls back stalls */
+  last_fill_us_.store(steady_us(), std::memory_order_relaxed);
 
   if (ma_device_start(dev) != MA_SUCCESS) {
     ma_device_uninit(dev);
@@ -207,13 +217,20 @@ size_t AudioOut::pop(int16_t * out, size_t n)
   return give;
 }
 
+bool AudioOut::stalled(void) const
+{
+  if (!open_) return true;
+  const int64_t last = last_fill_us_.load(std::memory_order_relaxed);
+  return steady_us() - last >= kStallMs * 1000;
+}
+
 void AudioOut::drain(void)
 {
   if (!open_) return;
   /* Wait for the device to play what is already queued, so a tune that has
    * finished is heard to its end instead of being cut off by close(). Bounded,
    * because a device that has stopped consuming would otherwise hang the exit. */
-  for (int i = 0; i < 400 && queued() > 0; i++) {
+  for (int i = 0; i < 400 && queued() > 0 && !stalled(); i++) {
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
   }
 }

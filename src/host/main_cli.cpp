@@ -1501,6 +1501,8 @@ int main(int argc, char ** argv)
   };
 
   bool net_lost = false; /* the Network SID Device went away: exit status 1 */
+  bool audio_wall = false;    /* audio device stalled: paced on the wall clock */
+  uint64_t audio_dropped = 0; /* samples dropped while the device stalled */
   while (!g_stop && !limit_reached()) {
     if (keys) {
       const int k = console_key();
@@ -1629,6 +1631,9 @@ int main(int argc, char ** argv)
             const size_t put = audio.push(soft_buf.data() + at, n - at);
             at += put;
             if (put == 0) {
+              /* A stalled device never drains the ring: drop the rest of the
+               * frame, the wall clock paces below instead. */
+              if (audio.stalled()) { audio_dropped += n - at; break; }
               /* Ring full: let the device drain a little. Sleeping a fraction of
                * the buffer keeps this from becoming a spin. */
               std::this_thread::sleep_for(std::chrono::milliseconds(2));
@@ -1691,6 +1696,17 @@ int main(int argc, char ** argv)
 
     /* Not while seeking: the whole point is to get ahead of the clock. */
     if (!no_device && !fast) pace(frame);
+
+    /* An audio device that stopped calling back holds nothing back, which
+     * would leave -t and the song length unreached. Pace on the wall clock
+     * while it stays stalled, re-anchored when the stall starts. */
+    if (output == OutputMode::Audio && !fast) {
+      const bool stalled = audio.stalled();
+      if (stalled && !audio_wall) pacer.rebase(frame);
+      audio_wall = stalled;
+      if (stalled) pacer.wait_for_frame(frame);
+    }
+
 #if US_HAVE_NETDEVICE
     /* The backend notices a dead server by itself (receive timeout) and drops
      * every write after that, and pace() no longer waits; without this check the
@@ -1723,6 +1739,10 @@ int main(int argc, char ** argv)
     }
     if (output == OutputMode::Audio && audio.underruns() > 0) {
       printf(", %llu underrun", static_cast<unsigned long long>(audio.underruns()));
+    }
+    if (output == OutputMode::Audio && audio_dropped > 0) {
+      printf(", %llu dropped (device stalled)",
+             static_cast<unsigned long long>(audio_dropped));
     }
     printf("\n");
   }

@@ -4,7 +4,7 @@
  *
  * host/session_audio.h
  * Session output to the default audio device: reSIDfp synthesis through
- * AudioOut. The device ring is the clock.
+ * AudioOut. The device ring is the clock, the wall clock while it stalls.
  *
  * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
@@ -60,7 +60,8 @@ class AudioSessionSink final : public SessionSink
     bool attach(Machine & machine) override;
     bool prepare(Machine & machine, const SidFile * tune) override;
     bool frame_done(const std::atomic<bool> & stopping) override;
-    bool wall_clock(void) const override { return false; }
+    /** @brief Wall clock pacing only while the device has stalled. */
+    bool wall_clock(void) const override { return audio_.stalled(); }
     void silence(Machine & machine) override;
     void restore(Machine & machine) override;
     void detach(Machine & machine) override;

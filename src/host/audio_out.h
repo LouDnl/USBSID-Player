@@ -132,6 +132,19 @@ class AudioOut
     void drain(void);
 
     /**
+     * @brief True when the device has not called back for kStallMs, or is closed.
+     *
+     * A device that never asks for samples (a VM without audio hardware, a
+     * stuck backend) leaves the ring full forever. The caller then paces on
+     * the wall clock and drops what does not fit, instead of waiting on the
+     * ring. Any thread.
+     */
+    bool stalled(void) const;
+
+    /** @brief Callback silence after which the device counts as stalled. */
+    static constexpr int64_t kStallMs = 500;
+
+    /**
      * @brief Fill a device buffer. **Audio thread only.**
      *
      * Public because the device callback has to reach it and the callback cannot
@@ -164,6 +177,8 @@ class AudioOut
     std::atomic<size_t> head_{ 0 };
     std::atomic<size_t> tail_{ 0 };
     std::atomic<uint64_t> underruns_{ 0 };
+    /* Steady clock in microseconds at the last callback, or at open(). */
+    std::atomic<int64_t> last_fill_us_{ 0 };
 };
 
 } /* namespace usbsid */

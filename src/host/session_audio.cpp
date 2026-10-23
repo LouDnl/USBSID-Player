@@ -124,6 +124,8 @@ bool AudioSessionSink::frame_done(const std::atomic<bool> & stopping)
       if (put == 0) {
         /* Ring full: the device is the clock, wait for it to drain */
         if (stopping) return true;
+        /* A stalled device never drains: drop the rest, wall_clock() paces */
+        if (audio_.stalled()) break;
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
       }
     }

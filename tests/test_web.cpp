@@ -41,6 +41,7 @@
 #include <vector>
 
 #include "machine_harness.h"
+#include "mos6581_8580.h"
 #include "player.h"
 #include "sid_trace.h"
 #include "sid_web.h"
@@ -327,6 +328,54 @@ int test_tune_through_the_ring(void)
   return 0;
 }
 
+/* ---- FM/OPL park -------------------------------------------------------- */
+
+/**
+ * @brief Unclaimed FM/OPL writes reach the ring as regs $80 and $90.
+ *
+ * The page packs those two into ASID 0x60. Real chip 5+ registers below the
+ * park stay dropped.
+ */
+int test_fmopl_park(void)
+{
+  Bus bus;
+  WebSidBackend backend;
+  Mos6581_8580 sid(bus, backend);
+  sid.config().count = 1;
+  sid.config().base[0] = 0xd400;
+  sid.config().fmopl_sid = -1;
+
+  bus.run(1);
+  sid.io_write(0xdf40, 0x20);
+  sid.io_write(0xdf50, 0xa5);
+
+  std::vector<DrainedWrite> got;
+  US_CHECK_EQ_U(drain(backend, got), 2u, "both unclaimed FM/OPL writes are queued");
+  if (got.size() == 2) {
+    US_CHECK_EQ_U(got[0].reg, 0x80u, "$df40 is ring reg $80");
+    US_CHECK_EQ_U(got[0].value, 0x20u, "with its value");
+    US_CHECK_EQ_U(got[1].reg, 0x90u, "$df50 is ring reg $90");
+    US_CHECK_EQ_U(got[1].value, 0xa5u, "with its value");
+  }
+
+  /* chip 5 and up, below the park: still dropped */
+  backend.write(0x80, 0x11, 1);
+  backend.write(0x1df, 0x22, 1);
+  US_CHECK_EQ_U(backend.pending(), 0u, "chip 5+ registers are still dropped");
+
+  /* the park addresses directly */
+  backend.write(0x1e0, 0x33, 1);
+  backend.write(0x1f0, 0x44, 1);
+  got.clear();
+  drain(backend, got);
+  US_CHECK_EQ_U(got.size(), 2u, "park regs queue directly too");
+  if (got.size() == 2) {
+    US_CHECK_EQ_U(got[0].reg, 0x80u, "$1e0 maps to $80");
+    US_CHECK_EQ_U(got[1].reg, 0x90u, "$1f0 maps to $90");
+  }
+  return 0;
+}
+
 /* ---- what the page asks the C API for ------------------------------------ */
 
 /**
@@ -386,6 +435,7 @@ int us_test_web(void)
   test_ring_shape();
   test_ring_overflow();
   test_ring_wraps();
+  test_fmopl_park();
   test_tune_through_the_ring();
   test_api_queries();
 

@@ -26,23 +26,29 @@
 
 #include "sid_web.h"
 
+#include "mos6581_8580.h" /* kMaxSids */
+
 namespace usbsid {
 
 void WebSidBackend::write(addr_t reg, data_t value, uint16_t cycles)
 {
   ++writes_;
 
-  /* $80 and above never reach this board: real chip 5 and up (this backend
-   * only ever has 4 real sockets over WebUSB - "board or emulated" stay a
-   * hard 4 chip placeholder, see mos6581_8580.h's own kMaxSids comment) and
-   * the FM/OPL "unclaimed" park (kFmOplParkBase, well past $80 too) both
-   * land here, and neither is something this board can use. Dropped here
-   * rather than truncated into `entry[0]`, which is one byte, the CYCLED_WRITE
-   * wire format's own register field: silently wrapping a chip 8+ register
-   * into some other chip's byte would corrupt the stream instead of just
-   * dropping the write, which is what UsbSidBackend and EmbeddedSidBackend do
-   * for the same reg range. */
-  if (reg >= 0x80) return;
+  /* Chip 5 and up ($80 to kFmOplRange - 1) never reach this board: this
+   * backend only has 4 real sockets over WebUSB ("board or emulated" stay a
+   * hard 4 chip placeholder, see mos6581_8580.h's kMaxSids comment). Dropped
+   * rather than truncated into `entry[0]`, the one byte CYCLED_WRITE register
+   * field: wrapping a chip 8+ register into another chip's byte would corrupt
+   * the stream. UsbSidBackend and EmbeddedSidBackend drop the same range.
+   *
+   * kFmOplRange and up is the unclaimed FM/OPL park (kFmOplParkBase,
+   * mos6581_8580.cpp): $df40/$df50 with no SID claiming them. The page packs
+   * these as ring regs $80 (index port) and $90 (data port) into ASID 0x60
+   * (asid-midi.js). Real chip registers stay below $80 on the ring, so the
+   * two ranges cannot collide. */
+  constexpr addr_t kFmOplRange = static_cast<addr_t>(kMaxSids * 0x20);
+  if (reg >= kFmOplRange) reg = ((reg & 0x1f) == 0x10) ? 0x90 : 0x80;
+  else if (reg >= 0x80) return;
 
   if (pending() >= kRingEntries) { /* the page has stopped draining */
     ++drops_;

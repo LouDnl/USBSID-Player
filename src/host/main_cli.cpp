@@ -1406,7 +1406,7 @@ int main(int argc, char ** argv)
   uint64_t status_at = 0;
   uint8_t mute_chip = 1;       /* which SID the digit keys address */
 
-  while (!g_stop && (frame_limit == 0 || frame < frame_limit)) {
+  bool net_lost = false; /* the Network SID Device went away: exit status 1 */
     if (keys) {
       const int k = console_key();
       switch (k) {
@@ -1606,6 +1606,17 @@ int main(int argc, char ** argv)
 
     /* Not while seeking: the whole point is to get ahead of the clock. */
     if (!no_device && !fast) pace(frame);
+#if US_HAVE_NETDEVICE
+    /* The backend notices a dead server by itself (receive timeout) and drops
+     * every write after that, and pace() no longer waits; without this check the
+     * emulation would spin silently at full speed. No reconnect is attempted. */
+    if (output == OutputMode::NetDevice && !net.is_connected()) {
+      if (status_line) printf("\n");
+      printf("  device   : connection to %s:%d lost\n", net_host, net_port);
+      net_lost = true;
+      break;
+    }
+#endif
   }
 
   player.stop();
@@ -1648,5 +1659,5 @@ int main(int argc, char ** argv)
 #if US_HAVE_NETDEVICE
   net.disconnect();
 #endif
-  return 0;
+  return net_lost ? 1 : 0;
 }

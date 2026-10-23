@@ -191,7 +191,12 @@ bool NetworkSidBackend::request_ok(uint8_t cmd, uint8_t sid_number,
     if (!running_ || !connected_) return false;
     if (!send_request(cmd, sid_number, payload, payload_len)) { fail(); return false; }
     uint8_t resp = 0;
-    if (!recv_exact(&resp, 1)) { fail(); return false; }
+    if (!recv_exact(&resp, 1)) {
+      /* Name the cause: the CLI only reports the lost link. */
+      if (running_) std::fprintf(stderr, "\nnetdevice: no reply from server (closed, or 2 s receive timeout)\n");
+      fail();
+      return false;
+    }
     if (resp == kRespOk) return true;
     if (resp == kRespBusy) {
       if (std::chrono::steady_clock::now() >= deadline) break;
@@ -212,7 +217,10 @@ bool NetworkSidBackend::request_ok(uint8_t cmd, uint8_t sid_number,
      * rejected this one request outright, not a sign the link is dead. */
     return false;
   }
-  fail(); /* BUSY for kMaxBusyTime: stuck server, treat like a dead connection */
+  /* BUSY for kMaxBusyTime: stuck server, treat like a dead connection */
+  std::fprintf(stderr, "\nnetdevice: server answered BUSY for %lld ms, link dropped\n",
+               static_cast<long long>(kMaxBusyTime.count()));
+  fail();
   return false;
 }
 

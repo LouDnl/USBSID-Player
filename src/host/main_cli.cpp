@@ -1152,12 +1152,12 @@ int main(int argc, char ** argv)
     const bool fm_ok = usb.set_sid_select(sids, count);
     const uint8_t slots = static_cast<uint8_t>(usb.num_slots());
     if (output == OutputMode::USBSID) {
-      printf("  sid select:");
+      printf("  sid select:\n");
       bool any = false;
       for (uint8_t s = 0; s < count && s < slots; s++) {
         if (sids[s] == 0) continue;
-        if (sids[s] == kSelectFmOpl) printf(" slot %u <- FM/OPL", s + 1);
-        else printf(" slot %u <- tune SID %u", s + 1, sids[s]);
+        if (sids[s] == kSelectFmOpl) printf("   slot %u <- FM/OPL\n", s + 1);
+        else printf("   slot %u <- tune SID %u\n", s + 1, sids[s]);
         any = true;
       }
       if (!any) printf(" (nothing in range)");

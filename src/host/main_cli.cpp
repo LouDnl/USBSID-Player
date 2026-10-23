@@ -44,6 +44,9 @@
 #if US_HAVE_NETDEVICE
 #include "sid_netdevice.h"
 #endif
+#if US_HAVE_RTMIDI
+#include "sid_asid.h"
+#endif
 #include "sidfile.h"
 #include "console.h"
 #include "audio_out.h"
@@ -271,15 +274,15 @@ void usage(const char * argv0)
     "                    ROM, the way a build without ROMs does\n"
     "\n"
     "  sound:\n"
-#if US_HAVE_NETDEVICE
-    "  -o, --output M    usbsid (default), audio, wav, or nsd. usbsid\n"
-    "                    falls back to audio when no board is found\n"
-#else
-    "  -o, --output M    usbsid (default), audio, or wav. usbsid falls back\n"
-    "                    to audio when no board is found\n"
+    "  -o,  --output M   usbsid (default)"
+#if US_HAVE_RTMIDI
+                         ", asid"
 #endif
-    "  -lb, --list-boards  list every attached board's serial number and exit\n"
-    "  -b, --boards SPEC  open these boards for --output=usbsid instead of\n"
+#if US_HAVE_NETDEVICE
+                         ", nsd"
+#endif
+                         ", audio or wav.\n"
+    "                    %1$s falls back to audio when no board is found\n"
     "                    the one the driver picks, in this order (board 1\n"
     "                    is the first, etc.). SPEC is a comma separated list\n"
     "                    of serial numbers from --list-boards, for example\n"
@@ -289,13 +292,18 @@ void usage(const char * argv0)
     "                    spread across every opened board's SIDs, board 1's\n"
     "                    first. (default: one board, the first in USB\n"
     "                    bus/port order)\n"
-    "  -w, --wav FILE    write a WAV instead of playing, implies --output=wav\n"
+#if US_HAVE_RTMIDI
+    "  -lm, --list-midi  list every available midi output device\n"
+    "  -a,  --asid N     Midi supporting ASID port to use for --output=asid\n"
+    "                    (default is 0)\n"
+#endif
 #if US_HAVE_NETDEVICE
     "  -nh, --net-host H  Network SID Device server to connect to for\n"
     "                    --output=nsd (default 127.0.0.1)\n"
     "  -np, --net-port P  its TCP port (default 6581)\n"
     "  -ns, --net-sids N  SIDs to tell it about (default: the tune's own count)\n"
 #endif
+    "  -w,  --wav FILE   write a WAV instead of playing, implies --output=wav\n"
     "  -ra, --rate N     sample rate for audio and wav (default 44100). A device\n"
     "                    may impose its own, which is then what is used\n"
     "  -q, --quality Q   fast (linear) or good (sinc, default)\n"
@@ -542,7 +550,7 @@ void print_tune(const SidFile & t, bool stereo)
  * that says what it did. `NetDevice` gets the same treatment: a server that
  * cannot be reached falls back to `Audio` rather than playing silently.
  */
-enum class OutputMode { USBSID, Audio, Wav, NetDevice };
+enum class OutputMode { USBSID, Audio, Wav, NetDevice, ASID };
 
 } /* namespace */
 
@@ -620,6 +628,10 @@ int main(int argc, char ** argv)
 
   const char * boards_spec = nullptr;
   bool list_boards = false;
+#if US_HAVE_RTMIDI
+  bool list_midi = false;
+  int asid_midi_port = 0;
+#endif
 
   for (int i = 1; i < argc; i++) {
     const char * a = argv[i];
@@ -662,6 +674,16 @@ int main(int argc, char ** argv)
       if (!strcmp(v, "usbsid")) output = OutputMode::USBSID;
       else if (!strcmp(v, "audio")) output = OutputMode::Audio;
       else if (!strcmp(v, "wav")) output = OutputMode::Wav;
+      else if (!strcmp(v, "asid")) {
+#if US_HAVE_RTMIDI
+        output = OutputMode::ASID;
+#else
+        /* Build without the RtMidi backend. See US_HAVE_RTMIDI in
+         * CMakeLists.txt. */
+        printf("--output=asid: not available in this build\n");
+        return 2;
+#endif
+      }
       else if (!strcmp(v, "nsd")) {
 #if US_HAVE_NETDEVICE
         output = OutputMode::NetDevice;
@@ -672,12 +694,28 @@ int main(int argc, char ** argv)
         return 2;
 #endif
       }
-      else { printf("unknown output '%s': use usbsid, audio, wav or nsd\n", v); return 2; }
+      else {
+        printf("unknown output '%s': use usbsid, audio"
+#if US_HAVE_RTMIDI
+                ", asid"
+#endif
+#if US_HAVE_NETDEVICE
+                ", nsd"
+#endif
+                " or wav\n", v);
+        return 2;
+      }
     }
     else if ((!strcmp(a, "-w") || !strcmp(a, "--wav")) && i + 1 < argc) {
       wav_path = argv[++i];
       output = OutputMode::Wav;   /* naming a file is asking for it */
     }
+#if US_HAVE_RTMIDI
+    else if ((!strcmp(a, "-lm") || !strcmp(a, "--list-midi")))  list_midi = true;
+    else if ((!strcmp(a, "-a") || !strcmp(a, "--asid")) && i + 1 < argc) {
+      asid_midi_port = atoi(argv[++i]);
+    }
+#endif
 #if US_HAVE_NETDEVICE
     else if ((!strcmp(a, "-nh") || !strcmp(a, "--net-host")) && i + 1 < argc)
       net_host = argv[++i];
@@ -731,6 +769,14 @@ int main(int argc, char ** argv)
     }
     return 0;
   }
+
+#if US_HAVE_RTMIDI
+  if (list_midi) {
+    ASIDBackend l_asid;
+    l_asid.list_ports();
+    return 0;
+  }
+#endif
 
   std::vector<std::string> board_order;
   if (boards_spec != nullptr) {
@@ -804,6 +850,9 @@ int main(int argc, char ** argv)
   std::vector<TraceSidBackend::Event> trace_buffer;
   TraceSidBackend * trace = nullptr;
   UsbSidBackend usb;
+#if US_HAVE_RTMIDI
+  ASIDBackend asid;
+#endif
 #if US_HAVE_NETDEVICE
   NetworkSidBackend net;
 #endif
@@ -872,6 +921,27 @@ int main(int argc, char ** argv)
       output = OutputMode::Audio;
     }
   }
+
+#if US_HAVE_RTMIDI
+  if (output == OutputMode::ASID && !no_device) {
+    int nosids = info.sid_count;
+    if (nosids > 4) {
+      printf("ASID output supports a maximum of 4 SID Chips, tune has %d SID Chips!\n",
+        nosids);
+      return 2;
+    }
+    if (asid.asid_init(asid_midi_port, nosids)) {
+
+      machine.set_sid_backend(asid);
+      active_backend = &asid;
+    } else {
+      /* The fallback, and it says so. Playing silently was the old behaviour and
+       * is indistinguishable from a broken tune. */
+      printf("  device   : none found, synthesising instead (--output=audio)\n");
+      output = OutputMode::Audio;
+    }
+  }
+#endif
 
 #if US_HAVE_NETDEVICE
   if (output == OutputMode::NetDevice) {
@@ -1037,6 +1107,10 @@ int main(int argc, char ** argv)
   if ((multi_board && force_remap) || select_sids_spec != nullptr) {
     sid_config.fmopl_sid = -1;
   }
+  /* ASID carries FM/OPL in its own 0x60 message: leave $df40/$df50 parked. */
+  if (output == OutputMode::ASID) {
+    sid_config.fmopl_sid = -1;
+  }
   if (multi_board && select_sids_spec == nullptr && is_sid && info.has_fm_opl) {
     if (force_remap) {
       printf("  fm/opl   : not used, -f/-fa move the SIDs "
@@ -1145,6 +1219,12 @@ int main(int argc, char ** argv)
      * Setting it afterwards ran the whole init at whatever rate the previous
      * tune left behind. */
     if (usb.is_open()) usb.set_clock_rate(machine.vic().timing().clock_hz);
+#if US_HAVE_RTMIDI
+    if (output == OutputMode::ASID) {
+      asid.sendSIDEnvironment(machine.vic().timing().clock_hz < 1000000);
+      asid.sendSIDType(info.sid_model == SidModel::Mos6581);
+    }
+#endif
 #if US_HAVE_NETDEVICE
     if (output == OutputMode::NetDevice) {
       net.configure_tune(machine.vic().timing().clock_hz > 1000000, info.sid_model);
@@ -1762,6 +1842,9 @@ int main(int argc, char ** argv)
   }
 
   usb.close();
+#if US_HAVE_RTMIDI
+  asid.asid_close();
+#endif
 #if US_HAVE_NETDEVICE
   net.disconnect();
 #endif

@@ -99,6 +99,42 @@ int test_parse_synthetic(void)
   return 0;
 }
 
+/* ---- the CIA1 timer the driver is entered with --------------------------- */
+
+/* Load a one song raster PSID flagged for the given video standard and return
+ * the CIA1 timer A latch after the driver setup. */
+static uint16_t cia1_latch_after_setup(uint8_t video_flags)
+{
+  std::vector<data_t> file(0x7c + 4, 0);
+  memcpy(file.data(), "PSID", 4);
+  file[0x05] = 0x02;                  /* version 2 */
+  file[0x07] = 0x7c;                  /* data offset */
+  file[0x08] = 0x10; file[0x09] = 0x00; /* load $1000 */
+  file[0x0a] = 0x10; file[0x0b] = 0x00; /* init $1000 */
+  file[0x0c] = 0x10; file[0x0d] = 0x03; /* play $1003 */
+  file[0x0f] = 0x01;                  /* one song */
+  file[0x11] = 0x01;                  /* default song 1 */
+  file[0x77] = video_flags;           /* flags bits 2-3: video standard */
+  file[0x78] = 0x04;                  /* driver may go at page 4 */
+  file[0x79] = 0x02;
+  file[0x7c] = 0x60;                  /* the "tune": rts */
+
+  TestC64 c64;
+  Player player(c64.machine);
+  if (!player.load_sid(file.data(), file.size())) return 0;
+  if (!player.init_tune(0)) return 0;
+  return c64.machine.cia1().latch_a();
+}
+
+int test_cia1_default_timer(void)
+{
+  /* The SID format documents $4025 for PAL and $4295 for NTSC. The NTSC bytes
+   * were once swapped ($9542), which played NTSC tunes at the wrong speed. */
+  US_CHECK_EQ_U(cia1_latch_after_setup(0x04), 0x4025u, "PAL CIA1 timer A latch is $4025");
+  US_CHECK_EQ_U(cia1_latch_after_setup(0x08), 0x4295u, "NTSC CIA1 timer A latch is $4295");
+  return 0;
+}
+
 /* ---- v5 SID count against the generated addresses ----------------------- */
 
 /* Parse a minimal v5 header with the given multiSidConfig and start byte. */
@@ -529,6 +565,7 @@ int us_test_player(void)
   test_boot_image_matches_roms();
 #endif
   test_parse_synthetic();
+  test_cia1_default_timer();
   test_v5_sid_count();
   test_real_tunes();
   test_tune_runs();

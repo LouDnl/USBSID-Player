@@ -106,8 +106,8 @@ void Player::setup_for_driver(bool is_pal)
   Mmu & mmu = machine_.mmu();
 
   /* the CIA1 timer A values the SID file format documents for each standard */
-  const data_t timer_lo = is_pal ? 0x25 : 0x42;
-  const data_t timer_hi = is_pal ? 0x40 : 0x95;
+  const data_t timer_lo = is_pal ? 0x25 : 0x95;
+  const data_t timer_hi = is_pal ? 0x40 : 0x42;
 
   mmu.write(0xd011, 0x1b);  /* screen on, raster compare high bit clear */
   mmu.write(0xd012, 0x37);

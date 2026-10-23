@@ -99,6 +99,66 @@ int test_parse_synthetic(void)
   return 0;
 }
 
+/* ---- v5 SID count against the generated addresses ----------------------- */
+
+/* Parse a minimal v5 header with the given multiSidConfig and start byte. */
+bool parse_v5_multi(uint8_t multi_cfg, uint8_t start_byte, SidFile & tune)
+{
+  std::vector<data_t> file(0x7c + 4, 0);
+  memcpy(file.data(), "PSID", 4);
+  file[0x05] = 0x05;                  /* version 5 */
+  file[0x07] = 0x7c;                  /* data offset */
+  file[0x08] = 0x10;                  /* load $1000 */
+  file[0x0a] = 0x10;                  /* init $1000 */
+  file[0x0c] = 0x10; file[0x0d] = 0x03; /* play $1003 */
+  file[0x0f] = 0x01;                  /* one song */
+  file[0x11] = 0x01;                  /* default song 1 */
+  file[0x7a] = multi_cfg;
+  file[0x7b] = start_byte;
+  file[0x7c] = 0x60;                  /* the "tune": rts */
+  return sidfile_parse(file.data(), file.size(), tune);
+}
+
+int test_v5_sid_count(void)
+{
+  SidFile t;
+
+  /* total 0 and 1 are a single SID */
+  US_CHECK(parse_v5_multi(0x30, 0x00, t), "count 0 parses");
+  US_CHECK_EQ_U(t.sid_count, 1u, "count 0 is one SID");
+  US_CHECK(parse_v5_multi(0x31, 0x00, t), "count 1 parses");
+  US_CHECK_EQ_U(t.sid_count, 1u, "count 1 is one SID");
+
+  /* cfg 3, step $100: $D400 $D500 $D600 $D700 $DE00 $DF00, then past $DFE0 */
+  US_CHECK(parse_v5_multi(0x36, 0x00, t), "cfg 3 count 6 parses");
+  US_CHECK_EQ_U(t.sid_count, 6u, "cfg 3 count 6 yields six SIDs");
+  US_CHECK_EQ_U(t.sid_addr[5], 0xdf00u, "the sixth lands at $DF00");
+  US_CHECK(parse_v5_multi(0x37, 0x00, t) == false, "cfg 3 count 7 is rejected");
+
+  /* cfg 3 with SID #2 override at $DE00: $DF00 is the last valid address */
+  US_CHECK(parse_v5_multi(0x33, 0xe0, t), "cfg 3 start $DE00 count 3 parses");
+  US_CHECK_EQ_U(t.sid_count, 3u, "cfg 3 start $DE00 count 3 yields three SIDs");
+  US_CHECK(parse_v5_multi(0x34, 0xe0, t) == false,
+           "cfg 3 start $DE00 count 4 is rejected");
+
+  /* cfg 3 with SID #2 override at $DF00: the next address is past $DFE0 */
+  US_CHECK(parse_v5_multi(0x32, 0xf0, t), "cfg 3 start $DF00 count 2 parses");
+  US_CHECK_EQ_U(t.sid_count, 2u, "cfg 3 start $DF00 count 2 yields two SIDs");
+  US_CHECK(parse_v5_multi(0x33, 0xf0, t) == false,
+           "cfg 3 start $DF00 count 3 is rejected");
+
+  /* cfg 6, steps $100 and $300: $D400 $D500 $DE00 $DF00, then past $DFE0 */
+  US_CHECK(parse_v5_multi(0x64, 0x00, t), "cfg 6 count 4 parses");
+  US_CHECK_EQ_U(t.sid_count, 4u, "cfg 6 count 4 yields four SIDs");
+  US_CHECK(parse_v5_multi(0x65, 0x00, t) == false, "cfg 6 count 5 is rejected");
+
+  /* reserved configurations generate no further SID */
+  US_CHECK(parse_v5_multi(0x72, 0x00, t) == false, "reserved cfg 7 count 2 is rejected");
+  US_CHECK(parse_v5_multi(0xf2, 0x00, t) == false, "reserved cfg 15 count 2 is rejected");
+
+  return 0;
+}
+
 /* ---- real tunes ---------------------------------------------------------- */
 
 struct TuneCase { const char * path; const char * label; };
@@ -469,6 +529,7 @@ int us_test_player(void)
   test_boot_image_matches_roms();
 #endif
   test_parse_synthetic();
+  test_v5_sid_count();
   test_real_tunes();
   test_tune_runs();
   test_dir_listing();

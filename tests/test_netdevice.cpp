@@ -84,16 +84,19 @@ struct FakeNsd {
       if (!rd(fd, h, 4)) break;
       std::vector<uint8_t> pl(static_cast<size_t>((h[2] << 8) | h[3]));
       if (!pl.empty() && !rd(fd, pl.data(), pl.size())) break;
-      std::vector<uint8_t> resp;
+      /* Assign temporaries, not `resp = { ... }`: GCC 16 -O3 flags that
+       * assign() into an empty vector with a false -Wnonnull. */
+      using Bytes = std::vector<uint8_t>;
+      Bytes resp;
       switch (h[0]) {
-        case 7:  resp = { 4, 5 }; break;                       /* version 5 */
-        case 10: resp = { 5, 1 }; break;                       /* one config */
-        case 11: resp = { 6, 0 };                              /* model, name */
+        case 7:  resp = Bytes{ 4, 5 }; break;                  /* version 5 */
+        case 10: resp = Bytes{ 5, 1 }; break;                  /* one config */
+        case 11: resp = Bytes{ 6, 0 };                         /* model, name */
                  for (const char * c = name; *c; c++) resp.push_back(static_cast<uint8_t>(*c));
                  resp.push_back(0);
                  break;
-        case 1:  resp = { static_cast<uint8_t>(h[1] > max_sids ? 2 : 0) }; break;
-        default: resp = { 0 }; break;
+        case 1:  resp = Bytes{ static_cast<uint8_t>(h[1] > max_sids ? 2 : 0) }; break;
+        default: resp = Bytes{ 0 }; break;
       }
       {
         std::lock_guard<std::mutex> lock(mu);

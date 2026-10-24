@@ -603,7 +603,7 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
   ### Software audio: reSIDfp for the synthesis, miniaudio for the device.
   ###
   ### Found if present rather than REQUIRED, deliberately. The release matrix is
-  ### four platforms including MSYS2/MINGW64, and making libresidfp a hard
+  ### four platforms including MSYS2/UCRT64, and making libresidfp a hard
   ### dependency of the CLI would break a build on any of them that does not have
   ### it, for a feature that is not why most people run this. When it is missing
   ### the binary is the same binary, and `--output=audio|wav` says it was not

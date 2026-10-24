@@ -65,14 +65,14 @@ jobs:
         if: matrix.os == 'windows-2022'
         uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW64
+          msystem: UCRT64
           update: true
           install: >-
-            mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-libusb
-            mingw-w64-x86_64-cmake
-            mingw-w64-x86_64-pkg-config
-            mingw-w64-x86_64-ninja
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-libusb
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-pkg-config
+            mingw-w64-ucrt-x86_64-ninja
             patch
             zip
 
@@ -114,7 +114,7 @@ jobs:
           # A MinGW build needs its runtime beside it or it will not start on a
           # machine without MSYS2. Take whatever it actually links against.
           if [ "${{ matrix.os }}" = "windows-2022" ]; then
-            ldd "$SRC" | awk '/mingw64/ {print $3}' | while read -r dll; do
+            ldd "$SRC" | awk '/ucrt64/ {print $3}' | while read -r dll; do
               [ -f "$dll" ] && cp "$dll" stage/
             done
           fi
@@ -122,7 +122,7 @@ jobs:
           ls -l stage
           cd stage
           # A zip for Windows, a tarball elsewhere. `zip` is installed with the
-          # toolchain above: the MINGW64 shell ships with neither it nor 7z.
+          # toolchain above: the UCRT64 shell ships with neither it nor 7z.
           if [ "${{ matrix.os }}" = "windows-2022" ]; then
             zip -r "../usbsid-${{ matrix.asset }}.zip" .
           else

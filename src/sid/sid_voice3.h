@@ -3,27 +3,20 @@
  * line playback and for embedding on RP2350 (Pico2).
  *
  * sid_voice3.h
- * The two registers a SID can be read from: $d41b and $d41c.
+ * The two registers a SID can be read from: $d41b and $d41c
  *
- * This player produces no sound of its own, it drives real chips, so there is
- * no reason to emulate a SID. There is one exception, and it is not optional:
- * $d41b is voice three's oscillator output and $d41c is its envelope, and
- * those two are the only way a C64 program can read anything back out of a
- * SID. Tunes use them constantly, as a random source, as a timer, and as a
- * "wait until the oscillator has moved" synchronisation. A tune that polls
- * $d41b and gets the same value every time waits forever, which is what three
- * of them did.
+ * The player drives real chips and emulates no SID, except voice three
+ * $d41b is the oscillator output and $d41c the envelope of voice three, the
+ * only way a C64 program reads anything back from a SID
+ * Tunes use them as random source, timer and "wait until the oscillator has moved"
+ * A tune polling $d41b that gets the same value every time waits forever
  *
- * So voice three is emulated, and only voice three: its 24 bit oscillator, its
- * noise shift register, and its envelope generator. The model is the one every
- * emulator uses, from Dag Lem's reSID.
+ * Emulated are the 24 bit oscillator, the noise shift register and the envelope
+ * generator, the reSID model by Dag Lem
  *
- * It is clocked lazily. Nothing here has an outside influence between one
- * access and the next, so catching up at the moment of a read gives the same
- * answer as stepping it every cycle would, at none of the cost. A write
- * catches up to the write's own cycle before it takes effect, which is what
- * keeps that true.
- *
+ * Clocked lazily, nothing influences it between two accesses, catching up at
+ * a read gives the answer of stepping every cycle at none of the cost
+ * A write first catches up to its own cycle
  * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
@@ -70,26 +63,46 @@ class SidVoice3
 
     void reset(void);
 
-    /** @brief A register write. Anything not voice three's is ignored. */
+    /** @brief A register write, anything not voice three is ignored */
     void write(reg_t reg, data_t value, cycle_t now) US_RAM_ATTR;
-    /** @brief $d41b, the waveform output of voice three. */
+    /** @brief A register read, everything except 1b/1c is ignored */
+    data_t read(reg_t reg, cycle_t now) US_RAM_ATTR;
+    /** @brief $d41b, the waveform output of voice three */
     data_t osc3(cycle_t now) US_RAM_ATTR;
-    /** @brief $d41c, the envelope of voice three. */
+    /** @brief $d41c, the envelope of voice three */
     data_t env3(cycle_t now) US_RAM_ATTR;
-    /** @brief Put the clock back in step without changing anything else. */
+    /** @brief Put the clock back in step, nothing else changes */
     void resync(cycle_t now) { last_cycle_ = now; }
 
   private:
+    struct Osc {
+      uint32_t freq = 0; /* 16 bit */
+      uint32_t acc = 0;  /* 24 bit */
+      data_t ctrl = 0;
+      bool test(void) const { return (ctrl & 0x08) != 0; }
+    };
+
     void clock_to(cycle_t now) US_RAM_ATTR;
-    void clock_oscillator(uint32_t cycles) US_RAM_ATTR;
+    void clock(uint32_t cycles) US_RAM_ATTR;
+    void clock_waveforms(uint32_t cycles) US_RAM_ATTR;
+    void clock_oscillators(uint32_t cycles) US_RAM_ATTR;
+    void clock_noise(uint32_t cycles) US_RAM_ATTR;
+    void shift_lfsr(uint32_t feedback) US_RAM_ATTR;
+    void discharge_noise(void) US_RAM_ATTR;
+    void write_control(data_t value) US_RAM_ATTR;
+    bool sync_active(void) const US_RAM_ATTR;
+    bool combined_noise_active(void) const US_RAM_ATTR;
+    uint32_t noise_bits(void) const US_RAM_ATTR;
+    data_t osc3_output(void) const US_RAM_ATTR;
     void clock_envelope(uint32_t cycles) US_RAM_ATTR;
-    void clock_noise(uint32_t shifts) US_RAM_ATTR;
-    /* oscillator */
-    uint32_t accumulator_ = 0;   /* 24 bit */
-    uint32_t shift_ = 0x7ffff8;  /* 23 bit noise LFSR, reset value from reSID */
-    uint16_t freq_ = 0;
-    uint16_t pw_ = 0;
-    data_t control_ = 0;
+    void step_envelope(void) US_RAM_ATTR;
+
+    /* oscillators, voice one and two only for sync and ring modulation */
+    Osc osc_[3];
+    uint32_t shift_ = 0x7ffffc;  /* 23 bit noise LFSR */
+    uint16_t pw_ = 0;            /* voice three only */
+    uint32_t noise_pipeline_ = 0;
+    uint32_t noise_reset_cycles_ = 0;
 
     /* envelope */
     enum class EnvState : uint8_t { Attack, DecaySustain, Release };

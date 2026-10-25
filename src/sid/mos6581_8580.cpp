@@ -370,22 +370,18 @@ void Mos6581_8580::io_write(addr_t addr, data_t value)
 
   if (reg == kSidNotMapped) return;
 
-  /* A mute changed since the last write; serviced here since this runs on
-   * the core that owns the backend and cycle accounting. Before the write
-   * below, so a chip coming back is already itself for the next write. */
+  /* A mute changed since the last write, serviced in this function (core that owns the backend and cycle accounting) before the write */
   if (chip_mute_pending_ != 0) apply_chip_mute_pending();
 
   io_addr_ = addr;
   io_chip_ = chip;
-  /* Mirror in the tune's own chip layout, unshifted by -f/-fa */
+  /* Mirror in the tune chip layout, unshifted by -f/-fa */
   const addr_t mirror = (chip >= 1 && chip <= kMaxSids)
     ? static_cast<addr_t>(((chip - 1) * 0x20) + (addr & 0x1f)) : reg;
   regs_[mirror & (kRegsSize - 1)] = value;
 
-  /* Unclaimed FM/OPL addresses (kMaxSids + 1 from translate()) go to the
-   * backend as reg values out of any real chip's range; a backend that
-   * can't use them drops them (UsbSidBackend/EmbeddedSidBackend both
-   * guard on reg >= 0x80, well below kFmOplParkBase). */
+  /* Unclaimed FM/OPL addresses (kMaxSids + 1 from translate()) reach the backend as
+   * regs outside any real chip range, backends drop them (reg >= 0x80, below kFmOplParkBase) */
   if (chip == kMaxSids + 1) {
     US_LOG_IF(sid_rw, "[W FM] $%04x $%03x:%02x [C]%5u\n", addr, reg, value,
               static_cast<unsigned>(bus_.cycles() - last_event_));
@@ -397,11 +393,9 @@ void Mos6581_8580::io_write(addr_t addr, data_t value)
   if (chip >= 1 && chip <= kMaxSids) {
     const bool chip_is_muted = (config_.chip_mute & (1u << (chip - 1))) != 0;
 
-    /* --solo: local < 0x15 is one of the three per-voice register blocks
-     * (7 bytes each: freq lo/hi, pulse lo/hi, control, ad, sr); 0x15-0x18
-     * is the chip-shared filter/volume block, dropped only when the chip
-     * has no solo'd voice at all - a solo'd voice still needs its shared
-     * filter/volume to reach the backend to be heard. */
+    /* --solo: local < 0x15 is one of 3 voice blocks (7 bytes: freq lo/hi, pulse lo/hi, control, ad, sr)
+     * 0x15-0x18 is the shared filter/volume block, dropped only when the chip has
+     * no solo'd voice, a solo'd voice needs it to be heard */
     bool solo_dropped = false;
     if (config_.solo_active) {
       const addr_t local = mirror & 0x1f;
@@ -410,25 +404,23 @@ void Mos6581_8580::io_write(addr_t addr, data_t value)
                                      : ((keep & (1u << (local / 7))) == 0);
     }
 
-    /* Gated on mute/solo state so -srw shows only the writes that
-     * actually reach the backend, not the full stream. */
+    /* Gated on mute/solo state, -srw/-sidw show only the writes that reach the backend */
     if (!chip_is_muted && !solo_dropped) {
       US_LOG_IF(sid_rw, "[W SID%u] $%04x $%03x:%02x [C]%5u\n", chip, addr, reg,
                 value, static_cast<unsigned>(bus_.cycles() - last_event_));
+      US_LOG_IF(sid_w, "[W! SID%u] $%04x $%03x:%02x [C]%5u\n", chip, addr, reg,
+                value, static_cast<unsigned>(bus_.cycles() - last_event_));
     }
-    /* Voice three follows along so $d41b/$d41c can answer, fed the
-     * register and cycle so it can be caught up lazily and stay exact.
-     * Kept running even when muted/solo-dropped, same reasoning as the
-     * muted-chip comment below. */
+    /* Voice three follows along to answer $d41b/$d41c, fed register and cycle
+     * to catch up lazily. Runs when muted/solo-dropped too */
     voice3_[chip - 1].write(static_cast<reg_t>(addr & 0x1f), value,
                             bus_.cycles());
-    /* A muted chip's writes are dropped here, and only here (after the
-     * mirror and voice three, so $d41b/$d41c answer the same muted or
-     * not - tunes poll those as a timer and random source). Solo-dropped
-     * writes leave the same way, for the same reason. */
+    /* Writes of a muted or solo-dropped chip are dropped only in this function, after the
+     * mirror and voice three ($d41b/$d41c answer the same, tunes poll them
+     * as timer and random source) */
     if (chip_is_muted || solo_dropped) return;
 
-    /* Voice mute is applied only here, on the way out. */
+    /* Voice mute is applied only on the way out */
     backend_->write(reg, mask_for_output(mirror, value), cycles_since_last_event());
     ++writes_;
   }
@@ -440,8 +432,8 @@ data_t Mos6581_8580::io_read(addr_t addr)
   const addr_t reg = translate(addr, chip);
 
   if (reg == kSidNotMapped) {
-    /* OPL window reads (status port) are unemulated and float high. Reported
-     * to the backend for a trace to record; other backends ignore it. */
+    /* OPL window reads (status port) are not emulated and float high
+     * Reported to the backend for a trace to record, others ignore it */
     if (addr >= kFmOplWindowFirst && addr <= kFmOplWindowLast &&
         backend_ != nullptr) {
       io_addr_ = addr;
@@ -456,44 +448,46 @@ data_t Mos6581_8580::io_read(addr_t addr)
   io_chip_ = chip;
   ++reads_;
 
-  /* Only voice three's oscillator/envelope registers are readable. With
-   * real_reads the answer comes from the chip itself; otherwise voice
-   * three is emulated so $d41b/$d41c (timer, random source) still move. */
+  /* Only voice three's oscillator/envelope registers are readable.
+   * with real_reads the value comes from the chip onboard USBSID-Pico
+   * and when output is audio the value comes from ReSIDfp.
+   * otherwise three is emulated and $d41b/$d41c (timer, random source)
+   * still update like they should. */
   const reg_t local = static_cast<reg_t>(addr & 0x1f);
 
   if (config_.real_reads && chip >= 1 && chip <= kMaxSids) {
-    return backend_->read(reg, cycles_since_last_event());
+    const data_t value = backend_->read(reg, cycles_since_last_event());
+    US_LOG_IF(sid_r, "[RR SID%u] $%04x $%03x:%02x\n", chip, addr, reg, value);
+    return value;
   }
 
-  /* --solo: a chip with no solo'd voice at all never reaches the backend
-   * (see io_write()), so its reads are pure emulation noise for whoever
-   * asked to isolate SPEC's traffic with -srw - suppressed the same way
-   * writes are, chip-granular since $d41b/$d41c are voice three's alone
-   * but a tune polls them regardless of which voice it cares about. */
+  /* --solo: a chip with no solo'd voice never reaches the backend (see io_write())
+   * Its reads are noise when isolating a SPEC with -srw/-sidr, suppressed like writes
+   * Chip granular, a tune polls $d41b/$d41c whatever voice it cares about */
   const bool solo_read_dropped = config_.solo_active && chip >= 1 &&
     chip <= kMaxSids && config_.voice_solo[chip - 1] == 0;
 
   if (chip >= 1 && chip <= kMaxSids) {
     if (local == kSidRegOsc3 || local == kSidRegEnv3) {
-      const data_t value = (local == kSidRegOsc3)
-        ? voice3_[chip - 1].osc3(bus_.cycles())
-        : voice3_[chip - 1].env3(bus_.cycles());
+      const data_t value = voice3_[chip - 1].read(local, bus_.cycles());
       if (!solo_read_dropped) {
         US_LOG_IF(sid_rw, "[R SID%u] $%04x $%03x:%02x\n", chip, addr, reg, value);
+        US_LOG_IF(sid_r, "[R SID%u] $%04x $%03x:%02x\n", chip, addr, reg, value);
       }
       return value;
     }
   }
-  /* Mirror index in the tune's own chip layout, see io_write() */
+  /* Mirror index in the tune chip layout, see io_write() */
   const addr_t mirror = (chip >= 1 && chip <= kMaxSids)
     ? static_cast<addr_t>(((chip - 1) * 0x20) + local) : reg;
   if (!solo_read_dropped) {
     US_LOG_IF(sid_rw, "[R SID%u] $%04x $%03x:%02x (mirror)\n", chip, addr, reg,
               regs_[mirror & (kRegsSize - 1)]);
+    US_LOG_IF(sid_r, "[R SID%u] $%04x $%03x:%02x (mirror)\n", chip, addr, reg,
+              regs_[mirror & (kRegsSize - 1)]);
   }
 
-  /* Everything else floats on real hardware; the mirror is the most
-   * useful thing to hand back. */
+  /* Everything else floats on real hardware, hand back the mirror */
   return regs_[mirror & (kRegsSize - 1)];
 }
 

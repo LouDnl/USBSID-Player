@@ -3,16 +3,9 @@
  * line playback and for embedding on RP2350 (Pico2).
  *
  * logging.h
- * Watching what the machine does, one access at a time.
- *
- * The same set of switches old player has, and the same command line names
- * for them, because the two are going to be compared against each other for a
- * while yet and a diff of two differently shaped logs is no use to anybody.
- *
- * All of it compiles away on the device: `US_LOGGING` is only on for the
- * desktop build, and with it off every call site becomes nothing at all. With
- * it on but the switch off, a call site is one predicted-not-taken branch,
- * which the eighteen times realtime the desktop runs at can afford.
+ * Logging of machine accesses
+ * Same switches and command line names as old player, for comparing logs
+ * Compiled out on the device (US_LOGGING is on for the desktop build only)
  *
  * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
@@ -49,35 +42,31 @@
 
 namespace usbsid {
 
-/**
- * @brief What to print while the machine runs.
- *
- * The names match old players's variables, and the command line switches that
- * set them match its arguments.
- */
+/** @brief What to print while the machine runs, names match old player */
 struct LogFlags {
+  bool sid_r = false;         /* -sidr  SID reads */
+  bool sid_w = false;         /* -sidw  SID writes */
   bool sid_rw = false;        /* -srw   SID reads and writes */
   bool cia1_rw = false;       /* -c1rw  CIA1 reads and writes */
   bool cia2_rw = false;       /* -c2rw  CIA2 reads and writes */
   bool vic_rw = false;        /* -vrw   VIC register writes */
   bool vic_reg_reads = false; /* -vrrw  VIC register reads */
-  bool read_writes = false;   /* -lrw   every CPU read and write */
+  bool read_writes = false;   /* -lrw   all CPU reads and writes */
   bool rom_rw = false;        /* -llrw  reads that come out of a ROM */
   bool pla = false;           /* -pla   banking changes */
-  bool instructions = false;  /* -ins   every instruction */
+  bool instructions = false;  /* -ins   all instructions */
   bool timers = false;        /* -tim   the timers, once a frame */
   bool memstate = false;      /* -lmem  the SID registers, once a frame */
 
-  /** @brief True when anything at all is switched on. */
+  /** @brief True if anything is switched on */
   bool any(void) const
   {
-    return sid_rw || cia1_rw || cia2_rw || vic_rw || vic_reg_reads ||
+    return sid_r || sid_w || sid_rw || cia1_rw || cia2_rw || vic_rw || vic_reg_reads ||
            read_writes || rom_rw || pla || instructions || timers || memstate;
   }
 };
 
-/* One set of switches for the process. A player is one machine, and this is a
- * debugging aid rather than something to thread through every constructor. */
+/* One set of switches for the process */
 extern LogFlags us_log;
 
 #if US_LOGGING

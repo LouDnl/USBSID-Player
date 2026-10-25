@@ -4,13 +4,10 @@
  *
  * sid_voice3.cpp
  *
- * The waveform generator and the envelope generator follow Dag Lem's reSID,
- * which is where every emulator's SID behaviour comes from. What is left out
- * is what a read of $d41b and $d41c cannot show: the filter, the mixer, the
- * other two voices, and voice three's sync and ring modulation inputs from
- * voice two. Those change the *sound*, and this player has real chips to make
- * the sound.
- *
+ * Waveform and envelope generator follow Dag Lem's reSID based of off WilfredC64's code.
+ * Left out are the parts a read of $d41b and $d41c cannot show: the filter, the mixer,
+ * the other two voices and the sync and ring modulation inputs of voice three
+ * from voice two. Those only change the sound, real chips make that
  * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
@@ -39,50 +36,59 @@ namespace {
 
 /* Control register bits */
 constexpr data_t kCtrlGate     = 0x01;
+constexpr data_t kCtrlSync     = 0x02;
+constexpr data_t kCtrlRing     = 0x04;
 constexpr data_t kCtrlTest     = 0x08;
-constexpr data_t kCtrlTriangle = 0x10;
-constexpr data_t kCtrlSawtooth = 0x20;
-constexpr data_t kCtrlPulse    = 0x40;
-constexpr data_t kCtrlNoise    = 0x80;
 
-/* How many cycles one step of the envelope takes, per rate nibble. From
- * reSID: these are the periods that produce the attack and decay times the
- * data sheet lists. */
+constexpr int kVoice1 = 0;
+constexpr int kVoice2 = 1;
+constexpr int kVoice3 = 2;
+
+constexpr uint32_t kBit19 = 1u << 19;
+constexpr uint32_t kBit23 = 1u << 23;
+constexpr uint32_t kAccSize = 1u << 24;
+constexpr uint32_t kAccMask = kAccSize - 1;
+constexpr uint64_t kNoisePhaseSize = 1ull << 20;
+constexpr uint8_t kNoiseTaps[8] = { 22, 20, 16, 13, 11, 7, 4, 2 };
+constexpr uint32_t kLfsrMask = 0x7fffff;
+constexpr uint32_t kLfsrInitial = 0x7ffffc;
+constexpr uint32_t kNoiseResetCycles = 0x8000;
+constexpr uint32_t kWaveMask = 0xfff;
+
+/* The rate counter is 15 bits, its wrap sequence skips zero */
+constexpr uint32_t kRateCounterLimit  = 0x8000;
+constexpr uint32_t kRateCounterPeriod = kRateCounterLimit - 1;
+
+/* Cycles per envelope step per rate nibble, from reSID (periods that give the data sheet attack and decay times) */
 constexpr uint16_t kRatePeriod[16] = {
-      9,    32,    63,    95,   149,   220,   267,   313,
-    392,   977,  1954,  3126,  3907, 11719, 19531, 31250
+    0x0009, // ~2ms
+    0x0020, // ~8ms
+    0x003f, // ~16ms
+    0x005f, // ~24ms
+    0x0095, // ~38ms
+    0x00dc, // ~56ms
+    0x010b, // ~68ms
+    0x0139, // ~80ms
+    0x0188, // ~100ms
+    0x03d1, // ~250ms
+    0x07a2, // ~500ms
+    0x0c36, // ~800ms
+    0x0f43, // ~1s
+    0x2dc8, // ~3s
+    0x4c4c, // ~5s
+    0x7a13, // ~8s
 };
 
-/**
- * @brief The decay and release curve is not linear.
- *
- * The envelope counter still steps at the rate period, but below certain
- * levels it only steps every so many of those, which is what gives decay and
- * release their exponential shape.
- */
-uint8_t exponential_period_for(uint8_t envelope)
-{
-  switch (envelope) {
-    case 0xff: return 1;
-    case 0x5d: return 2;
-    case 0x36: return 4;
-    case 0x1a: return 8;
-    case 0x0e: return 16;
-    case 0x06: return 30;
-    case 0x00: return 1;
-    default:   return 0; /* no change at this level */
-  }
-}
 
 } /* namespace */
 
 void SidVoice3::reset(void)
 {
-  accumulator_ = 0;
-  shift_ = 0x7ffff8;
-  freq_ = 0;
+  for (Osc &o : osc_) o = Osc();
+  shift_ = kLfsrInitial;
   pw_ = 0;
-  control_ = 0;
+  noise_pipeline_ = 0;
+  noise_reset_cycles_ = 0;
 
   env_state_ = EnvState::Release;
   rate_counter_ = 0;
@@ -93,185 +99,294 @@ void SidVoice3::reset(void)
   hold_zero_ = true;
   attack_decay_ = 0;
   sustain_release_ = 0;
-
   last_cycle_ = 0;
 }
 
-/* ------------------------------------------------------------------------ *
- * the oscillator
- * ------------------------------------------------------------------------ */
+/* Oscillator */
+
+void SidVoice3::shift_lfsr(uint32_t feedback)
+{
+  shift_ = ((shift_ << 1) | feedback) & kLfsrMask;
+}
+
+bool SidVoice3::sync_active(void) const
+{
+  return ((osc_[kVoice1].ctrl | osc_[kVoice2].ctrl | osc_[kVoice3].ctrl)
+          & kCtrlSync) != 0;
+}
+
+bool SidVoice3::combined_noise_active(void) const
+{
+  return (osc_[kVoice3].ctrl & 0xf0) > 0x80
+      && !osc_[kVoice3].test()
+      && shift_ != 0;
+}
 
 /**
- * @brief Advance the noise shift register.
+ * @brief Advance the noise shift register
  *
- * The register is clocked once every time bit 19 of the accumulator goes from
- * zero to one, and the bit shifted in is bits 22 and 17 exclusive or'd.
+ * Shifts on each rising edge of accumulator bit 19, two cycles late
+ * Test held long enough fills the register with ones
  */
-void SidVoice3::clock_noise(uint32_t shifts)
+void SidVoice3::clock_noise(uint32_t cycles)
 {
-  for (uint32_t i = 0; i < shifts; i++) {
-    const uint32_t bit0 = ((shift_ >> 22) ^ (shift_ >> 17)) & 0x01;
-    shift_ = ((shift_ << 1) & 0x7fffff) | bit0;
-  }
-}
-
-void SidVoice3::clock_oscillator(uint32_t cycles)
-{
-  /* The test bit holds the accumulator at zero and fills the shift register */
-  if ((control_ & kCtrlTest) != 0) {
-    accumulator_ = 0;
-    shift_ = 0x7ffff8;
+  const Osc &v3 = osc_[kVoice3];
+  if (v3.test()) {
+    if (noise_reset_cycles_ != 0) {
+      noise_reset_cycles_ =
+        (noise_reset_cycles_ > cycles) ? noise_reset_cycles_ - cycles : 0;
+      if (noise_reset_cycles_ == 0) shift_ = kLfsrMask;
+    }
     return;
   }
-  if (freq_ == 0) return;
 
-  /* The accumulator is 24 bits and adds the frequency once a cycle, so a gap
-   * of any length is one multiply. How many times bit 19 turned over in that
-   * gap is the difference of the two counts, which is the number of times the
-   * noise register was clocked. */
-  const uint64_t before = accumulator_;
-  const uint64_t after = before + static_cast<uint64_t>(freq_) * cycles;
+  uint64_t shifts = 0;
+  if (noise_pipeline_ != 0) {
+    if (noise_pipeline_ <= cycles) {
+      shifts++;
+      noise_pipeline_ = 0;
+    } else {
+      noise_pipeline_ -= cycles;
+    }
+  }
 
-  const uint64_t shifts = (after >> 19) - (before >> 19);
-  accumulator_ = static_cast<uint32_t>(after & 0xffffff);
+  if (v3.freq != 0) {
+    const uint64_t phase = v3.acc & (kBit19 * 2 - 1);
+    const uint64_t freq = v3.freq;
+    const uint64_t half = kBit19;
+    /* Bit 19 rising edges in n cycles, multiple wraps included */
+    auto edges = [&](uint32_t n) -> uint64_t {
+      return (phase + freq * n + half) / kNoisePhaseSize
+           - (phase + half) / kNoisePhaseSize;
+    };
+    const uint64_t completed = edges((cycles > 2) ? cycles - 2 : 0);
+    shifts += completed;
+    const uint64_t all = edges(cycles);
+    if (all != completed) {
+      /* At most one edge fits in the final two cycles, FREQ is 16 bits */
+      noise_pipeline_ = (all != edges(cycles - 1)) ? 2 : 1;
+    }
+  }
 
-  if ((control_ & kCtrlNoise) != 0 && shifts != 0) {
-    clock_noise(static_cast<uint32_t>(shifts));
+  for (uint64_t i = 0; i < shifts; i++) {
+    shift_lfsr(((shift_ >> 22) ^ (shift_ >> 17)) & 0x01);
   }
 }
 
-/* ------------------------------------------------------------------------ *
- * the envelope
- * ------------------------------------------------------------------------ */
+void SidVoice3::clock_waveforms(uint32_t cycles)
+{
+  clock_noise(cycles);
+  for (Osc &o : osc_) {
+    if (!o.test()) o.acc = (o.acc + o.freq * cycles) & kAccMask;
+  }
+}
+
+/**
+ * @brief Clock with hard sync and combined noise feedback
+ *
+ * Stops at each MSB edge that can sync a destination, the source ring is
+ * 3 -> 1 -> 2 -> 3. Combined noise feeds the output back each cycle
+ */
+void SidVoice3::clock_oscillators(uint32_t cycles)
+{
+  while (cycles != 0) {
+    const Osc old[3] = { osc_[0], osc_[1], osc_[2] };
+    uint32_t step = cycles;
+    uint32_t rising_in[3] = { UINT32_MAX, UINT32_MAX, UINT32_MAX };
+
+    for (int src = 0; src < 3; src++) {
+      if ((old[(src + 1) % 3].ctrl & kCtrlSync) != 0
+          && !old[src].test() && old[src].freq != 0) {
+        const uint32_t distance = (old[src].acc < kBit23)
+          ? kBit23 - old[src].acc
+          : kAccSize + kBit23 - old[src].acc;
+        rising_in[src] = (distance + old[src].freq - 1) / old[src].freq;
+        if (rising_in[src] < step) step = rising_in[src];
+      }
+    }
+
+    const bool feedback = combined_noise_active();
+    if (feedback) step = 1;
+
+    clock_waveforms(step);
+
+    /* All edges first, a source synced on this same edge resets nothing */
+    for (int src = 0; src < 3; src++) {
+      const int dst = (src + 1) % 3;
+      const int prev = (src + 2) % 3;
+      if (rising_in[src] == step
+          && (old[dst].ctrl & kCtrlSync) != 0
+          && !((old[src].ctrl & kCtrlSync) != 0 && rising_in[prev] == step)) {
+        osc_[dst].acc = 0;
+      }
+    }
+
+    if (feedback) discharge_noise();
+    cycles -= step;
+  }
+}
+
+/* Waveform bits that read low discharge their noise cells, noise can lock up */
+void SidVoice3::discharge_noise(void)
+{
+  const data_t out = osc3_output();
+  for (int bit = 0; bit < 8; bit++) {
+    if ((out & (0x80 >> bit)) == 0) shift_ &= ~(1u << kNoiseTaps[bit]);
+  }
+}
+
+/* Envelope */
 
 void SidVoice3::clock_envelope(uint32_t cycles)
 {
-  while (cycles != 0) {
-    /* Jump straight to the next step of the rate counter rather than counting
-     * cycles one at a time. The result is the same and a silent stretch of a
-     * whole frame costs a couple of thousand steps instead of twenty. */
-    const uint32_t to_step = static_cast<uint32_t>(rate_period_ - rate_counter_);
-    if (cycles < to_step) {
-      rate_counter_ = static_cast<uint16_t>(rate_counter_ + cycles);
-      return;
+  /* Writes never reset the rate counter. If the new comparison value
+   * has already been passed, wait for the 15 bit counter to wrap.
+   * Its wrap sequence skips zero, zero is used only on a rate match */
+  const uint32_t distance = (rate_counter_ < rate_period_)
+    ? rate_period_ - rate_counter_
+    : kRateCounterPeriod - rate_counter_ + rate_period_;
+  if (cycles < distance) {
+    const uint32_t counter = rate_counter_ + cycles;
+    rate_counter_ = (counter >= kRateCounterLimit)
+      ? counter - kRateCounterPeriod
+      : counter;
+    return;
+  }
+  uint32_t remaining = cycles - distance;
+  rate_counter_ = 0;
+  for (;;) {
+    step_envelope();
+    /* A step may switch attack to decay and change the rate */
+    const uint32_t period = rate_period_;
+    if (remaining < period) {
+      rate_counter_ = remaining;
+      break;
     }
-    cycles -= to_step;
-    rate_counter_ = 0;
-
-    if (env_state_ == EnvState::Attack) {
-      /* attack is linear and ignores the exponential counter */
-      if (envelope_ < 0xff) {
-        ++envelope_;
-        if (envelope_ == 0xff) {
-          env_state_ = EnvState::DecaySustain;
-          rate_period_ = kRatePeriod[attack_decay_ & 0x0f];
-        }
+    const uint8_t sustain = static_cast<uint8_t>((sustain_release_ >> 4) * 0x11);
+    if (hold_zero_ ||
+        (env_state_ == EnvState::DecaySustain && envelope_ == sustain)) {
+      /* Keep the divider phase even while the output holds at sustain */
+      const uint32_t events = remaining / period;
+      if (env_state_ != EnvState::Attack) {
+        exponential_counter_ =
+          (exponential_counter_ + events) % exponential_period_;
       }
-      exponential_counter_ = 0;
-      exponential_period_ = 1;
-      continue;
+      rate_counter_ = remaining % period;
+      break;
     }
-
-    if (hold_zero_) continue;
-
-    ++exponential_counter_;
-    if (exponential_counter_ < exponential_period_) continue;
-    exponential_counter_ = 0;
-
-    const uint8_t sustain =
-      static_cast<uint8_t>((sustain_release_ >> 4) * 0x11);
-
-    if (env_state_ == EnvState::DecaySustain && envelope_ == sustain) continue;
-
-    if (envelope_ != 0) {
-      --envelope_;
-      const uint8_t period = exponential_period_for(envelope_);
-      if (period != 0) exponential_period_ = period;
-      if (envelope_ == 0) hold_zero_ = true;
-    }
+    remaining -= period;
   }
 }
 
-/* ------------------------------------------------------------------------ *
- * access
- * ------------------------------------------------------------------------ */
+void SidVoice3::step_envelope(void)
+{
+  if (env_state_ == EnvState::Attack) {
+    /* Reset on an actual attack step, not on a gate write */
+    exponential_counter_ = 0;
+  } else {
+    ++exponential_counter_;
+    if (exponential_counter_ != exponential_period_) return;
+    exponential_counter_ = 0;
+  }
+  if (hold_zero_) return;
+
+  const uint8_t sustain = static_cast<uint8_t>((sustain_release_ >> 4) * 0x11);
+  if (env_state_ == EnvState::Attack) {
+    envelope_ = static_cast<uint8_t>(envelope_ + 1);
+    if (envelope_ == 0xff) {
+      env_state_ = EnvState::DecaySustain;
+      rate_period_ = kRatePeriod[attack_decay_ & 0x0f];
+    }
+  } else if (env_state_ == EnvState::Release || envelope_ != sustain) {
+    envelope_ = static_cast<uint8_t>(envelope_ - 1);
+  } else {
+    return;
+  }
+
+  /* These are latches, not ranges: releasing during attack keeps
+   * the last threshold crossed while the envelope was rising */
+  switch (envelope_) {
+    case 0xff:
+    case 0x00: exponential_period_ = 1;  break;
+    case 0x5d: exponential_period_ = 2;  break;
+    case 0x36: exponential_period_ = 4;  break;
+    case 0x1a: exponential_period_ = 8;  break;
+    case 0x0e: exponential_period_ = 16; break;
+    case 0x06: exponential_period_ = 30; break;
+    default: break;
+  }
+  if (envelope_ == 0) hold_zero_ = true;
+}
+
+/* Access */
+
+void SidVoice3::clock(uint32_t cycles)
+{
+    if (!sync_active() && !combined_noise_active()) {
+    clock_waveforms(cycles);
+  } else {
+    clock_oscillators(cycles);
+  }
+  clock_envelope(cycles);
+}
 
 void SidVoice3::clock_to(cycle_t now)
 {
   if (now <= last_cycle_) { last_cycle_ = now; return; }
 
-  const uint64_t delta = static_cast<uint64_t>(now - last_cycle_);
+  uint64_t delta = static_cast<uint64_t>(now - last_cycle_);
   last_cycle_ = now;
 
-  /* A gap longer than this is a tune that has not touched voice three for
-   * more than a minute. The oscillator is exact whatever the gap, and the
-   * envelope has long since reached where it is going, so clamping the
-   * envelope's catch up costs nothing and bounds the work. */
-  constexpr uint64_t kMaxEnvelopeCatchup = 2ull * 1000ull * 1000ull;
-
-  clock_oscillator(static_cast<uint32_t>(delta & 0xffffffff));
-  if (delta > 0xffffffffull) {
-    /* the oscillator addition is modular, so the high part folds in cleanly */
-    clock_oscillator(static_cast<uint32_t>(delta >> 32));
+  while (delta != 0) {
+    const uint32_t cycles = (delta > 0xffffffffull)
+      ? 0xffffffffu : static_cast<uint32_t>(delta);
+    clock(cycles);
+    delta -= cycles;
   }
-
-  clock_envelope(static_cast<uint32_t>(
-    (delta > kMaxEnvelopeCatchup) ? kMaxEnvelopeCatchup : delta));
 }
 
 void SidVoice3::write(reg_t reg, data_t value, cycle_t now)
 {
-  switch (reg) {
-    case kSidRegV3FreqLo:
-    case kSidRegV3FreqHi:
-    case kSidRegV3PwLo:
-    case kSidRegV3PwHi:
-    case kSidRegV3Ctrl:
-    case kSidRegV3Ad:
-    case kSidRegV3Sr:
-      break;
-    default:
-      return; /* not ours */
-  }
+  /* The three voices share a seven register layout, only voice three
+   * needs pulse width and envelope for the readable outputs */
+  if (reg >= 0x15) return;
 
   clock_to(now);
 
-  switch (reg) {
-    case kSidRegV3FreqLo:
-      freq_ = static_cast<uint16_t>((freq_ & 0xff00) | value);
+  const int voice = reg / 7;
+  const int offset = reg % 7;
+  Osc &o = osc_[voice];
+
+  switch (offset) {
+    case 0:
+      o.freq = (o.freq & 0xff00) | value;
+      return;
+    case 1:
+      o.freq = (o.freq & 0x00ff) | (static_cast<uint32_t>(value) << 8);
+      return;
+    default:
       break;
-    case kSidRegV3FreqHi:
-      freq_ = static_cast<uint16_t>((freq_ & 0x00ff) | (value << 8));
-      break;
-    case kSidRegV3PwLo:
+  }
+
+  if (voice != kVoice3) {
+    if (offset == 4) {
+      o.ctrl = value;
+      if (o.test()) o.acc = 0;
+    }
+    return;
+  }
+
+  switch (offset) {
+    case 2:
       pw_ = static_cast<uint16_t>((pw_ & 0x0f00) | value);
       break;
-    case kSidRegV3PwHi:
+    case 3:
       pw_ = static_cast<uint16_t>((pw_ & 0x00ff) | ((value & 0x0f) << 8));
       break;
-
-    case kSidRegV3Ctrl: {
-      const bool was_gated = (control_ & kCtrlGate) != 0;
-      const bool now_gated = (value & kCtrlGate) != 0;
-      control_ = value;
-
-      if (!was_gated && now_gated) {
-        env_state_ = EnvState::Attack;
-        rate_period_ = kRatePeriod[(attack_decay_ >> 4) & 0x0f];
-        hold_zero_ = false;
-      } else if (was_gated && !now_gated) {
-        env_state_ = EnvState::Release;
-        rate_period_ = kRatePeriod[sustain_release_ & 0x0f];
-      }
-
-      if ((control_ & kCtrlTest) != 0) {
-        accumulator_ = 0;
-        shift_ = 0x7ffff8;
-      }
+    case 4:
+      write_control(value);
       break;
-    }
-
-    case kSidRegV3Ad:
+    case 5:
       attack_decay_ = value;
       if (env_state_ == EnvState::Attack) {
         rate_period_ = kRatePeriod[(value >> 4) & 0x0f];
@@ -279,61 +394,120 @@ void SidVoice3::write(reg_t reg, data_t value, cycle_t now)
         rate_period_ = kRatePeriod[value & 0x0f];
       }
       break;
-
-    case kSidRegV3Sr:
+    case 6:
       sustain_release_ = value;
       if (env_state_ == EnvState::Release) {
         rate_period_ = kRatePeriod[value & 0x0f];
       }
       break;
-
     default:
       break;
   }
 }
 
+void SidVoice3::write_control(data_t value)
+{
+  Osc &v3 = osc_[kVoice3];
+
+  const bool was_gated = (v3.ctrl & kCtrlGate) != 0;
+  const bool now_gated = (value & kCtrlGate) != 0;
+  if (!was_gated && now_gated) {
+    env_state_ = EnvState::Attack;
+    rate_period_ = kRatePeriod[(attack_decay_ >> 4) & 0x0f];
+    hold_zero_ = false;
+  } else if (was_gated && !now_gated) {
+    env_state_ = EnvState::Release;
+    rate_period_ = kRatePeriod[sustain_release_ & 0x0f];
+  }
+
+  const bool old_test = v3.test();
+  v3.ctrl = value;
+  const bool new_test = (value & kCtrlTest) != 0;
+
+  if (!old_test && new_test) {
+    v3.acc = 0;
+    noise_pipeline_ = 0;
+    /* Sustained test recovery approximated by a single reset */
+    noise_reset_cycles_ = kNoiseResetCycles;
+  } else if (old_test && !new_test) {
+    shift_lfsr((~shift_ >> 17) & 0x01);
+    noise_reset_cycles_ = 0;
+  }
+}
+
+uint32_t SidVoice3::noise_bits(void) const
+{
+  uint32_t noise = 0;
+  for (int bit = 0; bit < 8; bit++) {
+    noise |= ((shift_ >> kNoiseTaps[bit]) & 0x01) << (11 - bit);
+  }
+  return noise;
+}
+
+data_t SidVoice3::osc3_output(void) const
+{
+  const Osc &v3 = osc_[kVoice3];
+  const uint32_t waveform = v3.ctrl >> 4;
+  if (waveform == 0) return 0;
+
+  const uint32_t acc = v3.acc;
+  uint32_t result = kWaveMask;
+
+  if ((waveform & 1) != 0) {
+    /* Saw selection disables the triangle MSB folding, ring included */
+    const uint32_t ring = ((v3.ctrl & kCtrlRing) != 0) ? osc_[kVoice2].acc : 0;
+    const bool invert = (waveform & 2) == 0 && ((acc ^ ring) & kBit23) != 0;
+    const uint32_t tri = invert ? ~acc : acc;
+    result &= (tri >> 11) & 0xffe;
+  }
+  if ((waveform & 2) != 0) {
+    result &= acc >> 12;
+  }
+  if ((waveform & 4) != 0 && !v3.test() && (acc >> 12) < pw_) {
+    return 0;
+  }
+  if ((waveform & 8) != 0) {
+    result &= noise_bits();
+  }
+  if ((waveform & (waveform - 1)) != 0) {
+    /* An isolated high bit loses its charge to low neighbours, at 12 bits
+     * before truncating so lower bits can reach the readable byte */
+    result &= (result << 1) | (result >> 1);
+  }
+  return static_cast<data_t>(result >> 4);
+}
+
 data_t SidVoice3::osc3(cycle_t now)
 {
   clock_to(now);
-
-  const data_t wave = static_cast<data_t>(control_ & 0xf0);
-  if (wave == 0) return 0;
-
-  /* Each waveform is the top eight bits of what the accumulator drives. Two
-   * waveforms at once are wired together on the chip and come out as
-   * something close to their bitwise and, which is what every emulator uses
-   * and what a program reading $d41b sees. */
-  data_t value = 0xff;
-
-  if ((wave & kCtrlTriangle) != 0) {
-    uint32_t msb_xor = ((accumulator_ & 0x800000) != 0) ? 0xffffff : 0;
-    const uint32_t tri = (accumulator_ ^ msb_xor) & 0x7fffff;
-    value = static_cast<data_t>(value & static_cast<data_t>((tri >> 15) & 0xff));
-  }
-  if ((wave & kCtrlSawtooth) != 0) {
-    value = static_cast<data_t>(value & static_cast<data_t>(accumulator_ >> 16));
-  }
-  if ((wave & kCtrlPulse) != 0) {
-    const uint16_t upper = static_cast<uint16_t>((accumulator_ >> 12) & 0xfff);
-    value = static_cast<data_t>(
-      value & ((upper >= (pw_ & 0x0fff)) ? 0xff : 0x00));
-  }
-  if ((wave & kCtrlNoise) != 0) {
-    const data_t noise = static_cast<data_t>(
-      (((shift_ >> 22) & 0x01) << 7) | (((shift_ >> 20) & 0x01) << 6) |
-      (((shift_ >> 16) & 0x01) << 5) | (((shift_ >> 13) & 0x01) << 4) |
-      (((shift_ >> 11) & 0x01) << 3) | (((shift_ >>  7) & 0x01) << 2) |
-      (((shift_ >>  4) & 0x01) << 1) | (((shift_ >>  2) & 0x01) << 0));
-    value = static_cast<data_t>(value & noise);
-  }
-
-  return value;
+  return osc3_output();
 }
 
 data_t SidVoice3::env3(cycle_t now)
 {
   clock_to(now);
   return envelope_;
+}
+
+data_t SidVoice3::read(reg_t reg, cycle_t now)
+{
+  switch (reg) {
+    case kSidRegOsc3:
+    case kSidRegEnv3:
+      break;
+    default:
+      return 0; /* not voice three */
+  }
+
+  switch (reg) {
+    case kSidRegOsc3:
+      return osc3(now);
+    case kSidRegEnv3:
+      return env3(now);
+    default:
+      break;
+  }
+  return 0;
 }
 
 } /* namespace usbsid */

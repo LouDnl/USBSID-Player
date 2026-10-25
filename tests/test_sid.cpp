@@ -793,7 +793,7 @@ int test_voice3(void)
     US_CHECK_EQ_U(held, 0x88u, "decay stops at the sustain level");
   }
 
-  /* And through the chip, at the address a tune uses */
+  /* And through the chip, at the address a tune uses for OSC3/Random */
   {
     Bus bus;
     NullSidBackend backend;
@@ -807,8 +807,31 @@ int test_voice3(void)
     bus.run(2000);
     const data_t after = sid.io_read(0xd41b);
     US_CHECK(before != after, "$d41b moves as the machine runs");
+  }
+
+  /* And through the chip, at the address a tune uses for ENV3 */
+  {
+    Bus bus;
+    NullSidBackend backend;
+    Mos6581_8580 sid(bus, backend);
+    sid.config().count = 1;
+    sid.config().base[0] = 0xd400;
+
+    sid.io_write(0xd418, 0x00);          /* mute volume */
+    sid.io_write(0xd40e, 0x00);          /* frequency low */
+    sid.io_write(0xd40f, 0x30);          /* frequency high */
+    sid.io_write(0xd413, 0x25);          /* AD(SR) */
+    sid.io_write(0xd414, 0x88);          /* (AD)SR */
+    sid.io_write(0xd412, 0x11);          /* triangle and gate */
+
+    const data_t before = sid.io_read(0xd41c);
+    bus.run(1500);
+    const data_t after = sid.io_read(0xd41c);
+    US_CHECK(before != after, "$d41c moves as the machine runs");
+
+    /* Unreadable register test */
     US_CHECK_EQ_U(sid.io_read(0xd41f), 0x00u,
-                  "an unreadable register still comes back from the mirror");
+      "an unreadable register still comes back from the mirror");
   }
 
   return 0;

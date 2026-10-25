@@ -377,6 +377,7 @@ void usage(const char * argv0)
     "\n"
     "  logging, to stdout, same switches as old player:\n"
     "  -srw              SID reads and writes\n"
+    "  -sidr / -sidw     SID reads or SID writes only\n"
     "  -c1rw / -c2rw     CIA1 / CIA2 reads and writes\n"
     "  -vrw / -vrrw      VIC register writes / reads\n"
     "  -lrw              every CPU read and write\n"
@@ -751,6 +752,8 @@ int main(int argc, char ** argv)
       songlengths_path = argv[++i];
     else if (!strcmp(a, "-nsl") || !strcmp(a, "--no-songlengths")) use_songlengths = false;
     else if (!strcmp(a, "-srw")) us_log.sid_rw = true;
+    else if (!strcmp(a, "-sidr")) us_log.sid_r = true;
+    else if (!strcmp(a, "-sidw")) us_log.sid_w = true;
     else if (!strcmp(a, "-c1rw")) us_log.cia1_rw = true;
     else if (!strcmp(a, "-c2rw")) us_log.cia2_rw = true;
     else if (!strcmp(a, "-vrw")) us_log.vic_rw = true;
@@ -1092,13 +1095,11 @@ int main(int argc, char ** argv)
     active_backend = trace;
   }
 
-  /* What the hardware is, and what one access to it costs. Before anything is
-   * loaded, because initialising a tune writes registers and those writes have
-   * to go to the same chip, and be spaced the same way, as the ones that come
-   * after. Loading fills in the tune's own chip count and addresses and leaves
-   * all of this alone. */
+  /* Hardware and access cost, set before loading as the init writes need the same spacing */
   SidConfig & sid_config = machine.sid().config();
-  sid_config.real_reads = real_reads;
+  /* ReSIDfp audio and wav recording outputs need real reads for OSC3 and ENV3 */
+  bool real_reads_override = (output == OutputMode::Audio || output == OutputMode::Wav);
+  sid_config.real_reads = (real_reads_override ? real_reads_override : real_reads);
   sid_config.force_socket_two = force_socket_two;
   sid_config.force_address = force_address;
   sid_config.forced_address = forced_address;

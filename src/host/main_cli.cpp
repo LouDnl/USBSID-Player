@@ -621,11 +621,11 @@ int main(int argc, char ** argv)
    * so this stays off unless asked for. See ResidFpSidBackend::configure()'s
    * own comment on why it is a configure()-time choice and not a toggle. */
   bool soft_stereo = false;
-  /* Percent, 0-300; 100/50 are the defaults ResidFpSidBackend/OplChip already
-   * start at, so leaving these untouched is a no-op - see soft.set_sid_gain()/
+  /* Percent, 0-300; 100/50 are the defaults ResidFpSidBackend/OplChip starts
+   * at, the cli player starts with 100/100 - see soft.set_sid_gain()/
    * set_fm_gain() below. */
   int soft_sid_volume = 100;
-  int soft_fm_volume = 50;
+  int soft_fm_volume = 100;
 
 #if US_HAVE_NETDEVICE
   /* --output=nsd: a Network SID Device server to send writes to

@@ -1429,8 +1429,9 @@ int main(int argc, char ** argv)
   const bool status_line = keys && !us_log.timers && !us_log.memstate;
 
   if (keys) {
-    printf("  keys     : space pause, n/p subtune, r restart song, f fast forward, "
-           "1/2/3 mute a voice, c next sid, s stop, q or ctrl-c quit\n");
+    printf("  keys     : space pause, n/right p/left change subtune, r restart song,\n"
+           "             f fast forward, 1/2/3 toggle mute of a voice, c select sid,\n"
+           "             s/q/Esc/ctrl-c quit\n");
   } else {
     printf("  press ctrl-c to stop\n");
   }

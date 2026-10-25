@@ -261,7 +261,7 @@ void usage(const char * argv0)
 {
   printf(
     US_PLAYER_BANNER
-    "usage: %1$s [options] <file.sid|file.prg|file.p00>\n"
+    "usage: %s [options] <file.sid|file.prg|file.p00>\n"
     "\n"
     "  a SID file plays; a program is loaded where it says and started the\n"
     "  way you would start it, with RUN or with SYS\n"
@@ -282,7 +282,7 @@ void usage(const char * argv0)
                          ", nsd"
 #endif
                          ", audio or wav.\n"
-    "                    %1$s falls back to audio when no board is found\n"
+    "                    %s falls back to audio when no board is found\n"
     "  -lb, --list-boards\n"
     "                    list every attached board's serial number and exit\n"
     "  -b,  --boards SPEC\n"
@@ -387,7 +387,7 @@ void usage(const char * argv0)
     "  -lmem             the SID registers, once a frame\n"
     "\n"
     "  -h, --help        this\n",
-    argv0);
+    argv0, argv0);
 }
 
 bool read_file(const char * path, std::vector<data_t> & out)

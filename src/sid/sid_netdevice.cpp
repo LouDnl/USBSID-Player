@@ -401,27 +401,13 @@ void NetworkSidBackend::handle_fmopl_write(addr_t reg, data_t value, uint16_t cy
      * above, order kept). */
     ex_stream_ = hardware_;
   }
-  /* reg & 0x1f: 0 is the index port, 0x10 is the data port. */
-  if ((reg & 0x1f) == 0x00) {
-    /* Index half: remember the OPL register number, nothing on the wire
-     * yet. The gap before this write is carried in extra_cycles_ and goes
-     * out with the next write (the data half or any SID write), so the
-     * server's clock does not lose it. */
-    extra_cycles_ += cycles;
-    opl_pending_reg_ = value;
-    opl_pending_valid_ = true;
-    return;
-  }
-  /* Data half. A data write with no preceding index write shouldn't
-   * happen, but be safe. */
-  if (!opl_pending_valid_) return;
-  opl_pending_valid_ = false;
-
+  /* reg & 0x1f: 0 is the index port ($DF40), 0x10 the data port ($DF50).
+   * Each is its own TRY_WRITE_EX entry with its own delay (spec). */
+  const uint16_t addr = ((reg & 0x1f) == 0x00) ? 0xdf40 : 0xdf50;
   uint32_t total = extra_cycles_ + cycles;
   extra_cycles_ = 0;
   const uint16_t delay = append_delay_quads(total, /* for_ex = */ true);
 
-  const uint16_t addr = static_cast<uint16_t>(0xdf00 + opl_pending_reg_);
   pending_ex_.push_back(static_cast<uint8_t>(delay >> 8));
   pending_ex_.push_back(static_cast<uint8_t>(delay & 0xff));
   pending_ex_.push_back(static_cast<uint8_t>(addr >> 8));
@@ -606,7 +592,6 @@ void NetworkSidBackend::disconnect(void)
   extra_cycles_ = 0;
   pending_quads_.clear();
   pending_ex_.clear();
-  opl_pending_valid_ = false;
   buffered_cycles_ = 0;
   frames_since_flush_ = 0;
 }
@@ -729,7 +714,6 @@ void NetworkSidBackend::reset(void)
   extra_cycles_ = 0;
   pending_quads_.clear();
   pending_ex_.clear();
-  opl_pending_valid_ = false;
   buffered_cycles_ = 0;
   frames_since_flush_ = 0;
   drop_queued();

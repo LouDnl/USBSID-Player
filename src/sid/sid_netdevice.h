@@ -225,10 +225,10 @@ class NetworkSidBackend final : public SidBackend
     /** @brief v5 only: send whatever is buffered in the TRY_WRITE_EX stream. */
     void do_flush_ex(void);
     /**
-     * @brief Route an FM/OPL "parked" write onto TRY_WRITE_EX's
-     * $df00-$dfff space, when the server is v5+. The index port
-     * (reg & 0x1f == 0) holds the OPL register number until the matching
-     * data-port write (reg & 0x1f == 0x10) completes the pair.
+     * @brief Route an FM/OPL "parked" write onto TRY_WRITE_EX, when the
+     * server is v5+. The index port (reg & 0x1f == 0) goes out as
+     * {delay, $df40, register}, the data port (reg & 0x1f == 0x10) as
+     * {delay, $df50, data}: two entries, each with its own delay.
      */
     void handle_fmopl_write(addr_t reg, data_t value, uint16_t cycles);
 
@@ -287,9 +287,7 @@ class NetworkSidBackend final : public SidBackend
 
     /* v5 TRY_WRITE_EX stream (FM/OPL only). pending_quads_ and pending_ex_
      * are never both non-empty: whichever a write is about to join flushes
-     * the other first, preserving TCP order without two accumulators.
-     * opl_pending_reg_/_valid_ hold the index-port half of the pair. */
-    bool     opl_pending_valid_ = false;
+     * the other first, preserving TCP order without two accumulators. */
     /* Per connection (cleared by connect()/disconnect(), not by reset()):
      * TRY_SET_FM_OPL(1) was queued. fm_opl_refused_ is set by the sender
      * thread when the server answered it with ERROR. */
@@ -298,7 +296,6 @@ class NetworkSidBackend final : public SidBackend
      * writes, one stream. Emulation thread only. */
     bool     ex_stream_ = false;
     std::atomic<bool> fm_opl_refused_{false};
-    uint8_t  opl_pending_reg_ = 0;
     std::vector<uint8_t> pending_ex_;
     static constexpr size_t kMaxExEntriesPerPacket = 204; /* 5*204 = 1020 B, under NSD_MAX_PAYLOAD */
 };

@@ -148,15 +148,18 @@ int test_netdevice_ex_stream(void)
   US_CHECK_EQ_U(plain.size(), 1, "one TRY_WRITE packet (pre-FM)");
   US_CHECK_EQ_U(ex.size(), 2, "two TRY_WRITE_EX packets");
   if (ex.size() == 2) {
-    US_CHECK_EQ_U(ex[0].payload.size(), 4 * 5, "FM pair + 3 SID writes in one packet");
+    US_CHECK_EQ_U(ex[0].payload.size(), 5 * 5, "FM index + data + 3 SID writes in one packet");
     US_CHECK_EQ_U(ex[1].payload.size(), 1 * 5, "tail after the big gap");
-    if (ex[0].payload.size() == 20) {
+    if (ex[0].payload.size() == 25) {
       const std::vector<uint8_t> & b = ex[0].payload;
-      US_CHECK_EQ_U((b[2] << 8) | b[3], 0xdf22, "FM address");
-      US_CHECK_EQ_U((b[7] << 8) | b[8], 0x0004, "SID 1 address verbatim");
-      US_CHECK_EQ_U((b[12] << 8) | b[13], 0x0020, "SID 2 address verbatim");
-      US_CHECK_EQ_U((b[17] << 8) | b[18], 0x0004, "big gap entry address");
-      US_CHECK_EQ_U((b[15] << 8) | b[16], 5000, "big gap delay kept");
+      US_CHECK_EQ_U((b[2] << 8) | b[3], 0xdf40, "FM index port address");
+      US_CHECK_EQ_U(b[4], 0x22, "FM register number");
+      US_CHECK_EQ_U((b[7] << 8) | b[8], 0xdf50, "FM data port address");
+      US_CHECK_EQ_U(b[9], 0x33, "FM data value");
+      US_CHECK_EQ_U((b[12] << 8) | b[13], 0x0004, "SID 1 address verbatim");
+      US_CHECK_EQ_U((b[17] << 8) | b[18], 0x0020, "SID 2 address verbatim");
+      US_CHECK_EQ_U((b[22] << 8) | b[23], 0x0004, "big gap entry address");
+      US_CHECK_EQ_U((b[20] << 8) | b[21], 5000, "big gap delay kept");
     }
   }
   return 0;

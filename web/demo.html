@@ -176,6 +176,10 @@ $('connect').onclick = async () => {
         opt.value = o.id; opt.textContent = o.name;
         sel.appendChild(opt);
       }
+      /* Show the port the transport picked (name hint match), not the first entry */
+      for (const o of transport.outputs()) {
+        if (o.name === transport.productName) sel.value = o.id;
+      }
       $('midiRow').style.display = 'flex';
     } else if ($('worker').checked && USBSIDPlayerWorker.available()) {
       /* Emulation and USB writes run in the worker, no throttling in a background tab */

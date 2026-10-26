@@ -1261,6 +1261,18 @@ export class USPlayerAdapter {
     try { return !!t.selectOutputByName(name); } catch (_) { return false; }
   }
 
+  /**
+   * Name of the output ASID mode plays to now, empty when there is none
+   *
+   * A host picker shows this rather than its first entry: the transport prefers a
+   * port matching its device name hint
+   */
+  currentMidiOutput() {
+    const t = this._transport;
+    if (!t || typeof t.outputs !== 'function') return '';
+    try { return t.productName || ''; } catch (_) { return ''; }
+  }
+
   getSongInfo() { return this._info; }
 
   /**

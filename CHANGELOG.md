@@ -1,6 +1,7 @@
 # Changelog
 Please refer to the [releases page](https://github.com/LouDnl/USBSID-Player/releases) for more information on version changes
 
+* Fix output selection for ASID
 * Fix environment and SID type not being sent from the web player
 * Fix silent ASID webplay after using ReSIDfp in the browser
 * Fix reads from voice 3 for all modes when not using real reads

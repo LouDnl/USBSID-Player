@@ -1,3 +1,12 @@
+## Verification command
+# run: git ls-files -i -c --exclude-standard
+# remove from tracking: git rm --cached path/to/dir/or/file
+
+## Comments
+# /*   Only files and folders directly inside this directory (1 level deep).
+# /**  Everything recursively (all files and folders, infinitely deep).
+# /**/ Only subdirectories recursively (infinitely deep), excluding files.
+
 # Ignore everything
 *
 
@@ -15,17 +24,6 @@
 !API_EMBEDDED.md
 !API_WEB.md
 !.version
-
-# File types to un-ignore
-!*.cmake
-!*.cpp
-!*.c
-!*.h
-!*.yml
-!*.js
-!*.wasm
-!*.html
-!*.bin
 
 # Directories to un-ignore
 !.github
@@ -72,6 +70,18 @@
 !lib/ymfm
 !lib/ymfm/**
 !*.ipp
+
+# File types to un-ignore
+!*.cmake
+!*.cpp
+!*.c
+!*.h
+!*.yml
+!*.js
+!*.wasm
+!*.html
+!*.bin
+
 # The un-ignore rules above are per extension, and these are the ones the
 # vendored trees use that nothing else does.
 !*.h.in

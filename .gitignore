@@ -40,7 +40,7 @@
 !src
 !src/**
 !lib
-!lib/driver
+
 # Vendored third party sources, which have to be in the repository and not just
 # on a developer's disk: CMake decides whether software audio exists by looking
 # for lib/residfp/siddefs-fp.h.in, so a checkout without these silently builds

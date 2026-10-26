@@ -1,146 +1,66 @@
 # Changelog
 Please refer to the [releases page](https://github.com/LouDnl/USBSID-Player/releases) for more information on version changes
 
-#### Version: 1.5.0
-* Rename the CLI player binary `usbsid` to `usplayer` (`usplayer.exe` on
-  Windows). The test binary becomes `usplayer-test` and the ymfm build
-  `usplayer-ymfm`
-* Change the licence to GPL-2.0-or-later (was GPL-2.0-only): every source
-  header says "version 2, or (at your option) any later version", so the
-  player can be combined with the GPL-3.0-or-later USBSID-Pico-driver
-* Fix tune name, author and release shown double encoded in the web player
-  ("MihÃ¡ly" for "Mihály"): the parser keeps the Windows-1252 bytes the file
-  stores, the web exports and the command line convert to UTF-8 once, with
-  three byte sequences for 0x80-0x9f (euro sign and friends)
-* Add playing without the Commodore ROMs: a free stub KERNAL
-  (`src/mem/roms/stub_kernal.cpp`) with the stock reset, IOINIT and interrupt
-  entry sequences. CMake option `EMBED_ROMS=0` builds without the ROM images,
-  `usplayer_set_roms()` supplies real ones at runtime, `--no-roms` runs the
-  command line player on the stub. Programs with a SYS line start without
-  BASIC; a BASIC program without one needs the ROMs (`usplayer_needs_roms()`)
-* Add `src/host/session.h`: a playback session on an engine thread with
-  queued commands, song lengths, pause, subtunes, seek and mutes, playing
-  through phone audio, USBSID-Pico boards or a Network SID Device
-* Fix slow play and fast forward in web software audio (reSIDfp): speed
-  changes the synthesis output rate, pitch following, instead of seeking
-  silently. New exports `usp_audio_set_speed()`, `usp_audio_speed()`
-* Fix the memory view in web software audio with the worker: watched RAM
-  pages come with each register report. New export `usp_read_memory_block()`
-* Fix DeepSID buffer sizes below 200 ms being ignored in software audio
-* Add a per voice oscilloscope tap to software audio (reSIDfp):
-  `ResidFpSidBackend::set_scope()`, new exports `usp_audio_scope()`,
-  `usp_audio_scope_voices()`, `usp_audio_scope_take()`. The worker sends the
-  frames with each register report; DeepSID's Scope tab draws them
-* Compile reSIDfp from a patched copy in the build tree: local changes live in
-  `patches/residfp/` (see its README.md), `lib/residfp` is not edited by the
-  build. Windows CI installs MSYS2 `patch` for it
-* Add stereo and filter control to software audio in the web player:
-  `usp_audio_set_stereo()`, `usp_audio_channels()`, `usp_audio_set_panning()`
-  (SID v5 panning layout and mode, the tune's own by default, plus a position
-  for single SID tunes), `usp_audio_pan()`, `usp_audio_set_filter()` (reSIDfp
-  filter on/off, 6581 curve and range, 8580 curve, combined waveforms). The
-  AudioWorklet plays stereo chunks; mono chunks play as before
-* Move software audio's scope, panning and filter handling into
-  `web/usplayer-softaudio.js`, shared by both web adapters; the site adapter
-  configures stereo and carries scope frames. New `web/usplayer-scope.js`
-  draws per voice oscilloscopes, one column per SID chip
-* Fix `usp_audio_available()` counting wrong once rendered audio had been
-  taken
-* Fix the web player's status line in software audio with the worker:
-  frames, fps, ms per frame, FM writes and clipped samples read 0 (they
-  came from the page's player, which never steps); the worker reports them
-* Fix reSIDfp output differing from run to run in native builds: the filter
-  tables are built on one thread everywhere, their threads shared one dither
-  noise sequence
-* Add ASID backend unit tests (`tests/test_asid.cpp`, suite entry `asid`,
-  ctest target `test_asid`): 22 test functions, 293 checks over the SysEx
-  messages the ASID backend sends (start/stop, environment, SID type,
-  register mapping and MSB packing checked against a copy of the firmware
-  decoder, chip addresses 1-4, per frame dedup, control register shadow
-  slots, filter and volume flush, FM/OPL 0x60 messages). Stub RtMidi symbols
-  record the SysEx and need no MIDI port. Built when RtMidi is available
-  (`US_HAVE_RTMIDI`), otherwise the test reports `[SKIP]`
-* Fix ASID backend: the SID environment message carried the SID count as the speed
-  multiplier, it carries the tune speed multiplier (CIA1 timer A latch read over
-  the first frames of each song, resent on change), a failed `asid_init` leaked its `RtMidiOut`, and
-  `sendSIDEnvironment`/`sendSIDType` crashed when sent before init or after a failed init
-* Fix NTSC CIA1 timer A default ($9542, bytes swapped) to $4295: NTSC tunes relying
-  on the default timer played at the wrong speed. Add a test for the PAL and NTSC latch
-* Set `UNIX_COMPILE` (Linux, macOS) or `WINDOWS_COMPILE` (Windows) per platform, only
-  on the CLI target with RtMidi (was `UNIX_COMPILE` on every platform)
+#### Version: Unreleased
+* Fix FM/OPL over NSD to follow the NSD v5 spec (needs matching firmware)
+* Rename CLI player binary usbsid to usplayer (test and ymfm builds follow)
+* Change licence to GPL-2.0-or-later (was GPL-2.0-only)
+* Fix double encoded tune name, author and release in web player
+* Add playing without the Commodore ROMs (stub KERNAL, EMBED_ROMS=0, --no-roms)
+* Add usplayer_set_roms() and usplayer_needs_roms() to the embedded API
+* Add src/host/session.h playback session on an engine thread
+* Fix slow play and fast forward in web software audio (reSIDfp)
+* Add usp_audio_set_speed() and usp_audio_speed() exports
+* Fix memory view in web software audio with the worker
+* Add usp_read_memory_block() export
+* Fix DeepSID buffer sizes below 200 ms being ignored
+* Add per voice oscilloscope tap to software audio (reSIDfp)
+* Add usp_audio_scope, _scope_voices and _scope_take exports
+* Compile reSIDfp from a patched copy in the build tree (see patches/residfp)
+* Add stereo and filter control to software audio in the web player
+* Add usp_audio_set_stereo, _channels and _set_panning exports
+* Add usp_audio_pan and usp_audio_set_filter exports
+* Move scope, panning and filter handling to web/usplayer-softaudio.js
+* Add web/usplayer-scope.js for per voice oscilloscopes
+* Fix usp_audio_available() counting wrong after taking rendered audio
+* Fix web status line in software audio with the worker
+* Fix reSIDfp output differing from run to run in native builds
+* Add ASID backend unit tests (tests/test_asid.cpp)
+* Fix ASID environment message speed multiplier
+* Fix failed asid_init leaking RtMidiOut
+* Fix sendSIDEnvironment and sendSIDType crash before init
+* Fix NTSC CIA1 timer A default to $4295
+* Set UNIX_COMPILE and WINDOWS_COMPILE per platform
 
 #### Version: 1.4.0
-* Add multiboard playback: `--boards SERIAL,...` opens several USBSID-Pico
-  boards and spreads a tune's SIDs across all of them, `--list-boards` lists
-  the attached serials. `--output usbsid` without `--boards` still opens one
-  board. Requires a USBSID-Pico-driver with `USBSID_Manager`
-* Add FM/OPL to multiboard playback: without `-f`/`-fa`/`--select-sids`, an
-  FM/OPL tune's FM goes to the first board in `--boards` order that has an
-  FM/OPL configured, also when that is past the first board's four SIDs
-* Add `fm`/`fm:SLOT` to `--select-sids`: puts the tune's FM/OPL on that slot,
-  only when the slot is its board's configured FM/OPL. With `--select-sids`
-  an FM/OPL not named this way is not played
-* Fix `-f`/`-fa` moving only a tune's first SID while the rest stayed on
-  socket one: every SID now moves along, and voice/chip mute replays and
-  pause/resume follow the forced address too
-* Add CMake option `FM_YMFM=1`: a command line build that uses ymfm
-  (`lib/ymfm`, YM3812) instead of Nuked-OPL3-fast for FM/OPL, command line
-  only; with `-DEXECUTABLE=usbsid-ymfm` it builds beside the regular `usbsid`
-* Update `-T`/`--trace` to log like `-srw` (`[W SID1] $d400 $000:0f [C]   23`,
-  reads included) plus the running cycle total and the play time of every
-  event as `[T]MM:SS.mmm`
-* Add PSID/RSID v5 support: variable length metadata strings, up to 15 SID
-  chips via `multiSidConfig`, an SID panning hint, the FM/OPL flag, and song
-  lengths embedded in the file itself as a fallback to the external
-  Songlengths database
-* Add a fourth output backend, `--output nsd`, a client of the Network
-  SID Device protocol (Linux/MacOs only!): plays a tune through any compliant 
-  server (USBSID-Pico acting as an NSD server included) over TCP instead of 
-  local hardware or software SID
-* Update the netdevice backend to protocol version 5: FM/OPL writes that have
-  no local SID socket to piggyback on now go out over `TRY_WRITE_EX`'s own
-  `$df00`-`$dfff` address range instead of being dropped, when the server
-  supports it; add `TRY_SET_FM_OPL` (command 21), enabling/disabling FM OPL
-  on the server itself
-* Widen software audio (`--output audio`/`wav`) and the netdevice backend to
-  the full 15 chips a v5 tune's own `multiSidConfig` can ask for, not just 4
-  - `--output usbsid`/`webusb` and the embedded player still play the first 4,
-  a real board's own physical socket limit
-* Add `--stereo`: render a v5 tune's own panning hint as an actual stereo mix
-  (`--output audio`/`wav` only, off by default - every other output stays one
-  channel per chip, unaffected)
-* Fix a v5 tune's own embedded song length table being ignored in favour of
-  the five minute default just because the tune also was not in the external
-  Songlengths database
-* Add `docs/API_WEB.md` and `docs/API_EMBEDDED.md`.
-* Switch the vendored FM/OPL engine from Nuked-OPL3 to
-  [Nuked-OPL3-fast](https://github.com/tgies/Nuked-OPL3-fast), a bit-exact
-  perf fork pinned to current upstream (1.5x-2.8x faster, and picks up
-  upstream's 2024 envelope generator fix our old vendored copy predated)
-* Add SID register and CIA 1 timer A reports from the web player's audio
-  worker, timed to the audible output: piano, graph and register views of a
-  host page follow the tune in worker mode too
-* Add `setSidVolume()`, `setFmVolume()` and `hasFm()` to the web adapters:
-  the SID and FM/OPL sides of the software mix are set apart, worker mode
-  included
-* Add `hasFm` and `sidAddresses` to the tune info of the web adapters
-* Fix `hasFm()` of the web adapters missing SID+FM tunes older than v5, which
-  carry no FM/OPL header flag: in software audio a tune that writes to the
-  FM/OPL counts as an FM tune
-* Add `setBufferSamples()` to the DeepSID adapter: DeepSID's "Buffer size"
-  setting sets the software audio ring depth
-* Fix the web player's audio ring overfilling after a throttled tab: the
-  worklet reports its received sample count, a backlog of stale reports asks
-  for the shortfall once
-* Fix slow controls after returning to a hidden tab: the deep hidden ring is
-  trimmed to the visible target at once
-* Fix silence after a tab or app switch on mobile: a suspended or
-  interrupted audio context is resumed on return
-* Fix a cached older `usplayer-worker.js` being used by a newer adapter: the
-  worker URL is versioned like the wasm
+* Add multiboard playback (--boards SERIAL,... and --list-boards)
+* Add FM/OPL to multiboard playback
+* Add fm and fm:SLOT to --select-sids
+* Fix -f and -fa moving only the first SID of a tune
+* Add CMake option FM_YMFM=1 to build with ymfm for FM/OPL (CLI only)
+* Update --trace to log like -srw plus cycle total and play time
+* Add PSID/RSID v5 support (up to 15 SIDs, panning hint, FM flag, song lengths)
+* Add --output nsd, a Network SID Device client (Linux/MacOs only!)
+* Update netdevice backend to protocol version 5
+* Add TRY_SET_FM_OPL (command 21) to enable/disable FM OPL on the server
+* Widen software audio and netdevice backend to 15 chips
+* Add --stereo to render a v5 panning hint as a stereo mix
+* Fix embedded v5 song length table being ignored
+* Add docs/API_WEB.md and docs/API_EMBEDDED.md
+* Switch FM/OPL engine from Nuked-OPL3 to [Nuked-OPL3-fast](https://github.com/tgies/Nuked-OPL3-fast)
+* Add SID register and CIA1 timer A reports from the web audio worker
+* Add setSidVolume(), setFmVolume() and hasFm() to the web adapters
+* Add hasFm and sidAddresses to the tune info of the web adapters
+* Fix hasFm() missing SID+FM tunes older than v5
+* Add setBufferSamples() to the DeepSID adapter
+* Fix web audio ring overfilling after a throttled tab
+* Fix slow controls after returning to a hidden tab
+* Fix silence after a tab or app switch on mobile
+* Fix cached older usplayer-worker.js being used by a newer adapter
 
 #### Version: 1.3.0
-* Add Cynthcart support to the embedded player, runs through USBSID-Player's own C64 core instead of the old emudore based path
+* Add Cynthcart support to the embedded player
+* Run Cynthcart through the player C64 core
 * Update SID/PRG loading for the embedded player
 
 #### Version: 1.2.2
@@ -150,7 +70,7 @@ Please refer to the [releases page](https://github.com/LouDnl/USBSID-Player/rele
 * Update the web JavaScript API
 
 #### Version: 1.2.0
-* Add per chip and per voice muting, in the API and the CLI (also usable while recording)
+* Add per chip and per voice muting to the API and CLI
 * Fix SID register tracing
 * Fix reset handling
 * Update the boot image used to skip a tune's boot sequence
@@ -159,18 +79,20 @@ Please refer to the [releases page](https://github.com/LouDnl/USBSID-Player/rele
 * Add tests
 
 #### Version: 1.1.0
-* Add software audio output (ResidFp via miniaudio) and WAV file output, alongside the USBSID-Pico hardware backend
+* Add software audio output (ResidFp via miniaudio)
+* Add WAV file output
 * Add FM/OPL emulation (Nuked-OPL3) and audio output for FM/OPL tunes
 * Add HVSC Songlengths support
 * Add hot reset handling
 * Vendor miniaudio, Nuked-OPL3 and ResidFp as libraries
-* Fix board configuration not reaching the player config in CLI, Web and embedded builds
+* Fix board configuration not reaching the player config
 * Fix NTSC raster timing
 
 #### Version: 1.0.0
-* Rewrite the player from scratch: cycle exact 6502/6510, CIA, VIC-II (SID only) and SID emulation, replacing the old emudore and SidBerry derived emulation core
-* Split the emulation into embeddable source files behind a wrapper API, separate from the CLI
-* Add PRG program support alongside PSID/RSID tunes for the embedded player, with next/previous tune switching
+* Rewrite the player from scratch with a cycle exact CPU, CIA, VIC-II and SID
+* Split the emulation into embeddable source files behind a wrapper API
+* Add PRG program support to the embedded player
+* Add previous/following tune switching
 * Add first iteration of a WebAssembly build and web player demo
 * Add multiplatform (Linux/Windows/MacOS) desktop CLI builds and CI workflows
 * Add unit test suite

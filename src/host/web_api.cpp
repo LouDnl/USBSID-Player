@@ -459,6 +459,8 @@ int usp_audio_configure(int chips, int rate, int quality, int model)
   apply_panning();
   /* attach() sets access_overhead to 0, see sid_residfp.h */
   g_soft.attach(usbsid::usplayer_machine());
+  /* ReSIDfp audio needs real reads for OSC3 and ENV3, this overrides SidBackendType */
+  usbsid::usplayer_machine().sid().config().real_reads = true;
   g_soft_on = true;
   return 1;
 }

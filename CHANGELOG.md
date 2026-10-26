@@ -1,10 +1,12 @@
 # Changelog
 Please refer to the [releases page](https://github.com/LouDnl/USBSID-Player/releases) for more information on version changes
 
+* Fix reads from voice 3 for all modes when not using real reads
 * Add identification of backend used to redirect reads for voice 3
 * Set backend identification for each backend when initialised
 * Make asid device number and midi device string readable
 * Update fixed device logging to use backend identification
+* Fix voice 3 reading when using the embedded player
 * Fix FM/OPL over NSD to follow the NSD v5 spec (needs matching firmware)
 * Rename CLI player binary usbsid to usplayer (test and ymfm builds follow)
 * Change licence to GPL-2.0-or-later (was GPL-2.0-only)

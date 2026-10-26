@@ -437,7 +437,7 @@ data_t Mos6581_8580::io_read(addr_t addr)
    * still update like they should. */
   const reg_t local = static_cast<reg_t>(addr & 0x1f);
 
-  if (config_.real_reads && chip >= 1 && chip <= kMaxSids) {
+  if ((config_.real_reads || backend_->read_v3_backend()) && chip >= 1 && chip <= kMaxSids) {
     const data_t value = backend_->read(reg, cycles_since_last_event());
     US_LOG_IF(sid_r, "[RR SID%u] $%04x $%03x:%02x\n", chip, addr, reg, value);
     return value;
@@ -449,7 +449,7 @@ data_t Mos6581_8580::io_read(addr_t addr)
   const bool solo_read_dropped = config_.solo_active && chip >= 1 &&
     chip <= kMaxSids && config_.voice_solo[chip - 1] == 0;
 
-  if (chip >= 1 && chip <= kMaxSids) {
+  if (backend_->read_v3_virtual() && (chip >= 1 && chip <= kMaxSids)) {
     if (local == kSidRegOsc3 || local == kSidRegEnv3) {
       const data_t value = voice3_[chip - 1].read(local, bus_.cycles());
       if (!solo_read_dropped) {

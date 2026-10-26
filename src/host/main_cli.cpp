@@ -984,9 +984,7 @@ int main(int argc, char ** argv)
 
   /* Hardware and access cost, set before loading as the init writes need the same spacing */
   SidConfig & sid_config = machine.sid().config();
-  /* ReSIDfp audio and wav recording outputs need real reads for OSC3 and ENV3 */
-  bool real_reads_override = (output == OutputMode::Audio || output == OutputMode::Wav);
-  sid_config.real_reads = (real_reads_override ? real_reads_override : real_reads);
+  sid_config.real_reads = real_reads;
   sid_config.force_socket_two = force_socket_two;
   sid_config.force_address = force_address;
   sid_config.forced_address = forced_address;

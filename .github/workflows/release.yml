@@ -138,7 +138,7 @@ jobs:
           if-no-files-found: error
 
   ### The browser player: the WASM and the JavaScript that drives it, as one
-  ### bundle a page can be pointed at. See docs/WEB.md.
+  ### bundle a page can be pointed at. See docs/API_WEB.md.
   web:
     name: Build web
     runs-on: ubuntu-latest
@@ -225,7 +225,7 @@ jobs:
           # The build copies usbsid.js, .mjs and .wasm into web/, so the
           # directory is already the deliverable. See CMakeLists.txt.
           # web/README.md is the bundle's own, and is not overwritten.
-          cp docs/WEB.md web/ 2>/dev/null || true
+          cp docs/API_WEB.md web/ 2>/dev/null || true
           # reSIDfp is compiled into the wasm, so its licence ships beside it.
           mkdir -p web/licenses
           cp lib/residfp/COPYING web/licenses/reSIDfp-COPYING

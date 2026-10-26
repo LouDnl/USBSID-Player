@@ -473,7 +473,7 @@ release:windows:
     expire_in: 4 weeks
 
 # The browser player: the WASM and the JavaScript that drives it, as one bundle
-# a page can be pointed at. See docs/WEB.md.
+# a page can be pointed at. See docs/API_WEB.md.
 release:web:
   extends: .rules_release
   stage: build
@@ -512,7 +512,7 @@ release:web:
     - ./build/usplayer-test
     # The build copies usbsid.js, .mjs and .wasm into web/, so the directory is
     # already the deliverable. web/README.md is the bundle's own.
-    - cp docs/WEB.md web/ 2>/dev/null || true
+    - cp API_WEB.md web/ 2>/dev/null || true
     - mkdir -p web/licenses
     - cp lib/residfp/COPYING web/licenses/reSIDfp-COPYING
     # The bundle must be able to make a sound on its own, usplayer-audio.js is

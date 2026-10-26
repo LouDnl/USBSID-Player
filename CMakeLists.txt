@@ -631,6 +631,7 @@ if(${WEB} EQUAL 1)
     _usp_force_socket_two _usp_key_runstop _usp_type
     _usp_set_sid_config
     _usp_audio_configure
+    _usp_audio_release
     _usp_audio_enabled
     _usp_audio_available
     _usp_audio_take

@@ -32,7 +32,7 @@ namespace usbsid {
 
 ASIDBackend::ASIDBackend(void)
 {
-
+  ASIDBackend::set_backend_type(SidBackendType::ASID);
 }
 
 ASIDBackend::~ASIDBackend(void)

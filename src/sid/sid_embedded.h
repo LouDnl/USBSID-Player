@@ -78,7 +78,9 @@ namespace usbsid {
 class EmbeddedSidBackend final : public SidBackend
 {
   public:
-    EmbeddedSidBackend(void) = default;
+    EmbeddedSidBackend(void) {
+      EmbeddedSidBackend::set_backend_type(SidBackendType::Embed);
+    }
 
     void write(addr_t reg, data_t value, uint16_t cycles) override US_RAM_ATTR;
     data_t read(addr_t reg, uint16_t cycles) override US_RAM_ATTR;

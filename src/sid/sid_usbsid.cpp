@@ -56,6 +56,7 @@ int socket_num_sids(const uint8_t * cfg, int socket)
 UsbSidBackend::UsbSidBackend(void)
 {
   for (int16_t & slot : chip_to_logical_) slot = -1;
+  UsbSidBackend::set_backend_type(SidBackendType::USB);
 }
 
 UsbSidBackend::~UsbSidBackend(void)

@@ -59,7 +59,10 @@ constexpr size_t kScopeMaxFrames = 0x10000;
 
 } /* namespace */
 
-ResidFpSidBackend::ResidFpSidBackend(void) = default;
+ResidFpSidBackend::ResidFpSidBackend(void)
+{
+  ResidFpSidBackend::set_backend_type(SidBackendType::ReSIDfp);
+}
 
 ResidFpSidBackend::~ResidFpSidBackend(void)
 {

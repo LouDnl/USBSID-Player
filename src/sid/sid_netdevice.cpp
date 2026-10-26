@@ -81,7 +81,9 @@ constexpr std::chrono::milliseconds kMaxBusyTime{2000};
 
 } /* namespace */
 
-NetworkSidBackend::NetworkSidBackend(void) {}
+NetworkSidBackend::NetworkSidBackend(void) {
+  NetworkSidBackend::set_backend_type(SidBackendType::NetDevice);
+}
 
 NetworkSidBackend::~NetworkSidBackend(void)
 {

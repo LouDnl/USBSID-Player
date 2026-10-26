@@ -71,7 +71,9 @@ class WebSidBackend final : public SidBackend
     static constexpr uint32_t kRingEntries = 8192;
     static constexpr uint32_t kEntryBytes = 4;
 
-    WebSidBackend(void) = default;
+    WebSidBackend(void) {
+      WebSidBackend::set_backend_type(SidBackendType::Web);
+    }
 
     void write(addr_t reg, data_t value, uint16_t cycles) override;
     data_t read(addr_t reg, uint16_t cycles) override;

@@ -56,7 +56,6 @@ void ASIDBackend::list_ports(void)
 bool ASIDBackend::asid_init(int midi_port, int no_sids)
 {
   nosids = no_sids;
-  int nports, asidport = 0;
   // Uncomment for debug prints
   // printf("Opening Midi port %d for ASID\n", midi_port);
 

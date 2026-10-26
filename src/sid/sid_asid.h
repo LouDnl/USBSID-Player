@@ -69,6 +69,7 @@ class ASIDBackend final : public SidBackend
 {
   private:
     RtMidiOut *midiout = nullptr;
+    int nports, asidport = 0;
 
     enum C64Cycles {
       EMULATION_CYCLES_PER_SECOND_DFLT = 1000000,
@@ -101,6 +102,9 @@ class ASIDBackend final : public SidBackend
     void list_ports(void);
     bool asid_init(int port, int no_sids);
     void asid_close(void);
+
+    int curr_port(void) { return asidport; };
+    std::string curr_device(void) { return midiout->getPortName(asidport); }; /* Use .c_str() for logging */
 
     void write(addr_t reg, data_t value, uint16_t cycles) override;
     void wait(uint16_t cycles) override;

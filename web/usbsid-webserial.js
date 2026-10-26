@@ -512,9 +512,15 @@ export class USBSIDWebSerialTransport {
 
   /* Send a SID file to the board and start it
    * Order: stop, START, data in 62 byte pieces (command and sub command take 2 of the
-   * 64 bytes), END, SIZE, load subtune, start
-   * A 51 KB tune is about 850 packets, each awaited (writer.ready), the board paces the upload */
-  async uploadSIDFile(bytes, subtune = 1, fileType = 0x01, onProgress = null) {
+   * 64 bytes), END, SIZE, PLAYTIME (only when playtimeMs > 0), load subtune, start
+   * A 51 KB tune is about 850 packets, each awaited (writer.ready), the board paces the upload
+   * Same signature and packet order as uploadSIDFile() in usbsid-driver.js
+   * bytes: file data, subtune: 1 based, fileType: 0x01 SID or 0x02 PRG,
+   * onProgress: optional callback(sent, total), playtimeMs: play time sent before the
+   * tune starts. The board resets it to five minutes on every START, send it with each upload
+   * Returns true when every packet was sent, false on the first failure (no throw) */
+  async uploadSIDFile(bytes, subtune = 1, fileType = 0x01, onProgress = null,
+                      playtimeMs = 0) {
     if (!this._open) return false;
     const CHUNK = SLOT - 2;
     const total = bytes.length;
@@ -535,6 +541,9 @@ export class USBSIDWebSerialTransport {
     if (!await this._sendNow(UPLOAD_SID_END)) return false;
     if (!await this._sendNow(UPLOAD_SID_SIZE,
           new Uint8Array([(total >> 8) & 0xFF, total & 0xFF]))) return false;
+    /* Before the load, a length sent after the start leaves the tune running against
+     * the board's five minute default for a while */
+    if (playtimeMs > 0 && !await this.playerSetPlaytime(playtimeMs)) return false;
     if (!await this.playerLoadTune(subtune > 0 ? subtune - 1 : 0)) return false;
     return await this.playerStart();
   }

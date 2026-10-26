@@ -791,6 +791,9 @@ export class UsPlayerAudio {
     this.unrun();
     this._unwatchVisibility();
     this._handedOver = false;
+    /* Give the machine back to the web backend, a later ASID or WebUSB play
+     * in this page writes to the ring again (older wasm has no release) */
+    if (this.M && typeof this.M._usp_audio_release === 'function') this.M._usp_audio_release();
     if (this.node) { try { this.node.disconnect(); } catch (_) {} this.node = null; }
     if (this.gain) { try { this.gain.disconnect(); } catch (_) {} this.gain = null; }
     if (this.ctx) { try { await this.ctx.close(); } catch (_) {} this.ctx = null; }

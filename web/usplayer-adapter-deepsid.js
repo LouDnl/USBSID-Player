@@ -877,6 +877,12 @@ export class USPlayerAdapter {
         window.updateRegGridSIDCount(nsids);
       }
 
+      /* The wasm module is shared by the page, an earlier software audio play left
+       * the machine on reSIDfp, a board or ASID transport needs the web backend back
+       * (older wasm has no release) */
+      if (!this._isAudio && typeof this._player.M._usp_audio_release === 'function') {
+        this._player.M._usp_audio_release();
+      }
       const ok = sid ? this._player.loadSID(bytes, subtune || 0)
                      : this._player.loadPRG(bytes);
       if (!ok) throw new Error('neither a SID nor a program');

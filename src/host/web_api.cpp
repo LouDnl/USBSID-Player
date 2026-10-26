@@ -465,6 +465,26 @@ int usp_audio_configure(int chips, int rate, int quality, int model)
   return 1;
 }
 
+/**
+ * @brief Hand the machine back to the web backend after usp_audio_configure()
+ *
+ * Restores what the configure changed (backend, access_overhead, render_idle,
+ * real_reads) to the defaults of a hardware web transport (ASID, WebUSB)
+ * Safe to call when audio was never configured
+ */
+void usp_audio_release(void)
+{
+  if (!g_soft_on) return;
+  g_soft.discard();
+  usbsid::Machine & machine = usbsid::usplayer_machine();
+  machine.set_sid_backend(usbsid::web_backend());
+  usbsid::SidConfig & cfg = machine.sid().config();
+  cfg.access_overhead = 1;
+  cfg.render_idle = false;
+  cfg.real_reads = false;
+  g_soft_on = false;
+}
+
 /** @brief Is the software SID receiving writes */
 int usp_audio_enabled(void) { return g_soft_on ? 1 : 0; }
 

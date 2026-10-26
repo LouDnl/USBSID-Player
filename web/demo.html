@@ -279,6 +279,12 @@ $('play').onclick = async () => {
     if (n > 1) log(`${n} SID chips, telling ASID about all of them`);
   }
 
+  /* The machine may still be on reSIDfp from an earlier audio play, a board or ASID
+   * needs the web backend back (older wasm has no release) */
+  if ($('ttype').value !== 'audio' && player.M && typeof player.M._usp_audio_release === 'function') {
+    player.M._usp_audio_release();
+  }
+
   /* Software audio starts on play, synthesis needs the clock and chip count and the AudioContext needs this gesture (iOS) */
   if ($('ttype').value === 'audio') {
     if (!audioOut) audioOut = new UsPlayerAudio(player);

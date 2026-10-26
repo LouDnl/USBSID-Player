@@ -817,14 +817,17 @@ int main(int argc, char ** argv)
 
   if (output == OutputMode::USBSID && !no_device) {
     if (usb.open(board_order)) {
+      machine.set_sid_backend(usb);
       if (usb.num_boards() == 1) {
-        printf("  device   : USBSID-Pico, pcb v%d, %d SID%s "
-               "(socket one %d, socket two %d)\n",
-               usb.pcb_version(), usb.num_sids(), usb.num_sids() == 1 ? "" : "s",
-               usb.sids_socket_one(), usb.sids_socket_two());
+        printf("  device   : %s, pcb v%d, %d SID%s (socket one %d, socket two %d)\n",
+          machine.sid().backend().get_backend_type_string(),
+          usb.pcb_version(), usb.num_sids(), usb.num_sids() == 1 ? "" : "s",
+          usb.sids_socket_one(), usb.sids_socket_two());
       } else {
-        printf("  device   : %d USBSID-Pico boards, %d SID%s total\n",
-               usb.num_boards(), usb.num_sids(), usb.num_sids() == 1 ? "" : "s");
+        printf("  device   : %d %s boards, %d SID%s total\n",
+          usb.num_boards(),
+          machine.sid().backend().get_backend_type_string(),
+          usb.num_sids(), usb.num_sids() == 1 ? "" : "s");
       }
       const auto & boards = usb.manager().Boards();
       if (!board_order.empty()) {
@@ -841,7 +844,6 @@ int main(int argc, char ** argv)
         if (!opened) printf("  warning  : --boards asked for %s, not opened "
                              "(not attached, or already claimed)\n", wanted.c_str());
       }
-      machine.set_sid_backend(usb);
       active_backend = &usb;
     } else {
       /* Fallback is announced, silence looks like a broken tune */
@@ -861,6 +863,10 @@ int main(int argc, char ** argv)
     if (asid.asid_init(asid_midi_port, nosids)) {
 
       machine.set_sid_backend(asid);
+      printf("  device   : Midi using %s port %d: %s\n",
+        machine.sid().backend().get_backend_type_string(),
+        asid.curr_port(),
+        asid.curr_device().c_str());
       active_backend = &asid;
     } else {
       /* Fallback is announced, silence looks like a broken tune */
@@ -878,9 +884,6 @@ int main(int argc, char ** argv)
       const uint8_t chips = static_cast<uint8_t>(
         (net_sids > 0) ? net_sids : (is_sid ? info.sid_count : 2));
       net.set_sid_count(chips); /* clamped to kMaxSids (15) internally */
-      printf("  device   : Network SID Device at %s:%d, protocol v%d, %u SID%s\n",
-             net_host, net_port, net.protocol_version(), net.sid_count(),
-             net.sid_count() == 1 ? "" : "s");
       /* A software server is its own clock, no bus overhead unless --overhead
        * Idle frames are sent as time (SidConfig::render_idle) */
       if (net.is_software()) {
@@ -888,6 +891,10 @@ int main(int argc, char ** argv)
         machine.sid().config().render_idle = true;
       }
       machine.set_sid_backend(net);
+      printf("  device   : %s at %s:%d, protocol v%d, %u SID%s\n",
+             machine.sid().backend().get_backend_type_string(),
+             net_host, net_port, net.protocol_version(), net.sid_count(),
+             net.sid_count() == 1 ? "" : "s");
       active_backend = &net;
     } else {
       /* Fallback as above */

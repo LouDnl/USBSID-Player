@@ -76,8 +76,6 @@ bool ASIDBackend::asid_init(int midi_port, int no_sids)
     return false;
   }
 
-  printf("  midi     : using ASID port %d: %s\n", asidport, midiout->getPortName(asidport).c_str());
-
   midiout->openPort(asidport);
   port_is_open = true;
 

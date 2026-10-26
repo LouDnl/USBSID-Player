@@ -3,16 +3,18 @@ USBSID-Player is a Cycle Exact Commodore64 emulating PSID/RSID & PRG tune player
 
 
 # Features
-- Cycle exact C64 emulation (CPU, CIA1/2, VIC, and up to 15 SID chips - a v5 tune's own `multiSidConfig` ceiling), the same emulation core behind every target below
-- Plays PSID, RSID and PRG/P00, tunes skip the boot and start in milliseconds, programs boot to BASIC and RUN/SYS themselves
-- Four interchangeable output backends behind one seam (`SidBackend`): a real USBSID-Pico over USB, software audio (ResidFp) via miniaudio, a WAV file, or a Network SID Device server (v4/v5) over TCP. Software audio and netdevice play every chip a v5 tune asks for, up to 15; a real board (USB, WebUSB, or the embedded player) plays its own first 4 physical sockets
-- `--stereo`: pan a multi-SID tune per its own v5 panning hint, on software audio and WAV output (off by default, one channel)
-- FM/OPL playback via Nuked-OPL3-fast, for tunes that use a board's FM/OPL chip alongside its SID chips; the netdevice backend can also enable/disable FM OPL on the server itself (NSD v5's `TRY_SET_FM_OPL`)
-- HVSC Songlengths support, stops a tune when the song ends instead of playing on forever, preferring a v5 tune's own embedded song length table over the five minute default when the external database has never heard of it
-- Muting and solo by chip and voice, subtune switching, PAL/NTSC forcing, and a `--trace` mode that records every SID register event to a file
-- Per subsystem logging switches (SID/CIA/VIC/CPU reads and writes, banking, instructions, timers) carried over from the old player
-- Embeds directly into the USBSID-Pico firmware (`ONBOARD_SIDPLAYER=1`, RP2350 only, needs `-O3`), a drop in replacement for the player it succeeds
-- Compiles to WebAssembly for the browser, driving a board over WebUSB (cycle exact) or ASID over Web MIDI (a snapshot per frame), with an AudioWorklet worker so playback survives a backgrounded tab
+- Cycle exact C64 emulation (CPU, CIA1/2, VIC and up to 15 SID chips, the `multiSidConfig` limit of a v5 tune), the same core for every target below
+- Plays PSID, RSID and PRG/P00 (tunes skip the boot, programs boot to BASIC and RUN/SYS themselves)
+- Four output backends (`SidBackend`): a real USBSID-Pico over USB, software audio (ResidFp) via miniaudio, a WAV file or a Network SID Device server (v4/v5) over TCP
+- Software audio and netdevice play up to 15 SID chips, a real board (USB, WebUSB or embedded) plays the first 4 sockets
+- `--stereo` pans a multi-SID tune per the v5 panning hint (software audio and WAV only, off by default)
+- FM/OPL playback via Nuked-OPL3-fast for tunes that use the FM/OPL chip of a board
+- Netdevice sends FM OPL as NSD v5 `TRY_WRITE_EX` writes to `$DF40` (address) and `$DF50` (data), `TRY_SET_FM_OPL` enables/disables FM OPL on the server
+- HVSC Songlengths support, a tune stops when the song ends (a v5 tune uses its embedded song length table when the database has no entry)
+- Muting and solo by chip and voice, subtune switching, PAL/NTSC forcing and a `--trace` mode that records SID register events to a file
+- Logging switches per subsystem (SID/CIA/VIC/CPU reads and writes, banking, instructions, timers) like the old player
+- Embeds into the USBSID-Pico firmware (`ONBOARD_SIDPLAYER=1`, RP2350 only, needs `-O3`), a drop in replacement for the old player
+- Compiles to WebAssembly for the browser, drives a board over WebUSB (cycle exact) or ASID over Web MIDI (a snapshot per frame), the AudioWorklet worker keeps playing in a background tab
 
 
 # Usage
@@ -23,50 +25,77 @@ usage: usplayer [options] <file.sid|file.prg|file.p00>
   a SID file plays; a program is loaded where it says and started the
   way you would start it, with RUN or with SYS
 
-  -s, --song N      start at subtune N (default: the tune's own)
-  -t, --seconds N   stop after N seconds (default: play until ctrl-c)
-  -i, --info        print what the file says and exit
-  -n, --no-device   run without hardware, useful for checking a tune
+  -s,  --song N     start at subtune N (default: the tune's own)
+  -t,  --seconds N  stop after N seconds (default: play until ctrl-c)
+  -i,  --info       print what the file says and exit
+  -n,  --no-device  run without hardware, useful for checking a tune
+  --no-roms         run on the stub KERNAL, without BASIC and character
+                    ROM, the way a build without ROMs does
 
   sound:
-      --output M    usbsid (default), audio, wav, or nsd. usbsid
-                    falls back to audio when no board is found
-  -lb, --list-boards  list every attached board's serial number and exit
-  -b, --boards SPEC  open these boards (comma separated serial numbers
-                    from --list-boards, board 1 first) instead of the
-                    one the driver picks; the tune's SIDs are spread
-                    across every opened board's SIDs, and FM/OPL goes to
-                    the first board with an FM/OPL configured (not with
-                    -f/-fa/--select-sids, see --select-sids fm)
-      --wav FILE    write a WAV instead of playing, implies --output=wav
-      --net-host H  Network SID Device server to connect to for
+  -o,  --output M   usbsid (default), asid, nsd, audio or wav.
+                    usplayer falls back to audio when no board is found
+  -lb, --list-boards
+                    list every attached board's serial number and exit
+  -b,  --boards SPEC
+                    open these boards for --output=usbsid instead of
+                    the one the driver picks, in this order (board 1
+                    is the first, etc.). SPEC is a comma separated list
+                    of serial numbers from --list-boards, for example
+                    AB12,CD34 opens AB12 as board 1 and CD34 as board 2
+                    regardless of USB-connect order, and leaves any
+                    other attached board untouched. The tune's SIDs are
+                    spread across every opened board's SIDs, board 1's
+                    first. (default: one board, the first in USB
+                    bus/port order)
+  -lm, --list-midi  list every available midi output device
+  -a,  --asid N     Midi supporting ASID port to use for --output=asid
+                    (default is 0)
+  -nh, --net-host H Network SID Device server to connect to for
                     --output=nsd (default 127.0.0.1)
-      --net-port P  its TCP port (default 6581)
-      --net-sids N  SIDs to tell it about (default: the tune's own count)
-      --rate N      sample rate for audio and wav (default 44100). A device
+  -np, --net-port P its TCP port (default 6581)
+  -ns, --net-sids N SIDs to tell it about (default: the tune's own count)
+  -w,  --wav FILE   write a WAV instead of playing, implies --output=wav
+  -ra, --rate N     sample rate for audio and wav (default 44100). A device
                     may impose its own, which is then what is used
-      --quality Q   fast (linear) or good (sinc, default)
-      --stereo      pan multi-SID tunes per the v5 file's own hint
+  -q,  --quality Q  fast (linear) or good (sinc, default)
+  -st, --stereo     pan multi-SID tunes per the v5 file's own hint
                     (--output=audio/wav only; off by default, one channel)
-  -T, --trace FILE  write every SID register event to FILE, laid out like
+  -rv, --resid-volume N
+                    reSIDfp (SID) output level, percent, 0-300
+                    (--output=audio/wav only; default 100)
+  -fv, --fmopl-volume N
+                    FM/OPL output level, percent, 0-300 (same scope;
+                    default 50 - the OPL is the louder of the two chips)
+  -T,  --trace FILE write every SID register event to FILE, laid out like
                     -srw (chip, C64 address, register:value, [C] cycle
                     delta) plus the running cycle total and the play
-                    time MM:SS.mmm. Records what is played, so it works
+                    time MM:SS.mmm. Records what is played, also works
                     with a board and with --wav; add -n for a silent
                     run that only records
-      --mute SPEC   silence voices. SPEC is a comma separated list of
-                    CHIP:VOICE or CHIP for all three, chips and voices
-                    counting from 1, for example 1:3 or 2 or 1:1,1:2
-      --solo SPEC   the other way round: silence everything except SPEC.
-                    --solo 1:2 --wav v2.wav records voice two on its own
-      --pal         force PAL timing
-      --ntsc        force NTSC timing
+  -m,  --mute SPEC  silence voices (gate/sustain forced off; everything
+                    else for that voice still reaches the backend). SPEC
+                    is a comma separated list of CHIP:VOICE or CHIP for
+                    all three, chips and voices counting from 1, for
+                    example 1:3 or 2 or 1:1,1:2
+  -S,  --solo SPEC  the other way round, and harder: only SPEC's writes
+                    reach the backend, everything else is dropped before
+                    it gets there (and before -srw sees it), not just
+                    silenced. --solo 1:2 --wav v2.wav records voice two
+                    on its own with no other chip/voice traffic
+  -ms, --mute-solo SPEC
+                    the old --solo: silence everything except SPEC
+                    the soft way, same as --mute. Kept under its own name
+                    for anyone relying on that behavior specifically
+  -P,  --pal        force PAL timing
+  -N,  --ntsc       force NTSC timing
 
   hardware:
   -rr               read the SID back from the chip, not the mirror
   -f                force everything into socket two
   -fa XX            force everything to physical base $XX (hex)
-  -ss, --select-sids SPEC  play only these of the tune's SIDs, on the
+  -ss, --select-sids SPEC
+                    play only these of the tune's SIDs, on the
                     board's sockets in the order given. SPEC is a comma
                     separated list of tune SID numbers counting from 1,
                     each optionally followed by :SLOT to name the exact
@@ -84,14 +113,19 @@ usage: usplayer [options] <file.sid|file.prg|file.p00>
                     given, an FM/OPL not named this way is not played
                     (--output=usbsid only; default: the tune's first N
                     SIDs on the first N sockets, in order)
-      --overhead N  cycles one hardware access costs (default 1)
-      --songlengths F  HVSC Songlengths database, to stop when the song ends.
-                    Found by itself in $SONGLENGTHS, ~/Songlengths.md5,
-                    $HVSCROOT or $HVSC_BASE DOCUMENTS/Songlengths.md5, or $HVSCDB.
-      --no-songlengths  ignore it even when one is found
+  -oh, --overhead N Cycles one hardware access costs (default 1; 0 for
+                    netdevice software servers)
+  -sl, --songlengths F
+                    HVSC Songlengths database, to stop when the song
+                    ends. Found by itself in $SONGLENGTHS,
+                    ~/Songlengths.md5, $HVSCROOT or $HVSC_BASE
+                    DOCUMENTS/Songlengths.md5, or $HVSCDB.
+  -nsl, --no-songlengths
+                    ignore it even when one is found
 
   logging, to stdout, same switches as old player:
   -srw              SID reads and writes
+  -sidr / -sidw     SID reads or SID writes only
   -c1rw / -c2rw     CIA1 / CIA2 reads and writes
   -vrw / -vrrw      VIC register writes / reads
   -lrw              every CPU read and write
@@ -131,7 +165,7 @@ Linux example.
 ./usplayer -i tune.sid                # print the tune's own info and exit
 ./usplayer -h                         # the full option list
 ```
-Needs `libusb-1.0` + `libusb-1.0-0-dev` and, on Linux, `libudev` + `libudev-dev` for USB access, both found via `pkg-config`. `-dev` for building, the other for running.
+Needs `libusb-1.0` + `libusb-1.0-0-dev` and on Linux `libudev` + `libudev-dev` for USB access, found via `pkg-config`. `-dev` is for building, the other for running.
 
 ## Build the WebAssembly player
 Linux example.  
@@ -151,10 +185,10 @@ cd web
 python3 -m http.server 8000
 # http://localhost:8000/web/demo.html
 ```
-A secure context is required: WebUSB and Web MIDI only exist on `https://` or `http://localhost`. See [docs/API_WEB.md](docs/API_WEB.md) for the JavaScript API, the transports, and how to embed the player in another page.
+WebUSB and Web MIDI need a secure context (`https://` or `http://localhost`), see [docs/API_WEB.md](docs/API_WEB.md) for the JavaScript API, the transports and how to embed the player in another page.
 
 ## Embed into the firmware
-The firmware pulls this repository in via `cmake/usbsid-player.cmake` and builds with `ONBOARD_SIDPLAYER=1`. The API is `#include <usplayer.h>`:
+The firmware pulls this repository in via `cmake/usbsid-player.cmake` and builds with `ONBOARD_SIDPLAYER=1`. Use the API with `#include <usplayer.h>`:
 ```c
 load_sidtune(sidfile, sidfile_size, tuneno);
 init_sidplayer();
@@ -165,19 +199,19 @@ stop_sidplayer();
 See [docs/API_EMBEDDED.md](docs/API_EMBEDDED.md) for the full API.
 
 ## Run the test suite
-The suite is part of the command line build (`BUILD_TESTS` defaults to 1), in the same build directory:
+The suite is part of the command line build (`BUILD_TESTS` defaults to 1), use the same build directory:
 ```bash
 cmake -S . -B build_cli \
   -DDESKTOP=1 -DEMBEDDED=0 -DWEB=0 -DBUILD_TESTS=1 && \
 	cmake --build build_cli --target usplayer-test --parallel $(nproc) && \
   ./build_cli/usplayer-test
 ```
-Every component also has its own `test_<name>` executable registered with CTest, run them all with `ctest --test-dir build_cli` after a full `cmake --build build_cli`.
+Every component has a `test_<name>` executable registered with CTest, run them all with `ctest --test-dir build_cli` after a full `cmake --build build_cli`.
 
-The `asid` suite (`tests/test_asid.cpp`, also `ctest -R asid` or `./build.sh test` for the whole suite) checks the SysEx messages of the ASID backend against stub RtMidi symbols and needs no MIDI port. It is built when RtMidi is available and reports `[SKIP]` otherwise.
+The `asid` suite (`tests/test_asid.cpp`, run with `ctest -R asid` or `./build.sh test` for all) checks the ASID SysEx messages against stub RtMidi symbols, no MIDI port needed. It is built when RtMidi is available, else it reports `[SKIP]`.
 
 ## Build the command line player with ymfm
-Uses [ymfm](https://github.com/aaronsgiles/ymfm) instead of Nuked-OPL3-fast as the FM/OPL engine. Command line player only, CMake refuses `FM_YMFM=1` together with `WEB=1` or `EMBEDDED=1`. `EXECUTABLE` gives the binary its own name and keeps it from replacing the regular `usplayer`:
+Uses [ymfm](https://github.com/aaronsgiles/ymfm) as FM/OPL engine. Command line player only (CMake refuses `FM_YMFM=1` with `WEB=1` or `EMBEDDED=1`), `EXECUTABLE` names the binary, the regular `usplayer` stays untouched:
 ```bash
 cmake -S . -B build_ymfm \
   -DDESKTOP=1 -DEMBEDDED=0 -DWEB=0 -DREQUIRE_AUDIO=1 \
@@ -203,7 +237,7 @@ CLI player:
 # Libraries used for non USBSID audio play (CLI & Web)
 - [ResidFp](https://github.com/libsidplayfp/libresidfp)
 - [miniaudio](https://github.com/mackron/miniaudio)
-- [Nuked-OPL3-fast](https://github.com/tgies/Nuked-OPL3-fast), a bit-exact perf fork of [Nuked-OPL3](https://github.com/nukeykt/Nuked-OPL3)
+- [Nuked-OPL3-fast](https://github.com/tgies/Nuked-OPL3-fast), a bit-exact fork of [Nuked-OPL3](https://github.com/nukeykt/Nuked-OPL3)
 - [ymfm](https://github.com/aaronsgiles/ymfm), optional FM/OPL engine for the `cli-ymfm` build (CLI only)
 
 

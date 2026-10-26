@@ -58,6 +58,11 @@ const FM_MAX_PAIRS = 16;
 const ASID_MFR = 0x2D;
 const ASID_START = 0x4C;
 const ASID_STOP  = 0x4D;
+const ASID_ENV   = 0x31;   /* SID environment: PAL/NTSC, speed, frame delta */
+const ASID_TYPE  = 0x32;   /* SID chip type */
+/* Cycles a second of the PAL and NTSC machine, as EMULATION_CYCLES_PER_SECOND_* in sid_asid.h */
+const CYCLES_PAL  = 985248;
+const CYCLES_NTSC = 1022727;
 
 function makeChip() {
   return { reg: new Uint8Array(32), modified: new Uint8Array(32) };
@@ -131,6 +136,44 @@ export class ASIDMIDITransport {
 
   playbackStart() { this._basic(ASID_START); }
   playbackStop() { this._basic(ASID_STOP); this._clearAll(); }
+
+  /**
+   * Tell the receiver the video standard and frame time (ASID 0x31)
+   *
+   * Port of ASIDBackend::sendSIDEnvironment() in sid_asid.cpp: F0 2D 31 <settings>
+   * <framedelta us in 7+7+2 bits, LSB first> F7. Speed 1x, no buffering requested.
+   *
+   * @param {boolean} pal         true for a PAL tune, false for NTSC
+   * @param {number}  multiplier  speed 1 to 16, 1 is normal
+   */
+  sendEnvironment(pal, multiplier = 1) {
+    if (!this._out) return;
+    const mult = Math.min(16, Math.max(1, multiplier | 0));
+    const frameDeltaUs = pal
+      ? Math.floor(1000000 * 63 * 312 / CYCLES_PAL)
+      : Math.floor(1000000 * 65 * 263 / CYCLES_NTSC);
+    this._send([
+      0xF0, ASID_MFR, ASID_ENV,
+      (((mult - 1) & 0x0f) << 1) | (pal ? 0 : 1),
+      frameDeltaUs & 0x7f,
+      (frameDeltaUs >> 7) & 0x7f,
+      (frameDeltaUs >> 14) & 0x03,
+      0xF7,
+    ]);
+  }
+
+  /**
+   * Tell the receiver which SID chip the tune expects (ASID 0x32)
+   *
+   * Port of ASIDBackend::sendSIDType(): F0 2D 32 00 <00 for 6581, 01 otherwise> F7.
+   * Chip index is always 0, as the command line player.
+   *
+   * @param {boolean} is6581  true when the tune header asks for a 6581
+   */
+  sendSidType(is6581) {
+    if (!this._out) return;
+    this._send([0xF0, ASID_MFR, ASID_TYPE, 0x00, is6581 ? 0x00 : 0x01, 0xF7]);
+  }
 
   /* Add one register change to the frame snapshot */
   writeCycled(reg, val, _cycles) {

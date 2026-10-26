@@ -111,6 +111,23 @@ export function sidModel(bytes) {
   return (((flags >> 4) & 0x03) === 2) ? 1 : 0;
 }
 
+/**
+ * Whether the tune header asks for a 6581, for the ASID SID type message (0x32)
+ *
+ * Bits 4 and 5 of the big endian word at $76 equal to 1. Unknown, either and a
+ * header older than v2 (no flags word) are not a 6581, as the command line player
+ * (info.sid_model == SidModel::Mos6581). Differs from sidModel(), which falls back to a 6581.
+ *
+ * @param {Uint8Array} bytes
+ */
+export function headerIs6581(bytes) {
+  if (!bytes || bytes.length < 0x78) return false;
+  const version = (bytes[0x04] << 8) | bytes[0x05];
+  if (version < 2) return false;
+  const flags = (bytes[0x76] << 8) | bytes[0x77];
+  return ((flags >> 4) & 0x03) === 1;
+}
+
 /** Discards everything, the default for a player without a device */
 export class NullTransport {
   writeCycled(_reg, _val, _cycles) {}
@@ -139,6 +156,7 @@ export class USBSIDPlayerWeb {
     this._rafId = 0;
     this._audio = null;      // { ctx, node } while the AudioWorklet clock runs
     this._tunePtr = 0;
+    this._asidTune = null;   // { is6581 } of the loaded SID tune, null for a program
     this._lastFlush = 0;
     this._lastReset = 0;
     this._hz = 50.125;       // frames a second, replaced on load
@@ -176,6 +194,9 @@ export class USBSIDPlayerWeb {
     this._isPrg       = M.cwrap('usp_is_prg', 'number', []);
     this._clockId     = M.cwrap('usp_clock_id', 'number', []);
     this._refreshHz   = M.cwrap('usp_refresh_hz', 'number', []);
+    /* Older wasm may lack it, the ASID environment message is then skipped */
+    this._clockHz     = (typeof M._usp_clock_hz === 'function')
+                      ? M.cwrap('usp_clock_hz', 'number', []) : null;
     this._song        = M.cwrap('usp_song', 'number', []);
     this._songs       = M.cwrap('usp_songs', 'number', []);
     this._frames      = M.cwrap('usp_frames', 'number', []);
@@ -243,6 +264,7 @@ export class USBSIDPlayerWeb {
     if (this._running) this.stop();   // never leave a tune half playing
     const ptr = this._stage(bytes);
     const ok = this._loadSidtune(ptr, bytes.length, subtune);
+    this._asidTune = ok ? { is6581: headerIs6581(bytes) } : null;
     if (ok) {
       this._initSidplayer();
       this._start();
@@ -262,6 +284,7 @@ export class USBSIDPlayerWeb {
     if (this._running) this.stop();
     const ptr = this._stage(bytes);
     const ok = this._loadPrg(ptr, bytes.length);
+    this._asidTune = null;    // the command line sends no environment for a program
     if (ok) {
       this._start();
       this._afterStart();
@@ -447,6 +470,7 @@ export class USBSIDPlayerWeb {
     this._acc = 0;
     this._lastT = (typeof performance !== 'undefined') ? performance.now() : Date.now();
     if (this.transport.playbackStart) this.transport.playbackStart();
+    this._sendAsidTune();
 
     if (opts.externalClock) return;
 
@@ -455,6 +479,20 @@ export class USBSIDPlayerWeb {
       catch (e) { /* no Web Audio, or no gesture: fall through */ }
     }
     this._startRafClock();
+  }
+
+  /**
+   * ASID environment (0x31) and SID type (0x32) of the loaded tune, after the play start
+   *
+   * Same order and bytes as main_cli.cpp: PAL is a SID clock under 1 MHz, speed 1x.
+   * Only a SID tune, only a transport with the methods (ASID) and a wasm with the clock.
+   */
+  _sendAsidTune() {
+    const t = this.transport;
+    if (!this._asidTune || !this._clockHz) return;
+    if (typeof t.sendEnvironment !== 'function' || typeof t.sendSidType !== 'function') return;
+    t.sendEnvironment(this._clockHz() < 1000000, 1);
+    t.sendSidType(this._asidTune.is6581);
   }
 
   _startRafClock() {

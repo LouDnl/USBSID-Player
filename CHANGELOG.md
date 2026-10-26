@@ -1,7 +1,7 @@
 # Changelog
 Please refer to the [releases page](https://github.com/LouDnl/USBSID-Player/releases) for more information on version changes
 
-#### Version: Unreleased
+* Add identification of backend used to redirect reads for voice 3
 * Fix FM/OPL over NSD to follow the NSD v5 spec (needs matching firmware)
 * Rename CLI player binary usbsid to usplayer (test and ymfm builds follow)
 * Change licence to GPL-2.0-or-later (was GPL-2.0-only)

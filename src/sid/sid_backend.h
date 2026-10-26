@@ -78,6 +78,69 @@ class SidBackend
     virtual void flush(void) {}
 
     virtual void reset(void) {}
+
+    /** @brief All backend types */
+    enum class SidBackendType { None, USB, ReSIDfp, Wav, NetDevice, ASID, Web, Embed };
+
+  private:
+    /** @brief Backend type storage, None for backends that never set one (test and null backends) */
+    SidBackendType backend_type = SidBackendType::None;
+
+  public:
+    /** @brief Returns the type of backend that is used */
+    SidBackendType get_backend_type(void) { return backend_type; }
+
+    /** @brief Set the type of backend that is used */
+    void set_backend_type(SidBackendType bt) { backend_type = bt; }
+
+    /** @brief Returns true when backend requires reading from Voice 3 in ReSIDfp or a real SID */
+    bool read_v3_backend(void) {
+      /* This gives the same result as if real reads were enabled */
+      switch (backend_type) {
+        case SidBackendType::ReSIDfp:
+        case SidBackendType::Wav:
+        case SidBackendType::Embed: /* Doesn't read from ReSIDfp but directly from the SID */
+          return true;
+        case SidBackendType::USB:
+        case SidBackendType::NetDevice:
+        case SidBackendType::ASID:
+        case SidBackendType::Web:
+        default: return false;
+      }
+    }
+
+    /** @brief Returns true when backend requires reading from virtual Voice 3 */
+    bool read_v3_virtual(void) {
+      switch (backend_type) {
+        case SidBackendType::None: /* No type set keeps the virtual voice 3, as before backend types existed */
+        case SidBackendType::USB:
+        case SidBackendType::NetDevice:
+        case SidBackendType::ASID:
+        /* When needed this gets overruled by web_api.cpp:usp_audio_configure setting real_reads to true */
+        case SidBackendType::Web:
+          return true;
+        case SidBackendType::Embed:
+        case SidBackendType::ReSIDfp:
+        case SidBackendType::Wav:
+        default: return false;
+      }
+    }
+
+    /** @brief Returns the type of backend that is used for logging */
+    const char * get_backend_type_string(void) {
+      const char * bt = "Undefined";
+      switch (backend_type) {
+        case SidBackendType::Embed:     bt = "Embedded player";      break;
+        case SidBackendType::USB:       bt = "USBSID-Pico";    break;
+        case SidBackendType::ReSIDfp:   bt = "ReSIDfp";              break;
+        case SidBackendType::Wav:       bt = "Wav";                  break;
+        case SidBackendType::NetDevice: bt = "Network SID Device";            break;
+        case SidBackendType::ASID:      bt = "ASID";                 break;
+        case SidBackendType::Web:       bt = "Web";                  break;
+        default: break;
+      }
+      return bt;
+    }
 };
 
 /** @brief Throws everything away, the default */

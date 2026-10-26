@@ -1,9 +1,9 @@
 ####
-# USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
-# line playback and for embedding on RP2350 (Pico2).
+# USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+# command line playback, websites and for embedding on RP2040/RP2350.
 #
 # CMakeLists.txt
-# This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+# This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
 # File author: LouD
 #
 # Copyright (c) 2026 LouD
@@ -29,13 +29,12 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-### The target stays `${EXECUTABLE}` (default `usbsid`), the file it builds is `usplayer` (see OUTPUT_NAME below)
+### Target is ${EXECUTABLE} (default usbsid), output file is usplayer (see OUTPUT_NAME below)
 set(PROJECT_NAME usbsid)
 set(EXECUTABLE ${PROJECT_NAME} CACHE STRING "EXECUTABLE")
 
-### The player's version, one line in .version beside this file. Listed as a
-### configure dependency: editing .version re-runs CMake on the next build,
-### instead of leaving the old number in a build directory configured earlier.
+### Player version, one line in .version beside this file
+### Configure dependency, editing .version reruns CMake on the following build
 set(US_VERSION_FILE ${CMAKE_CURRENT_LIST_DIR}/.version)
 if(EXISTS ${US_VERSION_FILE})
   file(STRINGS ${US_VERSION_FILE} US_PLAYER_VERSION LIMIT_COUNT 1)
@@ -51,40 +50,32 @@ message(STATUS "USBSID-Player version: ${US_PLAYER_VERSION}")
 ### Target selection, mutually exclusive
 set(DESKTOP 1 CACHE STRING "Build the desktop command line player")
 set(EMBEDDED 0 CACHE STRING "Build for the RP2350 firmware")
-### The browser player. A sub variant of DESKTOP: the emulation is the same
-### code, only the SID backend differs (a heap ring the page drains, instead of
-### libusb). Configure it with `emcmake cmake -S . -B build-web -DWEB=1`, or run
-### `./build.sh web`, which does that and then copies the result where the
-### config tool expects it.
+### Browser player, a sub variant of DESKTOP (same emulation code, other SID backend)
+### emcmake cmake -S . -B build-web -DWEB=1 or ./build.sh web, which also copies the result for the config tool
 set(WEB 0 CACHE STRING "Build the WebAssembly player")
 ### Tests, desktop only
 set(BUILD_TESTS 1 CACHE STRING "Build the test suite")
-### Per cycle counters saying which chip is costing the time. Off by default:
-### they are plain increments on the hottest path there is. See
-### src/util/profile.h and temp/tools/dbg_cost.cpp.
+### Per cycle counters for the cost per chip. Off by default, plain increments on the hottest path
+### See src/util/profile.h and temp/tools/dbg_cost.cpp
 set(PROFILE 0 CACHE STRING "Build with the per cycle profiling counters")
 ### Warnings as errors
 set(STRICT 1 CACHE STRING "Treat warnings as errors")
-### Fail the configure when software audio cannot be built, instead of quietly
-### producing a player without it. For releases and CI. See the reSIDfp block.
+### Fail the configure when software audio cannot be built (releases and CI). See the reSIDfp block
 set(REQUIRE_AUDIO 0 CACHE STRING "Refuse to configure without software audio")
 
-### Use ymfm (lib/ymfm, YM3812) instead of Nuked-OPL3-fast as the FM/OPL engine.
-### Command line only: the web and embedded builds always keep Nuked, so the
-### browser player and the default CLI stay on one engine. Run
-### `./build.sh cli-ymfm`, which configures this into its own build directory.
+### Use ymfm (lib/ymfm, YM3812) as FM/OPL engine, command line only
+### Web and embedded builds keep Nuked. ./build.sh cli-ymfm configures it in its own build directory
 set(FM_YMFM 0 CACHE STRING "Use ymfm instead of Nuked-OPL3-fast for FM/OPL (CLI only)")
 
-### Compile the stock Commodore BASIC, KERNAL and character ROMs in. With 0 the
-### build carries no Commodore code: tunes start on the stub KERNAL
-### (src/mem/roms/stub_kernal.cpp) and real images can be supplied at runtime
-### (usplayer_set_roms()). BASIC programs without a SYS line need them.
+### Compile the stock Commodore BASIC, KERNAL and character ROMs in
+### With 0 tunes start on the stub KERNAL (src/mem/roms/stub_kernal.cpp), real images via usplayer_set_roms()
+### BASIC programs without a SYS line need them
 set(EMBED_ROMS 1 CACHE STRING "Compile the stock C64 ROM images in")
 
 if(${WEB} EQUAL 1)
   set(DESKTOP 1)
   set(EMBEDDED 0)
-  set(BUILD_TESTS 0) ### the suite is native, it does not cross compile
+  set(BUILD_TESTS 0) ### the suite is native only
 endif()
 
 if(${FM_YMFM} EQUAL 1 AND (${WEB} EQUAL 1 OR ${EMBEDDED} EQUAL 1))
@@ -102,17 +93,14 @@ if(${DESKTOP} EQUAL 0 AND ${EMBEDDED} EQUAL 0)
   message(FATAL_ERROR "Please set either DESKTOP or EMBEDDED to 1! Exiting...")
 endif()
 
-### Default to an optimised build. -O3 is a hard requirement for the embedded
-### player, and the desktop build wants it too so both run the same code paths.
+### Default to an optimised build, -O3 is required for the embedded player and used on desktop too
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
-### NDEBUG as in CMake's own Release flags: vendored reSIDfp asserts are debug
-### checks, upstream ships without them. In wasm a failed one aborts the module.
+### NDEBUG as in the Release flags, reSIDfp asserts are debug checks and abort the wasm module
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -g -DNDEBUG")
 set(CMAKE_C_FLAGS_RELEASE "-O3 -g -DNDEBUG")
-### Debug info in a wasm module is DWARF that has to be downloaded, and the
-### page has no debugger attached to it in normal use. Build it without.
+### No debug info in wasm, DWARF has to be downloaded
 if(${WEB} EQUAL 1)
   set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
   set(CMAKE_C_FLAGS_RELEASE "-O3 -DNDEBUG")
@@ -120,8 +108,7 @@ endif()
 
 project(${PROJECT_NAME} C CXX ASM)
 
-### EMSCRIPTEN only exists once the toolchain file has run, which is during
-### project(), so this cannot be checked any earlier.
+### EMSCRIPTEN only exists after the toolchain file ran in project()
 if(${WEB} EQUAL 1 AND NOT EMSCRIPTEN)
   message(FATAL_ERROR
     "WEB=1 needs the Emscripten toolchain: configure with 'emcmake cmake ...'. Exiting...")
@@ -147,23 +134,13 @@ set(US_COMPILE_DEFS
   US_EMBED_ROMS=${EMBED_ROMS}
 )
 
-### reSIDfp, vendored in lib/residfp from the libsidplayfp release tarball.
-###
-### Vendored and not the system libresidfp, on purpose. The system one here is
-### 1.0.0 and the source release is 1.2.1, and shipping both would mean the
-### command line player and the browser run different SID engines: the same tune
-### would not sound the same, in a project that pins a write stream hash
-### precisely so that sort of thing cannot happen quietly. Compiling one copy for
-### every target also means no package to install on any of the four release
-### platforms, and a wasm build has to compile from source anyway.
-###
-### Two headers are generated by autoconf upstream. configure_file does the same
-### eight substitutions, so no autotools are needed to build this.
-###
-### Compiled from a patched copy in the build tree, never from lib/residfp
-### itself: patches/residfp/*.patch holds the local changes, see its README.md.
-### The copy directory is named by a hash of the patches and the sources, a
-### change gets a fresh copy and nothing is deleted.
+### reSIDfp, vendored in lib/residfp from the libsidplayfp release tarball
+### System libresidfp is 1.0.0 and the source release is 1.2.1, CLI and browser must run the same SID engine
+### One copy for every target needs no package on the four release platforms, wasm compiles from source anyway
+### Two headers generated by autoconf upstream are made with configure_file (eight substitutions)
+### Compiled from a patched copy in the build tree, lib/residfp is not touched
+### Local changes are in patches/residfp/*.patch, see its README.md
+### Copy directory is named by a hash of the patches and sources, nothing is deleted
 set(US_RESIDFP_SRC ${CMAKE_CURRENT_LIST_DIR}/lib/residfp)
 set(US_RESIDFP_GEN ${CMAKE_CURRENT_BINARY_DIR}/residfp-generated)
 set(US_RESIDFP_DIR ${US_RESIDFP_SRC})
@@ -174,7 +151,7 @@ if(EXISTS ${US_RESIDFP_SRC}/siddefs-fp.h.in)
   file(GLOB_RECURSE US_RESIDFP_UPSTREAM LIST_DIRECTORIES false
        RELATIVE ${US_RESIDFP_SRC} ${US_RESIDFP_SRC}/*)
   list(SORT US_RESIDFP_UPSTREAM)
-  ### Reconfigure when a patch or an upstream file changes.
+  ### Reconfigure when a patch or upstream file changes
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${US_RESIDFP_PATCHES})
   set(US_RESIDFP_KEY "")
   foreach(f ${US_RESIDFP_UPSTREAM})
@@ -209,8 +186,7 @@ if(EXISTS ${US_RESIDFP_SRC}/siddefs-fp.h.in)
           WORKING_DIRECTORY ${US_RESIDFP_DIR}
           RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE err)
       else()
-        ### The build tree may sit inside this repository: stop git looking
-        ### above the copy, or the patch paths resolve against the repo root.
+        ### Stop git looking above the copy, patch paths would resolve against the repo root
         execute_process(
           COMMAND ${CMAKE_COMMAND} -E env
                   GIT_CEILING_DIRECTORIES=${CMAKE_CURRENT_BINARY_DIR}/residfp-patched
@@ -235,8 +211,7 @@ if(EXISTS ${US_RESIDFP_DIR}/siddefs-fp.h.in)
   set(LIB_MAJOR 1)
   set(LIB_MINOR 2)
   set(LIB_LEVEL 1)
-  ### Every compiler this builds with (gcc, clang, emcc) has __builtin_expect,
-  ### and the branch hints are what reSIDfp's hot paths are written around.
+  ### gcc, clang and emcc have __builtin_expect, the reSIDfp hot paths use the branch hints
   set(HAVE_BUILTIN_EXPECT 1)
   set(RESIDFP_BRANCH_HINTS 1)
   set(RESIDFP_INLINING 1)
@@ -252,21 +227,16 @@ if(EXISTS ${US_RESIDFP_DIR}/siddefs-fp.h.in)
        ${US_RESIDFP_DIR}/*.cpp
        ${US_RESIDFP_DIR}/residfp/*.cpp
        ${US_RESIDFP_DIR}/resample/*.cpp)
-  ### The tarball ships resample/test.cpp, a standalone program with its own
-  ### main(). Globbed in it collides with the player's. Filtered rather than
-  ### deleted from lib/, so re-vendoring a later release cannot bring it back.
+  ### The tarball ships resample/test.cpp with its own main(), filtered out of the glob
+  ### Stays filtered when re-vendoring
   list(FILTER US_RESIDFP_SOURCES EXCLUDE REGEX "/test[^/]*\\.cpp$")
   set(US_RESIDFP_INCLUDE_DIRS
       ${US_RESIDFP_DIR} ${US_RESIDFP_DIR}/residfp ${US_RESIDFP_GEN})
   set(US_HAVE_RESIDFP 1)
   message(STATUS "Software audio: vendored reSIDfp ${PACKAGE_VERSION}")
 elseif(${REQUIRE_AUDIO} EQUAL 1)
-  ### Carrying on without software audio is right for a developer with an
-  ### incomplete tree and wrong for a release: it produces a player with no
-  ### --output=audio and no --output=wav, and a web bundle that cannot make a
-  ### sound, with nothing but a STATUS line to say so. Every CI build did exactly
-  ### that until the vendored sources were added to the repository. So the
-  ### workflows ask for it to be a hard error instead of a message nobody reads.
+  ### Without software audio a release has no --output=audio and --output=wav, only a STATUS line reports it
+  ### Workflows ask for a hard error
   message(FATAL_ERROR
     "REQUIRE_AUDIO=1 but lib/residfp is empty: no ${US_RESIDFP_DIR}/siddefs-fp.h.in. "
     "The vendored reSIDfp sources are part of the repository; a checkout that "
@@ -278,19 +248,13 @@ else()
   message(STATUS "Software audio: OFF, lib/residfp is empty")
 endif()
 
-### Nuked-OPL3-fast (tgies), a bit-exact perf fork of Nuke.YKT's Nuked OPL3
-### pinned to upstream 1.8 (commit cfedb09), the FM/OPL side of a SID+FM tune.
-### Three self contained files (opl3.c, opl3.h, wf_rom.h), LGPL-2.1-or-later,
-### vendored in lib/nukedopl for the same reason reSIDfp is: the command line
-### player and the browser have to run the *same* engine or the same tune
-### sounds different depending on where it is played. Only ever built beside
-### software audio: with no reSIDfp there is nothing to mix it into, and the
-### embedded target sends FM writes to a real chip on the board.
+### Nuked-OPL3-fast (tgies), bit-exact fork of Nuked OPL3 pinned to upstream 1.8 (commit cfedb09)
+### FM/OPL side of a SID+FM tune. Three files (opl3.c, opl3.h, wf_rom.h), LGPL-2.1-or-later, vendored in lib/nukedopl
+### CLI and browser run the same engine. Only built beside software audio, embedded sends FM writes to the real chip
 set(US_NUKEDOPL_DIR ${CMAKE_CURRENT_LIST_DIR}/lib/nukedopl)
-### ymfm (Aaron Giles, BSD-3-Clause), opt in with FM_YMFM=1. The YM3812 model is
-### used, which is the FM-YAM chip; the SFX Sound Expander's YM3526 is register
-### compatible with it. ymfm_opl.cpp includes ymfm_fm.ipp and also defines the
-### Y8950 and YMF278B, hence the adpcm and pcm sources.
+### ymfm (Aaron Giles, BSD-3-Clause), opt in with FM_YMFM=1
+### YM3812 model (FM-YAM), the YM3526 of the SFX Sound Expander is register compatible
+### ymfm_opl.cpp includes ymfm_fm.ipp and defines Y8950 and YMF278B too (adpcm and pcm sources needed)
 set(US_YMFM_DIR ${CMAKE_CURRENT_LIST_DIR}/lib/ymfm)
 set(US_YMFM_SOURCES
   ${US_YMFM_DIR}/ymfm_opl.cpp
@@ -326,9 +290,8 @@ else()
   set(US_HAVE_FM 0)
 endif()
 
-### RtMidi, used as output for ASID compatible devices
-### 4 files are vendored into the repository, 1 source file, 2 headers and
-### the license file from the RtMidi repository at https://github.com/thestk/rtmidi
+### RtMidi, output for ASID compatible devices
+### Vendored: 1 source file, 2 headers and the license file from https://github.com/thestk/rtmidi
 set(US_RTMIDI_DIR ${CMAKE_CURRENT_LIST_DIR}/lib/rtmidi)
 if(EXISTS ${US_RTMIDI_DIR}/RtMidi.cpp)
   set(US_RTMIDI_SOURCES
@@ -342,8 +305,7 @@ else()
   set(US_HAVE_RTMIDI 0)
 endif()
 
-### Core library. Everything except the frontends lives here so the tests, the
-### CLI and the embedded API all link identical objects.
+### Core library with everything except the frontends. Tests, CLI and embedded API link the same objects
 set(US_CORE_SOURCES
   ${CMAKE_CURRENT_LIST_DIR}/src/api/usplayer.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/sid/sid_voice3.cpp
@@ -361,8 +323,7 @@ set(US_CORE_SOURCES
   ${CMAKE_CURRENT_LIST_DIR}/src/file/prgfile.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/file/sidfile.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/file/songlengths.cpp
-  ### The firmware hook pointers, in every build: the web one does not
-  ### compile the embedded backend but still reaches for the clock.
+  ### Firmware hook pointers in every build, web reaches for the clock without the embedded backend
   ${CMAKE_CURRENT_LIST_DIR}/src/sid/firmware_hooks.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/player/pacing.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/player/player.cpp
@@ -377,17 +338,13 @@ else()
   message(STATUS "C64 ROMs: none compiled in, stub KERNAL until supplied at runtime")
 endif()
 
-### Which SID backend the C API is compiled against. The embedded one binds to
-### the firmware's bus functions through weak symbols, and an undefined weak
-### function under wasm-ld is not reliably null, so the web build leaves it out
-### altogether rather than linking it and trusting a null check. The desktop
-### build takes both, because the test suite exercises the web ring natively.
+### SID backend the C API is compiled against
+### Embedded binds to firmware bus functions via weak symbols, an undefined weak function is not reliably null under wasm-ld
+### Web leaves it out, desktop takes both (tests use the web ring natively)
 if(${WEB} EQUAL 1)
   list(APPEND US_CORE_SOURCES ${CMAKE_CURRENT_LIST_DIR}/src/sid/sid_web.cpp)
-  ### Software audio in the browser. The same backend the CLI uses, compiled to
-  ### wasm along with the vendored reSIDfp, so the page can make sound with no
-  ### board at all. The write ring above stays: a page can drive hardware, make
-  ### its own sound, or both, and the choice is made at runtime.
+  ### Software audio in the browser, same backend as the CLI compiled to wasm with reSIDfp
+  ### The write ring above stays, a page can drive hardware, make sound or both (chosen at runtime)
   if(US_HAVE_RESIDFP)
     list(APPEND US_CORE_SOURCES
       ${CMAKE_CURRENT_LIST_DIR}/src/sid/sid_residfp.cpp
@@ -421,8 +378,7 @@ set(US_CORE_INCLUDE_DIRS
 if(${WEB} EQUAL 1 AND US_HAVE_RESIDFP)
   list(APPEND US_CORE_INCLUDE_DIRS ${US_RESIDFP_INCLUDE_DIRS})
 endif()
-### The FM headers are needed wherever sid_residfp.h is included, which on the
-### desktop is the CLI rather than the core library.
+### FM headers are needed wherever sid_residfp.h is included (the CLI on desktop)
 if(US_HAVE_FM)
   list(APPEND US_CORE_INCLUDE_DIRS ${US_FM_INCLUDE_DIRS})
 endif()
@@ -431,8 +387,7 @@ if(US_HAVE_RTMIDI)
   list(APPEND US_CORE_INCLUDE_DIRS ${US_RTMIDI_INCLUDE_DIR})
 endif()
 
-### The playback session for interactive frontends (src/host/session.h). It
-### runs an engine thread, which the browser build has none of.
+### Playback session for interactive frontends (src/host/session.h), runs an engine thread (not in the browser build)
 if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
   list(APPEND US_CORE_SOURCES ${CMAKE_CURRENT_LIST_DIR}/src/host/session.cpp)
   list(APPEND US_CORE_INCLUDE_DIRS ${CMAKE_CURRENT_LIST_DIR}/src/host)
@@ -444,48 +399,40 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
   find_package(Threads REQUIRED)
   target_link_libraries(usbsidcore PUBLIC Threads::Threads)
 endif()
-### -fno-rtti is a C++ flag, and reloc65.c is third party C that was never
-### written to today's warning settings, so it gets its own set.
+### -fno-rtti is C++ only, reloc65.c is third party C with its own warning set
 target_compile_options(usbsidcore PRIVATE
   $<$<COMPILE_LANGUAGE:CXX>:${US_COMPILE_OPTS}>)
 set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/src/driver/reloc65.c
   PROPERTIES COMPILE_OPTIONS "-Wall;-Wno-unused-parameter")
-### reSIDfp is vendored upstream code and is not held to this project's warning
-### settings, for the same reason reloc65.c is not: it was written to its own,
-### and -Werror on someone else's source turns a routine re-vendor into a
-### porting job. clang objects to its struct/class tag mismatches, which matter
-### only under the Microsoft C++ ABI and are harmless here.
+### reSIDfp is vendored upstream code, own warning set like reloc65.c
+### -Werror makes a re-vendor a porting job
+### clang objects to struct/class tag mismatches, only relevant for the Microsoft C++ ABI
 if(US_HAVE_FM)
-  ### Nuked OPL3 is upstream C and was not written to this project's warnings,
-  ### for the same reason reloc65.c and reSIDfp are not held to them.
+  ### Nuked OPL3 is upstream C, own warning set like reloc65.c and reSIDfp
   set_source_files_properties(${US_NUKEDOPL_DIR}/opl3.c PROPERTIES COMPILE_OPTIONS "-w")
-  ### ymfm is upstream C++ held to its own warning settings, same as the above.
+  ### ymfm is upstream C++, own warning set
   set_source_files_properties(${US_YMFM_SOURCES} PROPERTIES COMPILE_OPTIONS "-w")
 endif()
 if(US_HAVE_RESIDFP)
   set_source_files_properties(${US_RESIDFP_SOURCES} PROPERTIES COMPILE_OPTIONS "-w;-fexceptions")
-  ### Filter tables built on one thread, every build (USP_NO_THREADS vendor patch
-  ### in FilterModelConfig*.cpp). wasm has no std::thread without -pthread, which
-  ### needs SharedArrayBuffer with COOP/COEP headers this project does not
-  ### require. Natively, the six table threads share one dither noise sequence
-  ### (FilterModelConfig::rnd) and race on it: the tables, and the audio, differ
-  ### from run to run. One thread costs a few ms, once per process.
+  ### Filter tables on one thread in every build (USP_NO_THREADS vendor patch in FilterModelConfig*.cpp)
+  ### wasm has no std::thread without -pthread (needs SharedArrayBuffer with COOP/COEP)
+  ### The six native table threads share one dither noise sequence (FilterModelConfig::rnd) and race on it
+  ### One thread costs a few ms, once per process
   set_source_files_properties(${US_RESIDFP_SOURCES}
     PROPERTIES COMPILE_DEFINITIONS "USP_NO_THREADS=1")
 endif()
 target_compile_definitions(usbsidcore PUBLIC ${US_COMPILE_DEFS})
-### opl_chip.h is included from the CLI target too, so this has to be PUBLIC.
+### opl_chip.h is included from the CLI target too, must be PUBLIC
 target_compile_definitions(usbsidcore PUBLIC US_FM_YMFM=${FM_YMFM})
 
-### The desktop player. Which USBSID driver it builds against is worked out
-### below: lib/driver by default and always in CI, a local working copy when
-### US_DRIVER_SIBLING says so.
+### Desktop player. The driver it builds against is set below
+### lib/driver by default and always in CI, a local working copy with US_DRIVER_SIBLING
 if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
   find_package(PkgConfig REQUIRED)
   pkg_check_modules(libusb REQUIRED IMPORTED_TARGET libusb-1.0)
   set(US_LINK_LIBS PkgConfig::libusb)
-  ### MSYS2/MinGW: pkg-config resolves to libusb-1.0.dll.a (the DLL import
-  ### library), so name the static archive instead.
+  ### MSYS2/MinGW: pkg-config gives libusb-1.0.dll.a (DLL import library), name the static archive
   if(MINGW)
     find_library(US_LIBUSB_STATIC NAMES libusb-1.0.a HINTS ${libusb_LIBRARY_DIRS})
     if(US_LIBUSB_STATIC)
@@ -498,31 +445,14 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
     list(APPEND US_LINK_LIBS PkgConfig::udev)
   endif()
 
-  ### Which USBSID driver to build against.
-  ###
-  ### Two knobs, both passed on the cmake line, and nothing about the workspace
-  ### layout is assumed here. Neither has to be set: with both empty this builds
-  ### against `lib/driver`. Locally that is a symlink to the driver working copy;
-  ### in CI the workflows check the driver out into it.
-  ###
-  ###   US_DRIVER_SIBLING  a driver working copy to use instead of
-  ###                      lib/driver. Rarely needed now that lib/driver is not a
-  ###                      pinned submodule, and kept for building against a
-  ###                      second checkout. **Ignored in GitHub Actions**.
-  ###   US_DRIVER_DIR      build against exactly this directory and do not work
-  ###                      anything out. Wins over everything, CI included.
-  ###
-  ### In GitHub Actions `US_DRIVER_SIBLING` is ignored even if it is passed: a
-  ### runner has no local checkout, and the workflows put the driver in
-  ### lib/driver themselves rather than taking a path from a workstation.
-  ### `GITHUB_ACTIONS` is set to true by every Actions runner, so that is the
-  ### signal rather than something the workflows have to remember to pass.
-  ### STRING and not PATH on purpose. CMake's PATH cache type rewrites a relative
-  ### value to an absolute one against the directory cmake happened to be invoked
-  ### from, which makes `-DUS_DRIVER_SIBLING=../driver-repo/src` mean different
-  ### things depending on where it was run. As STRING the value arrives here as it
-  ### was written and is resolved below against this file, so it means the same
-  ### thing from anywhere.
+  ### Which USBSID driver to build against
+  ### Neither knob has to be set, both empty builds against lib/driver
+  ### Locally lib/driver is a symlink to the driver working copy, in CI the workflows check the driver out into it
+  ###   US_DRIVER_SIBLING  driver working copy, overrides lib/driver (ignored in GitHub Actions)
+  ###   US_DRIVER_DIR      build against exactly this directory, wins over everything incl. CI
+  ### GITHUB_ACTIONS is true on every Actions runner, that is the signal for ignoring US_DRIVER_SIBLING
+  ### STRING and not PATH, the PATH cache type makes a relative value absolute against the cwd of cmake
+  ### As STRING the value arrives as written and is resolved below against this file
   set(US_DRIVER_DIR "" CACHE STRING
     "Directory holding USBSID.cpp. Overrides everything, including in CI. Empty to work it out")
   set(US_DRIVER_SIBLING "" CACHE STRING
@@ -533,21 +463,17 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
       ${US_DRIVER_DIR} ABSOLUTE BASE_DIR ${CMAKE_CURRENT_LIST_DIR})
     set(US_DRIVER_WHY "asked for with -DUS_DRIVER_DIR")
   elseif(DEFINED ENV{GITHUB_ACTIONS})
-    set(US_DRIVER_WHY "GitHub Actions, so lib/driver as the workflow checked it out")
+    set(US_DRIVER_WHY "GitHub Actions, lib/driver as the workflow checked it out")
   elseif(NOT US_DRIVER_SIBLING STREQUAL "")
-    ### Relative is allowed and is resolved against this file, so
-    ### `-DUS_DRIVER_SIBLING=../driver-repo/src` means what it looks like from the
-    ### source tree wherever cmake was run from. ABSOLUTE rather than REALPATH, so
-    ### a path that reaches here through a symlink is kept as it was given.
+    ### A relative path is resolved against this file, -DUS_DRIVER_SIBLING=../driver-repo/src works from anywhere
+    ### ABSOLUTE and not REALPATH, a symlink path is kept as given
     get_filename_component(US_DRIVER_SIBLING_ABS
       ${US_DRIVER_SIBLING} ABSOLUTE BASE_DIR ${CMAKE_CURRENT_LIST_DIR})
     if(EXISTS ${US_DRIVER_SIBLING_ABS}/USBSID.cpp)
       set(US_DRIVER_DIR ${US_DRIVER_SIBLING_ABS})
       set(US_DRIVER_WHY "US_DRIVER_SIBLING")
     else()
-      ### Named outright and not there. Falling through to lib/driver would
-      ### build the wrong driver and say nothing, and a typo in a make.sh is
-      ### exactly the case this has to catch.
+      ### Named and not there, stop. Falling back to lib/driver would build the wrong driver silently
       message(FATAL_ERROR
         "US_DRIVER_SIBLING was given as\n"
         "    ${US_DRIVER_SIBLING}\n"
@@ -557,16 +483,12 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
         "  US_DRIVER_SIBLING empty to build against lib/driver.")
     endif()
   else()
-    set(US_DRIVER_WHY "no US_DRIVER_SIBLING, so lib/driver")
+    set(US_DRIVER_WHY "no US_DRIVER_SIBLING, lib/driver")
   endif()
 
-  ### Falling back to lib/driver, wherever its sources actually sit.
-  ###
-  ### USBSID-Pico-driver keeps its sources in src/ with java/, webusb/ and the
-  ### rest beside it, so a checkout of it gives lib/driver/src/, which is what
-  ### the workflows produce. A symlink pointed straight at that src/, which is
-  ### the local arrangement, gives lib/driver/. Take whichever is present
-  ### rather than assuming.
+  ### Fall back to lib/driver wherever its sources sit
+  ### A driver checkout gives lib/driver/src/ (workflows), a symlink straight at src/ gives lib/driver/ (local)
+  ### Take whichever is present
   if(US_DRIVER_DIR STREQUAL "")
     set(US_DRIVER_ROOT ${CMAKE_CURRENT_LIST_DIR}/lib/driver)
     if(EXISTS ${US_DRIVER_ROOT}/src/USBSID.cpp)
@@ -587,10 +509,8 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
       "  Locally, lib/driver is a symlink to the driver working copy:\n"
       "    ln -s ../../driver-repo/src lib/driver")
   endif()
-  ### The board backend drives every board through USBSID_Manager, which the
-  ### driver has carried beside USBSID.cpp since multiboard support. A driver
-  ### checkout older than that has USBSID.cpp only: stop with that said
-  ### rather than at link time.
+  ### The board backend drives boards through USBSID_Manager, carried beside USBSID.cpp since multiboard support
+  ### An older driver checkout has USBSID.cpp only, stop at configure and not at link time
   if(NOT EXISTS ${US_DRIVER_DIR}/USBSID_Manager.cpp)
     message(FATAL_ERROR
       "The USBSID driver at\n"
@@ -600,17 +520,10 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
   endif()
   message(STATUS "USBSID driver sources: ${US_DRIVER_DIR} (${US_DRIVER_WHY})")
 
-  ### Software audio: reSIDfp for the synthesis, miniaudio for the device.
-  ###
-  ### Found if present rather than REQUIRED, deliberately. The release matrix is
-  ### four platforms including MSYS2/UCRT64, and making libresidfp a hard
-  ### dependency of the CLI would break a build on any of them that does not have
-  ### it, for a feature that is not why most people run this. When it is missing
-  ### the binary is the same binary, and `--output=audio|wav` says it was not
-  ### compiled in instead of failing to link.
-  ###
-  ### miniaudio is vendored (lib/miniaudio), so it is always available and needs
-  ### no package anywhere. It is public domain or MIT-0, which sits inside GPLv2.
+  ### Software audio: reSIDfp for synthesis, miniaudio for the device
+  ### reSIDfp is optional, the release matrix has four platforms incl. MSYS2/UCRT64
+  ### Without it the binary is the same and --output=audio|wav says it was not compiled in
+  ### miniaudio is vendored (lib/miniaudio), public domain or MIT-0, fits GPLv2
   set(US_SOFTSID_SOURCES "")
   if(US_HAVE_RESIDFP)
     set(US_SOFTSID_SOURCES
@@ -622,18 +535,15 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
     )
   endif()
 
-  ### Network SID Device client backend (--output netdevice). BSD sockets on
-  ### Linux/macOS, Winsock2 on Windows (src/sid/net_compat.h); see
-  ### US_HAVE_NETDEVICE below and its guards in main_cli.cpp.
+  ### Network SID Device client backend (--output netdevice), BSD sockets on Linux/macOS, Winsock2 on Windows (src/sid/net_compat.h)
+  ### See US_HAVE_NETDEVICE below and its guards in main_cli.cpp
   set(US_HAVE_NETDEVICE 1)
   set(US_NETDEVICE_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/src/sid/sid_netdevice.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/host/session_net.cpp)
 
-  ### RtMidi backend per real platform (WINDOWS_COMPILE on Windows,
-  ### UNIX_COMPILE on Linux and macOS; both only read by RtMidi.cpp).
-  ### Midi ASID backend (--output asid) requires ALSA on Linux
-  ### Linux ALSA, macOS CoreMIDI, Windows WinMM; set on the target below.
+  ### RtMidi backend per platform (WINDOWS_COMPILE on Windows, UNIX_COMPILE on Linux and macOS, only read by RtMidi.cpp)
+  ### Midi ASID backend (--output asid): ALSA on Linux, CoreMIDI on macOS, WinMM on Windows. Set on the target below
   if(US_HAVE_RTMIDI)
     list(APPEND US_RTMIDI_SOURCES
       ${CMAKE_CURRENT_LIST_DIR}/src/sid/sid_asid.cpp)
@@ -682,17 +592,14 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
     endif()
   endif()
   target_compile_definitions(${EXECUTABLE} PRIVATE US_PLAYER_VERSION="${US_PLAYER_VERSION}")
-  ### std::thread (sid_netdevice.cpp's sender thread) needs this on every
-  ### platform, reSIDfp or not - it used to ride in on reSIDfp's own Linux
-  ### only need for it, which left it unlinked on a build with neither.
+  ### std::thread (sid_netdevice.cpp sender thread) needs this on every platform
   find_package(Threads REQUIRED)
   target_link_libraries(${EXECUTABLE} PRIVATE Threads::Threads)
   if(WIN32)
     target_link_libraries(${EXECUTABLE} PRIVATE ws2_32)
   endif()
-  ### MSYS2/MinGW: link libstdc++, libgcc, winpthread and libusb (libusb-1.0.a)
-  ### statically, so usplayer.exe starts without the MSYS2 DLLs beside it or on
-  ### PATH (a missing DLL exits 0xC0000135 before main, with no output).
+  ### MSYS2/MinGW: link libstdc++, libgcc, winpthread and libusb (libusb-1.0.a) statically
+  ### usplayer.exe then starts without the MSYS2 DLLs (a missing DLL exits 0xC0000135 before main)
   if(MINGW)
     target_link_options(${EXECUTABLE} PRIVATE -static -static-libgcc -static-libstdc++)
   endif()
@@ -702,15 +609,14 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
   endif()
   ### the driver is third party and predates these warning settings
   target_compile_options(${EXECUTABLE} PRIVATE -Wall -fno-rtti)
-  ### Only the file name is usplayer (usplayer.exe); the target stays ${EXECUTABLE}.
-  ### A custom -DEXECUTABLE (the ymfm build) keeps its own file name.
+  ### Only the file name is usplayer (usplayer.exe), the target stays ${EXECUTABLE}
+  ### A custom -DEXECUTABLE (ymfm build) keeps its name
   if(EXECUTABLE STREQUAL PROJECT_NAME)
     set_target_properties(${EXECUTABLE} PROPERTIES OUTPUT_NAME usplayer)
   endif()
 endif()
 
-### The browser player. No libusb, no CLI, no threads: one wasm module and the
-### flat C ABI in src/host/web_api.cpp. The page in web/ drives it.
+### Browser player: one wasm module with the flat C ABI in src/host/web_api.cpp, driven by the page in web/
 if(${WEB} EQUAL 1)
   add_executable(${EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/src/host/web_api.cpp)
   target_link_libraries(${EXECUTABLE} PRIVATE usbsidcore)
@@ -778,13 +684,8 @@ if(${WEB} EQUAL 1)
   set_target_properties(${EXECUTABLE} PROPERTIES SUFFIX ".js")
   target_link_options(${EXECUTABLE} PRIVATE ${US_WEB_LINK_OPTS})
 
-  ### The same thing again as an ES module, for the worker.
-  ###
-  ### A module worker cannot importScripts, and the classic output above is a
-  ### script rather than a module, so the worker cannot load it. Building both
-  ### is cheaper than the alternatives: the page keeps the classic script it
-  ### already loads, and the worker gets something it can `import`. They are the
-  ### same objects, only the wrapper differs.
+  ### Same as an ES module for the worker
+  ### A module worker cannot importScripts the classic script, build both (same objects, other wrapper)
   add_executable(${EXECUTABLE}_esm ${CMAKE_CURRENT_LIST_DIR}/src/host/web_api.cpp)
   target_link_libraries(${EXECUTABLE}_esm PRIVATE usbsidcore)
   target_compile_options(${EXECUTABLE}_esm PRIVATE ${US_COMPILE_OPTS})
@@ -792,21 +693,14 @@ if(${WEB} EQUAL 1)
     OUTPUT_NAME "${EXECUTABLE}" SUFFIX ".mjs")
   target_link_options(${EXECUTABLE}_esm PRIVATE ${US_WEB_LINK_OPTS} "-sEXPORT_ES6=1")
 
-  ### The two targets emit the *same* ${EXECUTABLE}.wasm beside their wrapper,
-  ### so linking them at once is two writers on one file: a parallel
-  ### incremental rebuild can produce an empty (eight byte) module while both
-  ### still report link success. Ordering them costs nothing, the link takes
-  ### seconds, and the bytes are the same either way, which is what
-  ### `web_smoke.mjs --esm` checks.
+  ### Both targets emit the same ${EXECUTABLE}.wasm, linking at once gives two writers on one file
+  ### A parallel incremental rebuild can produce an empty (eight byte) module, order them
+  ### web_smoke.mjs --esm checks the bytes
   add_dependencies(${EXECUTABLE}_esm ${EXECUTABLE})
 
-  ### Put the artefacts next to the page that loads them.
-  ###
-  ### web/ is then self contained: it can be served, zipped or copied to
-  ### another site's directory without dragging a build tree behind it, and
-  ### demo.html and bench.html load `./usbsid.js` rather than reaching up into
-  ### a build directory that may or may not be where they last looked.
-  ### The three copied files are generated, so .gitignore drops them.
+  ### Put the artefacts beside the page that loads them
+  ### web/ is self contained, demo.html and bench.html load ./usbsid.js
+  ### The three copied files are generated, .gitignore drops them
   set(US_WEB_OUT ${CMAKE_CURRENT_LIST_DIR}/web)
   add_custom_command(TARGET ${EXECUTABLE} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory ${US_WEB_OUT}
@@ -815,14 +709,9 @@ if(${WEB} EQUAL 1)
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
       $<TARGET_FILE_DIR:${EXECUTABLE}>/${EXECUTABLE}.wasm ${US_WEB_OUT}/
     COMMENT "Copying ${EXECUTABLE}.js and ${EXECUTABLE}.wasm into web/")
-  ### The ES module goes out twice, under both names.
-  ###
-  ### `.mjs` is the conventional extension and plenty of servers do not know
-  ### it: nginx's stock mime.types has no entry, so it is served as
-  ### application/octet-stream. A module script is strictly MIME checked, so
-  ### an `import()` of it is refused outright. The same bytes under a `.js`
-  ### name are served as JavaScript everywhere, and the module locates its
-  ### wasm relative to its own URL either way.
+  ### The ES module goes out under both names
+  ### nginx has no mime.types entry for .mjs and serves application/octet-stream, import() refuses it
+  ### The same bytes as .js are served as JavaScript everywhere, the module finds its wasm relative to its URL
   add_custom_command(TARGET ${EXECUTABLE}_esm POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
       $<TARGET_FILE:${EXECUTABLE}_esm> ${US_WEB_OUT}/
@@ -843,8 +732,7 @@ if(${DESKTOP} EQUAL 1 AND ${BUILD_TESTS} EQUAL 1)
     list(APPEND US_TEST_SOURCES ${CMAKE_CURRENT_LIST_DIR}/tests/test_${t}.cpp)
   endforeach()
 
-  ### One standalone executable per component, registered with CTest so a
-  ### failing step is named precisely
+  ### One standalone executable per component, registered with CTest
   foreach(t ${US_TEST_NAMES})
     add_executable(test_${t} ${CMAKE_CURRENT_LIST_DIR}/tests/test_${t}.cpp)
     target_link_libraries(test_${t} PRIVATE usbsidcore)
@@ -864,8 +752,7 @@ if(${DESKTOP} EQUAL 1 AND ${BUILD_TESTS} EQUAL 1)
     target_link_libraries(test_netdevice PRIVATE ws2_32)
   endif()
 
-  ### The ASID backend is CLI-only and not in usbsidcore. The test supplies
-  ### the RtMidi symbols itself (recording sink), RtMidi.cpp is not linked.
+  ### ASID backend is CLI-only and not in usbsidcore, the test supplies the RtMidi symbols (recording sink)
   if(US_HAVE_RTMIDI)
     foreach(t asid)
       target_sources(test_${t} PRIVATE

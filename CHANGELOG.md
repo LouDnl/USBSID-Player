@@ -1,6 +1,8 @@
 # Changelog
 Please refer to the [releases page](https://github.com/LouDnl/USBSID-Player/releases) for more information on version changes
 
+#### Version: Unreleased
+* Rewrite virtual Voice3 (thanks @WilfredC64)
 * Fix automatic tune stop when using SENDSID from WebSerial
 * Fix output selection for ASID
 * Fix environment and SID type not being sent from the web player

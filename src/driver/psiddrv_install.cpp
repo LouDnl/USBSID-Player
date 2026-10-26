@@ -1,14 +1,13 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * psiddrv_install.cpp
  *
- * The layout of the parameter block after the driver, and the order the
- * fields go in, follow old player ~ src/psiddrv/psid.cpp exactly. The driver
- * reads them from fixed offsets, so this is not a place to be creative.
+ * Parameter block layout and field order, the driver reads them from
+ * fixed offsets
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -41,36 +40,25 @@ namespace {
 /* The assembled driver, as an o65 relocatable object */
 #include "psiddrv.h"
 
-/* Where a cartridge signature has to live for the machine to autostart it */
+/* Cartridge signature address needed for autostart */
 constexpr addr_t kCbm80Addr = 0x8000;
 constexpr uint16_t kCbm80Size = 9;
 
 /**
- * @brief Install the autostart signature at $8000, keeping what was there.
+ * @brief Install the autostart signature at $8000 and back up what was there
  *
- * This is the part that is easy to get backwards, and getting it backwards is
- * silent: the nine bytes at `addr` are the driver's `cbm80` field, and the
- * driver's cold start copies them **to** $8000. They are a *backup*, not a
- * signature. What goes to $8000 is the signature, so that a machine coming out
- * of reset finds a cartridge there and jumps into the driver.
+ * The nine bytes at addr are the driver cbm80 field, the driver cold start
+ * copies them to $8000. They are a backup, the signature goes to $8000 (per
+ * byte save $8000 into the driver, then overwrite $8000)
  *
- * So the order per byte is: save $8000 into the driver, then overwrite $8000.
- * A tune whose image covers $8000 gets its own nine bytes back the moment the
- * driver starts. Writing the signature into the driver's field instead makes
- * the driver stamp a cartridge header over the first nine bytes of any tune
- * loaded at $8000, which is exactly as fatal as it sounds.
- *
- * Follows old player ~ src/psiddrv/psid.cpp psid_set_cbm80().
- *
- * @param vec   where the signature's cold start vector points
- * @param addr  the driver's backup field, reloc_addr + 12
- * @return how many bytes it took
+ * @param vec Cold start vector of the signature
+ * @param addr Driver backup field, reloc_addr + 12
  */
 uint16_t install_cbm80(Ram & ram, addr_t vec, addr_t addr)
 {
   const data_t cbm80[kCbm80Size] = {
     static_cast<data_t>(vec & 0xff), static_cast<data_t>(vec >> 8),
-    0x00, 0x00,                       /* the NMI vector, unused */
+    0x00, 0x00,                       /* NMI vector, unused */
     0xc3, 0xc2, 0xcd, 0x38, 0x30      /* "CBM80" in screen codes */
   };
 
@@ -89,30 +77,21 @@ bool psiddrv_install(Ram & ram, const SidFile & tune, uint16_t song,
 {
   if (!tune.valid || tune.data == nullptr) return false;
 
-  /* Where the driver may live. A file that declares a free page is believed;
-   * one that says nothing gets the page straight after its own image, not
-   * "anywhere free": the KERNAL's own cursor-blink interrupt writes through
-   * screen memory (page 4, the old fallback) and can overwrite a driver
-   * parked there, and relocating high toward $cf00 risks the stack page.
-   * The page directly above the tune's own image is what old player and
-   * psid64 both use. */
+  /* Driver page. A file that declares a free page is believed, else use the page
+   * after the tune image (old player and psid64 do the same). Page 4 is
+   * overwritten by the cursor blink and a high page risks the stack page */
   uint8_t start_page = tune.start_page;
   if (start_page == 0 || start_page == 0xff) {
     const addr_t image_end = (tune.load_last_addr != 0)
       ? tune.load_last_addr
       : static_cast<addr_t>(tune.load_addr + tune.data_size);
 
-    /* Which pages the driver may not have, following psid64 by way of
-     * emulator-repo's Loader::find_free_page():
-     *
-     *   $00-$03  zero page, the stack, and the KERNAL's workspace and vectors
+    /* Pages the driver may not have (psid64):
+     *   $00-$03  zero page, stack, KERNAL workspace and vectors
      *   $a0-$bf  BASIC ROM
-     *   $d0-$ff  I/O and the KERNAL
-     *   the tune's own image
-     *
-     * $c0-$cf (plain RAM between BASIC and I/O, under no ROM) is deliberately
-     * left free: a tune that loads high enough to leave nothing above $9f
-     * still has this gap rather than falling back to the screen page. */
+     *   $d0-$ff  I/O and KERNAL
+     *   the tune image
+     * $c0-$cf is left free (RAM between BASIC and I/O) */
     bool used[0x100];
     for (unsigned i = 0; i < 0x100; i++) used[i] = false;
     const auto mark = [&used](unsigned lo, unsigned hi) {
@@ -123,13 +102,9 @@ bool psiddrv_install(Ram & ram, const SidFile & tune, uint16_t song,
     mark(0xd0, 0xff);
     mark(tune.load_addr >> 8, image_end >> 8);
 
-    /* The driver is two pages, the same as psid64's minimal one. */
+    /* Driver is two pages, like the psid64 minimal one */
     constexpr unsigned kDriverPages = 2;
-    /* $0400-$07e7 is the default screen. The driver fits there and a tune that
-     * prints anything then writes over it, so it is the last choice rather than
-     * the first. psid64 reaches the same place from the other end: it looks for
-     * somewhere to put a screen first, and then puts the driver where the
-     * screen is not. */
+    /* $0400-$07e7 is the default screen, last choice for the driver */
     const auto is_screen = [](unsigned page) { return page >= 0x04 && page <= 0x07; };
 
     unsigned best = 0, best_len = 0;      /* largest gap clear of the screen */
@@ -141,8 +116,7 @@ bool psiddrv_install(Ram & ram, const SidFile & tune, uint16_t song,
       if (free_here) { if (run == 0) run_start = i; run++; continue; }
       if (run >= kDriverPages) {
         if (run > fallback_len) { fallback_len = run; fallback = run_start; }
-        /* Trim the screen off the front of a run rather than discarding it:
-         * a run of $04-$0f is perfectly good from $08 on. */
+        /* Trim the screen off the front of a run, $04-$0f is good from $08 */
         unsigned s = run_start, n = run;
         while (n > 0 && is_screen(s)) { s++; n--; }
         if (n >= kDriverPages && n > best_len) { best_len = n; best = s; }
@@ -158,7 +132,7 @@ bool psiddrv_install(Ram & ram, const SidFile & tune, uint16_t song,
   const addr_t reloc_addr = static_cast<addr_t>(start_page << 8);
   reloc_addr_out = reloc_addr;
 
-  /* Relocate a private copy: reloc65 rewrites the buffer in place. */
+  /* Relocate a private copy, reloc65 rewrites the buffer */
   data_t driver[sizeof(psid_driver)];
   memcpy(driver, psid_driver, sizeof(psid_driver));
 
@@ -176,7 +150,7 @@ bool psiddrv_install(Ram & ram, const SidFile & tune, uint16_t song,
     ram.dma_write(static_cast<addr_t>(tune.load_addr + i), tune.data[i]);
   }
 
-  /* The parameter block sits after the driver's JMP and its CBM80 vector */
+  /* Parameter block sits after the driver JMP and CBM80 vector */
   addr_t addr = static_cast<addr_t>(reloc_addr + 3 + 9 + 9);
 
   ram.dma_write(addr++, 0x00);
@@ -195,8 +169,7 @@ bool psiddrv_install(Ram & ram, const SidFile & tune, uint16_t song,
   ram.dma_write(addr++, static_cast<data_t>(tune.load_last_addr & 0xff));
   ram.dma_write(addr++, static_cast<data_t>(tune.load_last_addr >> 8));
 
-  /* The autostart signature goes in last, because the backup it takes has to
-   * hold whatever the tune put at $8000, not what was there before it loaded. */
+  /* Signature goes in last, the backup must hold what the tune put at $8000 */
   install_cbm80(ram, static_cast<addr_t>(reloc_addr + kPsidDrvEntryOffset),
                 static_cast<addr_t>(reloc_addr + kPsidDrvCbm80Offset));
 
@@ -214,8 +187,7 @@ void psiddrv_set_song(Ram & ram, addr_t reloc_addr, uint16_t song, bool is_pal)
   ram.dma_write(781, static_cast<data_t>(song - 1));
   ram.dma_write(782, static_cast<data_t>(song - 1));
 
-  /* Many tunes read the video standard from here, and it has to be set after
-   * the SID flag has been read. */
+  /* Many tunes read the video standard from $02a6, set after the SID flag is read */
   ram.dma_write(0x02a6, static_cast<data_t>(is_pal ? 1 : 0));
 }
 

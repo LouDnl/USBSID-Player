@@ -1,14 +1,12 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * mos6510.cpp
- * Cycle exact MOS 6510 core. Every state of the state machine below is
- * exactly one bus cycle, including the dummy reads and the dummy write of a
- * read-modify-write, because those are what the SID write timestamps and the
- * IO side effects depend on.
+ * Cycle exact MOS 6510 core, every state is one bus cycle
+ * (dummy reads and writes included)
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -46,16 +44,13 @@ constexpr addr_t kVectorNmi   = kAddrNmiVector;
 constexpr addr_t kVectorReset = kAddrResetVector;
 constexpr addr_t kVectorIrq   = kAddrIrqVector;
 
-/* The ANE/LXA "magic constant". On real hardware the value depends on the
- * chip and the temperature; $ee is the value most commonly measured, and the
- * Acid800 LXA test calibrates itself against whatever the CPU produces. */
+/* ANE/LXA magic constant, varies with chip and temperature, $ee is the most commonly measured */
 constexpr data_t kAneMagic = 0xee;
 
 /**
- * @brief The 256 entry decode table.
+ * @brief The 256 entry decode table
  *
- * All 256 opcodes are decoded: the 151 documented ones and the undocumented
- * ones a 6510 really executes. Only the twelve JAM/KIL opcodes stop the CPU.
+ * 151 documented and the undocumented opcodes, only the 12 JAM/KIL opcodes halt the CPU
  */
 constexpr std::array<OpcodeInfo, 256> make_opcode_table(void)
 {
@@ -199,10 +194,7 @@ constexpr std::array<OpcodeInfo, 256> make_opcode_table(void)
   set(0x24, Mode::Zp,  Kind::Read, Op::Bit);
   set(0x2c, Mode::Abs, Kind::Read, Op::Bit);
 
-  /* ------------------------------------------------------------------ *
-   * Undocumented opcodes. A 6510 executes all of these, and SID tunes
-   * and PRGs in the test suite do use them.
-   * ------------------------------------------------------------------ */
+  /* Undocumented opcodes */
 
   /* combined read-modify-write plus accumulator operation */
   struct IllegalRmwRow { uint8_t base; Op op; };
@@ -256,8 +248,7 @@ constexpr std::array<OpcodeInfo, 256> make_opcode_table(void)
   set(0x9b, Mode::AbsY, Kind::Write, Op::Tas); /* SP = A & X, then SHA */
   set(0xbb, Mode::AbsY, Kind::Read,  Op::Las); /* A = X = SP = mem & SP */
 
-  /* undocumented NOPs. They still read their operand, page crossing
-   * included, which is why they are Kind::Read and not Kind::Implied. */
+  /* Undocumented NOPs, they read their operand (page crossing included) */
   set(0x1a, Mode::Imp, Kind::Implied, Op::Nop);
   set(0x3a, Mode::Imp, Kind::Implied, Op::Nop);
   set(0x5a, Mode::Imp, Kind::Implied, Op::Nop);
@@ -285,7 +276,7 @@ constexpr std::array<OpcodeInfo, 256> make_opcode_table(void)
   set(0xdc, Mode::AbsX, Kind::Read, Op::Nop);
   set(0xfc, Mode::AbsX, Kind::Read, Op::Nop);
 
-  /* the JAM/KIL opcodes are left as Kind::Kil by the default fill:
+  /* JAM/KIL opcodes stay Kind::Kil from the default fill:
    * $02 $12 $22 $32 $42 $52 $62 $72 $92 $b2 $d2 $f2 */
 
   return t;
@@ -316,8 +307,7 @@ void Mos6510::reset(void)
   irq_sampled_ = nmi_sampled_ = take_interrupt_ = false;
   nmi_hijack_ = false;
 
-  /* Vector fetch without spending cycles. The cycle exact variant is
-   * trigger_reset(), which a real machine reset uses. */
+  /* Vector fetch without spending cycles, cycle exact variant is trigger_reset() */
   const data_t lo = read(kVectorReset);
   const data_t hi = read(kVectorReset + 1);
   pc_ = static_cast<addr_t>((hi << 8) | lo);
@@ -351,22 +341,19 @@ bool Mos6510::state_writes(State s)
 
 bool Mos6510::ba_allows_cycle(void)
 {
-  /* A read waits for the bus, a write does not. The three cycle grace a 6510
-   * famously keeps running after BA drops is not applied here: the VIC's own
-   * BA timing (rebuild_sprite_ba(), the bad line fetch at cycle 12/15)
-   * already accounts for it, so adding a second grace here double counts it,
-   * turning a rounding error into a hang on tunes that poll a CIA timer in a
-   * tight loop across a bad line. */
+  /* A read waits for the bus, a write does not
+   * 3 cycle BA grace is in the VIC BA timing
+   * (rebuild_sprite_ba(), bad line fetch at cycle 12/15),
+   * not in the CPU */
   if (US_LIKELY(bus_.ba())) return true;
   return state_writes(state_);
 }
 
 void Mos6510::sample_lines(void)
 {
-  /* Levels as of the end of this cycle, read straight off the bus.
-   * end_instruction() looks at these, which is one cycle old by then, so an
-   * interrupt asserted in the last cycle of an instruction is correctly taken
-   * only after the next one. */
+  /* Levels at the end of this cycle, end_instruction() sees
+   * them one cycle old. An interrupt asserted in the last
+   * cycle of an instruction is taken after the following one */
   irq_sampled_ = bus_.irq_asserted() && !flag(kFlagI);
   nmi_sampled_ = bus_.nmi_edge();
 }
@@ -447,9 +434,8 @@ data_t Mos6510::write_value(void)
     case Op::Stx: return x_;
     case Op::Sty: return y_;
     case Op::Sax: return static_cast<data_t>(a_ & x_);
-    /* The unstable stores AND the register with the high byte of the
-     * unindexed address plus one. That is why they are unusable in practice
-     * and why they need base_hi_ rather than the effective address. */
+    /* Unstable stores AND the register with the high byte of the
+     * unindexed address + 1 (base_hi_) */
     case Op::Sha:
       return static_cast<data_t>(a_ & x_ & (base_hi_ + 1));
     case Op::Shx:
@@ -495,8 +481,7 @@ data_t Mos6510::rmw_value(data_t value)
     case Op::Inc: result = static_cast<data_t>(value + 1); break;
     case Op::Dec: result = static_cast<data_t>(value - 1); break;
 
-    /* The combined undocumented operations take their N and Z from the
-     * accumulator side, not from the value written back. */
+    /* Combined undocumented operations take N and Z from the accumulator */
     case Op::Slo:
       set_flag(kFlagC, (value & 0x80) != 0);
       result = static_cast<data_t>(value << 1);
@@ -547,11 +532,10 @@ void Mos6510::compare(data_t reg, data_t value)
 }
 
 /**
- * @brief ADC, binary and BCD.
+ * @brief ADC, binary and BCD
  *
- * The decimal path follows the documented 6502 behaviour: the carry comes
- * from the decimal adjusted result, Z comes from the binary result, N and V
- * come from the intermediate before the final +$60 correction.
+ * Decimal: C from the adjusted result, Z from the binary result,
+ * N and V from the intermediate before the +$60 correction
  */
 void Mos6510::adc(data_t value)
 {
@@ -584,10 +568,9 @@ void Mos6510::adc(data_t value)
 }
 
 /**
- * @brief SBC, binary and BCD.
+ * @brief SBC, binary and BCD
  *
- * All flags come from the binary result, which is what the 6502 does; only
- * the accumulator value is decimal adjusted.
+ * All flags come from the binary result, only the accumulator is decimal adjusted
  */
 void Mos6510::sbc(data_t value)
 {
@@ -644,7 +627,7 @@ void Mos6510::finish_read(data_t value)
     case Op::Anc:
       a_ = static_cast<data_t>(a_ & value);
       set_nz(a_);
-      /* the carry ends up as a copy of the sign bit */
+      /* Carry is a copy of the sign bit */
       set_flag(kFlagC, (a_ & 0x80) != 0);
       break;
     case Op::Alr:
@@ -675,11 +658,10 @@ void Mos6510::finish_read(data_t value)
 }
 
 /**
- * @brief ARR, AND immediate followed by a rotate right with unusual flags.
+ * @brief ARR, AND immediate then rotate right
  *
- * Binary mode: C is bit 6 of the result and V is bit 6 xor bit 5.
- * Decimal mode: the nibbles are corrected separately and C comes from the
- * high nibble, which is the behaviour VICE and Altirra both implement.
+ * Binary mode: C is bit 6 of the result and V is bit 6 xor bit 5
+ * Decimal mode: nibbles are corrected separately and C comes from the high nibble
  */
 void Mos6510::arr(data_t value)
 {
@@ -764,7 +746,7 @@ void Mos6510::tick(void)
 
   switch (state_) {
 
-    /* ---- opcode fetch ------------------------------------------------- */
+    /* opcode fetch */
     case State::Fetch:
       if (US_UNLIKELY(take_interrupt_)) {
         take_interrupt_ = false;
@@ -784,9 +766,9 @@ void Mos6510::tick(void)
       decode_opcode(opcode_);
       break;
 
-    /* ---- addressing --------------------------------------------------- */
+    /* addressing */
     case State::ImpliedCycle:
-      read(pc_); /* dummy read of the next byte, pc does not move */
+      read(pc_); /* dummy read of the following byte, pc does not move */
       exec_implied();
       end_instruction();
       break;
@@ -844,7 +826,7 @@ void Mos6510::tick(void)
     }
 
     case State::AbsiFix:
-      /* The 6502 always reads from the not yet corrected address here */
+      /* Always reads from the not yet corrected address */
       data_ = read(addr_);
       if (page_crossed_) addr_ = static_cast<addr_t>(addr_ + 0x100);
       if (kind_ == Kind::Read && !page_crossed_) {
@@ -908,7 +890,7 @@ void Mos6510::tick(void)
       }
       break;
 
-    /* ---- operand access ------------------------------------------------ */
+    /* operand access */
     case State::ReadOperand:
       data_ = read(addr_);
       finish_read(data_);
@@ -917,8 +899,7 @@ void Mos6510::tick(void)
 
     case State::WriteOperand: {
       const data_t value = write_value();
-      /* When an unstable store crosses a page the stored value also replaces
-       * the high byte of the address it lands on. */
+      /* Unstable store crossing a page also replaces the high byte of the address */
       if (US_UNLIKELY(is_unstable_store(op_) && page_crossed_)) {
         addr_ = static_cast<addr_t>((value << 8) | (addr_ & 0x00ff));
       }
@@ -933,8 +914,7 @@ void Mos6510::tick(void)
       break;
 
     case State::RmwWriteOld:
-      /* The real chip writes the unmodified value back first. IO chips see
-       * that write, which is what makes INC $D019 style tricks work. */
+      /* Unmodified value is written back first (INC $D019 style tricks) */
       write(addr_, data_);
       data_ = rmw_value(data_);
       state_ = State::RmwWriteNew;
@@ -945,7 +925,7 @@ void Mos6510::tick(void)
       end_instruction();
       break;
 
-    /* ---- branches ------------------------------------------------------ */
+    /* branches */
     case State::BranchOffset:
       data_ = read(pc_++);
       if (!branch_taken()) {
@@ -976,7 +956,7 @@ void Mos6510::tick(void)
       end_instruction();
       break;
 
-    /* ---- JMP (indirect) ------------------------------------------------ */
+    /* JMP (indirect) */
     case State::JmpIndPtrLo:
       ptr_ = read(pc_++);
       state_ = State::JmpIndPtrHi;
@@ -993,7 +973,7 @@ void Mos6510::tick(void)
       break;
 
     case State::JmpIndVecHi:
-      /* The famous page wrap bug: the high byte comes from the same page */
+      /* Page wrap bug, high byte comes from the same page */
       addr_ = static_cast<addr_t>(
         addr_ | (read(static_cast<addr_t>((ptr_ & 0xff00) |
                                           ((ptr_ + 1) & 0x00ff))) << 8));
@@ -1001,7 +981,7 @@ void Mos6510::tick(void)
       end_instruction();
       break;
 
-    /* ---- JSR ----------------------------------------------------------- */
+    /* JSR */
     case State::JsrLo:
       addr_ = read(pc_++);
       state_ = State::JsrDummy;
@@ -1028,7 +1008,7 @@ void Mos6510::tick(void)
       end_instruction();
       break;
 
-    /* ---- RTS ----------------------------------------------------------- */
+    /* RTS */
     case State::RtsDummy:
       read(pc_);
       state_ = State::RtsStackDummy;
@@ -1056,7 +1036,7 @@ void Mos6510::tick(void)
       end_instruction();
       break;
 
-    /* ---- RTI ----------------------------------------------------------- */
+    /* RTI */
     case State::RtiDummy:
       read(pc_);
       state_ = State::RtiStackDummy;
@@ -1083,14 +1063,14 @@ void Mos6510::tick(void)
       end_instruction();
       break;
 
-    /* ---- stack --------------------------------------------------------- */
+    /* stack */
     case State::PushDummy:
       read(pc_);
       state_ = State::PushWrite;
       break;
 
     case State::PushWrite:
-      /* PHP always pushes with B and the unused bit set */
+      /* PHP pushes with B and the unused bit set */
       push(op_ == Op::Pha
              ? a_
              : static_cast<data_t>(p_ | kFlagU | kFlagB));
@@ -1119,7 +1099,7 @@ void Mos6510::tick(void)
       break;
     }
 
-    /* ---- interrupts and BRK -------------------------------------------- */
+    /* interrupts and BRK */
     case State::IntrDummy1:
       read(pc_);
       state_ = State::IntrDummy2;
@@ -1162,9 +1142,8 @@ void Mos6510::tick(void)
           (intr_type_ == IntrType::Brk ? kFlagB : 0)));
       }
       set_flag(kFlagI, true);
-      /* An NMI that arrives before the vector fetch steals the vector from a
-       * BRK or an IRQ. The flags already pushed keep the original B value,
-       * which is the well known "BRK swallowed by NMI" behaviour. */
+      /* NMI before the vector fetch takes the vector of a BRK or IRQ,
+       * pushed flags keep the original B */
       if (intr_type_ != IntrType::Nmi && intr_type_ != IntrType::Reset &&
           bus_.nmi_edge()) {
         nmi_hijack_ = true;

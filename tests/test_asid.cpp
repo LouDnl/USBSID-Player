@@ -1,12 +1,12 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * test_asid.cpp
- * The ASID MIDI backend: SysEx encoding checked byte for byte against the
- * decoder in the USBSID-Pico firmware (repo/src/asid.c).
+ * ASID MIDI backend tests, SysEx encoding checked against the firmware decoder
+ * (USBSID-Pico firmare: asid.c)
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -39,8 +39,7 @@
 
 #if defined(US_TEST_HAVE_ASID)
 
-/* The tests read and seed backend state directly, there is no other way to
- * put a capture sink behind RtMidiOut without touching the runtime code. */
+/* Tests read and seed backend state directly to put a capture sink behind RtMidiOut */
 #define private public
 #include "sid_asid.h"
 #undef private
@@ -51,20 +50,18 @@ namespace {
 
 typedef std::vector<unsigned char> Bytes;
 
-/* Every message the backend sent, in order. */
+/* Messages sent by the backend, in order */
 std::vector<Bytes> g_sent;
-/* Fake MIDI ports: how many exist, and which one the backend opened. */
+/* Fake MIDI ports ~ count and the one the backend opened */
 unsigned g_ports = 0;
 int g_opened = -1;
-/* RtMidiOut constructions and destructions, to prove nothing leaks. */
+/* RtMidiOut constructions and destructions, leak check */
 int g_midi_new = 0;
 int g_midi_del = 0;
 
 } /* namespace */
 
-/* The vendored RtMidi.cpp needs a platform MIDI API and a sequencer. The test
- * supplies the few RtMidi symbols the backend uses, with a MIDI API that
- * records every message instead of sending. */
+/* Test supplies the RtMidi symbols the backend uses, with a MIDI API that records messages */
 class CaptureApi : public MidiOutApi
 {
  public:
@@ -106,7 +103,7 @@ RtMidiOut::~RtMidiOut() throw() { delete rtapi_; g_midi_del++; }
 
 namespace {
 
-/* A backend with its MIDI port open on the capture sink. */
+/* Backend with its MIDI port open on the capture sink */
 struct Rig {
   ASIDBackend be;
   explicit Rig(int no_sids = 1)
@@ -118,12 +115,11 @@ struct Rig {
     be.midiout->openPort(0);
     be.port_is_open = true;
   }
-  /* Drop the messages sent so far. */
+  /* Clear the sent messages */
   void clear(void) { g_sent.clear(); }
 };
 
-/* Register order of an ASID message, copied from asid_sid_registers in the
- * firmware (repo/src/asid.h). Bits 22-27 are the control and shadow slots. */
+/* Register order of an ASID message, from asid_sid_registers in repo/src/asid.h ~ bits 22-27 = control and shadow slots */
 const uint8_t kFwRegs[28] = {
   0x00, 0x01, 0x02, 0x03, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0c, 0x0d,
   0x0e, 0x0f, 0x10, 0x11, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x04, 0x0b,
@@ -148,8 +144,7 @@ Bytes sid_msg(unsigned char addr, const std::vector<std::pair<int, int> > & w)
   return m;
 }
 
-/* Firmware decode of a SID message (handle_writeordered_asid_message), as
- * the ordered list of (register, value) writes. Payload starts after F0 2D xx. */
+/* Firmware decode of a SID message (handle_writeordered_asid_message) into (register, value) writes ~ payload starts after F0 2D xx */
 std::vector<std::pair<int, int> > fw_decode_sid(const Bytes & m)
 {
   std::vector<std::pair<int, int> > out;
@@ -168,8 +163,7 @@ std::vector<std::pair<int, int> > fw_decode_sid(const Bytes & m)
   return out;
 }
 
-/* Firmware decode of an FM message (handle_asid_fmoplmessage) into the flat
- * index/data byte list. Returns false when the firmware drops the message. */
+/* Firmware decode of an FM message (handle_asid_fmoplmessage) into a flat index/data byte list ~ returns false when dropped */
 bool fw_decode_fm(const Bytes & m, Bytes & regs)
 {
   const unsigned char * buf = &m[3];
@@ -194,7 +188,7 @@ bool fw_decode_fm(const Bytes & m, Bytes & regs)
   return true;
 }
 
-/* Parked FM/OPL ports as the player core addresses them: kMaxSids * 0x20. */
+/* Parked FM/OPL ports as addressed by the player core: kMaxSids * 0x20 */
 const addr_t kFmIndex = kMaxSids * 0x20;
 const addr_t kFmData  = kMaxSids * 0x20 + 0x10;
 
@@ -215,7 +209,7 @@ int test_closed_port(void)
     fm_write(be, 0x20, 0x01);
     US_CHECK_EQ_U(be.asid_flush(), 0, "flush without port returns 0");
     be.flush();
-    be.asid_close(); /* no-op, must not send a stop message */
+    be.asid_close(); /* no-op, no stop message */
   }
   US_CHECK_EQ_U(g_sent.size(), 0, "closed port sends nothing");
   return 0;
@@ -257,7 +251,7 @@ int test_failed_init_no_leak(void)
   }
   US_CHECK_EQ_U(g_midi_new, g_midi_del, "destructor after failed init leaks nothing");
   US_CHECK_EQ_U(g_sent.size(), 0, "no stop message for a port never opened");
-  /* A handle that exists but never opened is freed without a stop message. */
+  /* Handle that never opened is freed without a stop message */
   g_midi_new = 0;
   g_midi_del = 0;
   {
@@ -348,8 +342,7 @@ int test_environment_message(void)
     r.be.sendSIDEnvironment(true);
     US_CHECK_EQ_U(g_sent.size(), 1, "PAL env sent");
     if (g_sent.size() == 1) {
-      /* settings 0x00: PAL bit0 clear, speed field 0 (1x).
-       * framedelta 19950 us = 0x6e, 0x1b, 0x01 in 7+7+2 bit groups */
+      /* settings 0x00 = PAL, speed 1x. framedelta 19950 us = 0x6e, 0x1b, 0x01 in 7+7+2 bit groups */
       US_CHECK(g_sent[0] == (Bytes{ 0xf0, 0x2d, 0x31, 0x00, 0x6e, 0x1b, 0x01, 0xf7 }),
                "PAL environment bytes");
       Bytes & m = g_sent[0];
@@ -361,7 +354,7 @@ int test_environment_message(void)
     Rig r(1);
     r.be.sendSIDEnvironment(false);
     if (g_sent.size() == 1) {
-      /* NTSC sets bit0, speed field stays 0. framedelta 16715 us = 0x4b, 0x02, 0x01 */
+      /* NTSC sets bit0, speed field 0. framedelta 16715 us = 0x4b, 0x02, 0x01 */
       US_CHECK(g_sent[0] == (Bytes{ 0xf0, 0x2d, 0x31, 0x01, 0x4b, 0x02, 0x01, 0xf7 }),
                "NTSC environment bytes");
     } else {
@@ -416,7 +409,7 @@ int test_speed_multiplier(void)
   US_CHECK_EQ_U(asid_speed_multiplier(true, 100, pal), 16, "faster than 16x clamps to 16");
   US_CHECK_EQ_U(asid_speed_multiplier(true, 0, pal), 16, "latch 0 clamps to 16");
   US_CHECK_EQ_U(asid_speed_multiplier(true, 0xffff, pal), 1, "slow timer clamps to 1");
-  /* 19656 / 6553 = 3.0 exactly; 19656 / 7000 = 2.8 rounds up; 19656 / 8000 = 2.45 rounds down */
+  /* 19656 / 6553 = 3.0 exactly. 19656 / 7000 = 2.8 rounds up. 19656 / 8000 = 2.45 rounds down */
   US_CHECK_EQ_U(asid_speed_multiplier(true, 6552, pal), 3, "exact ratio 3");
   US_CHECK_EQ_U(asid_speed_multiplier(true, 6999, pal), 3, "2.8 rounds up to 3");
   US_CHECK_EQ_U(asid_speed_multiplier(true, 7999, pal), 2, "2.45 rounds down to 2");
@@ -479,8 +472,7 @@ int test_msb_packing(void)
 
 int test_register_order_vs_firmware(void)
 {
-  /* Every register 0x00-0x18 alone: the firmware must decode the same
-   * register and value back. */
+  /* Every register 0x00-0x18 alone must decode to the same register and value */
   for (int reg = 0; reg <= 0x18; reg++) {
     Rig r;
     const int val = 0x80 | (reg + 1);
@@ -560,7 +552,7 @@ int test_flush_clears_and_dedups(void)
   US_CHECK_EQ_U(g_sent.size(), 0, "second flush with nothing pending sends nothing");
   r.be.write(0x01, 0x40, 0);
   r.be.flush();
-  US_CHECK_EQ_U(g_sent.size(), 1, "next frame sends again");
+  US_CHECK_EQ_U(g_sent.size(), 1, "the following frame sends again");
   if (g_sent.size() == 1) {
     US_CHECK(g_sent[0] == sid_msg(0x4e, { { 1, 0x40 } }), "only the new register, old one not resent");
   }
@@ -604,9 +596,9 @@ int test_control_register_shadow(void)
     US_CHECK(g_sent[0] == sid_msg(0x4e, { { 22, 0x11 }, { 25, 0x10 } }), "cut frame bytes");
   }
   r.be.flush();
-  US_CHECK_EQ_U(g_sent.size(), 2, "third value goes in the next frame");
+  US_CHECK_EQ_U(g_sent.size(), 2, "third value goes in the following frame");
   if (g_sent.size() == 2) {
-    US_CHECK(g_sent[1] == sid_msg(0x4e, { { 22, 0x41 } }), "next frame bytes");
+    US_CHECK(g_sent[1] == sid_msg(0x4e, { { 22, 0x41 } }), "following frame bytes");
   }
   return 0;
 }
@@ -627,9 +619,9 @@ int test_filter_volume_double_write(void)
                "flush carries pending registers and the first value");
     }
     r.be.flush();
-    US_CHECK_EQ_U(g_sent.size(), 2, "second value in the next frame");
+    US_CHECK_EQ_U(g_sent.size(), 2, "second value in the following frame");
     if (g_sent.size() == 2) {
-      US_CHECK(g_sent[1] == sid_msg(0x4e, { { bits[v], 0x0b } }), "next frame bytes");
+      US_CHECK(g_sent[1] == sid_msg(0x4e, { { bits[v], 0x0b } }), "following frame bytes");
     }
   }
   return 0;
@@ -640,7 +632,7 @@ int test_mid_frame_flush_covers_all_chips(void)
   Rig r;
   r.be.write(0x20 + 0x00, 0x77, 0);   /* chip 2 pending */
   r.be.write(0x18, 0x01, 0);
-  r.be.write(0x18, 0x02, 0);          /* forces flush of every chip */
+  r.be.write(0x18, 0x02, 0);          /* flushes all chips */
   US_CHECK_EQ_U(g_sent.size(), 2, "flush sends both chips");
   if (g_sent.size() == 2) {
     US_CHECK(g_sent[0] == sid_msg(0x4e, { { 21, 0x01 } }), "chip 1 first");
@@ -708,8 +700,7 @@ int test_fm_message(void)
 
 int test_fm_mask_byte_boundary(void)
 {
-  /* 4 pairs = 8 bytes = 2 mask bytes; data byte 7 (last) has bit 7 set,
-   * which lands in mask byte 1 bit 0 */
+  /* 4 pairs = 8 bytes = 2 mask bytes ~ data byte 7 (last) bit 7 set lands in mask byte 1 bit 0 */
   Rig r;
   for (int i = 0; i < 3; i++) fm_write(r.be, 0x10 + i, 0x20 + i);
   fm_write(r.be, 0x13, 0xe3);

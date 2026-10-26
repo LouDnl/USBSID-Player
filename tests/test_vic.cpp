@@ -1,14 +1,13 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * test_vic.cpp
- * Step 2.6 gate: cycles per frame for all four video models, the raster
- * interrupt landing on the right cycle, the cycles a bad line and a sprite
- * steal from the CPU, and the Acid800 instruction timing tests, which measure
- * the machine's timing through the raster counter.
+ * Cycles per frame for all four video models, raster interrupt cycle,
+ * cycles stolen by bad lines and sprites, and the Acid800 timing tests
+ * (machine timing through the raster counter)
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -160,8 +159,7 @@ int test_raster_irq(void)
     r.write(0x1a, 0x01);
     r.write(0x12, 0x00);
     r.write(0x11, 0x1b);
-    /* stop on the last line of the frame and clear anything pending, so the
-     * next line 0 is the one being observed */
+    /* stop on the last line of the frame and clear anything pending, the following line 0 is observed */
     r.goto_line(static_cast<uint16_t>(r.vic.timing().lines_per_frame - 1));
     r.write(0x19, 0x01);
     while (r.vic.raster() != 0) r.run(1);
@@ -194,8 +192,7 @@ int test_badlines(void)
   }
 
   {
-    /* with the display on, one bad line every eight raster lines inside the
-     * display window, each holding BA low for 43 cycles */
+    /* with the display on, one bad line every eight raster lines in the display window, each holding BA low for 43 cycles */
     VicRig r;
     r.write(0x11, 0x1b);          /* DEN set, yscroll 3 */
     r.goto_line(0);
@@ -235,7 +232,7 @@ int test_badlines(void)
 int test_sprite_dma(void)
 {
   VicRig r;
-  r.write(0x11, 0x0b);            /* display off, so only sprites steal */
+  r.write(0x11, 0x0b);            /* display off ~ only sprites steal */
   r.write(0x00 + 1, 0x64);        /* sprite 0 Y = 100 */
   r.write(0x15, 0x01);            /* enable sprite 0 */
 
@@ -246,10 +243,8 @@ int test_sprite_dma(void)
   for (unsigned i = 0; i < vic_cycles_per_frame(VideoModel::Pal6569); i++) {
     r.run(1);
     if (!r.bus.ba()) ba_low++;
-    /* count the lines the sprite is actually fetched on, which is what the
-     * DMA state means at cycle 55 */
-    /* cycle_in_line() has already moved on by the time run() returns, so 56
-     * is the state just after cycle 55, which is where the DMA is decided */
+    /* count the lines the sprite is fetched on (DMA state at cycle 55). cycle_in_line() has moved on
+       when run() returns, 56 is the state after cycle 55 where the DMA is decided */
     if (r.vic.cycle_in_line() == 56 && r.vic.sprite_dma(0) &&
         r.vic.raster() != last_line) {
       last_line = r.vic.raster();
@@ -282,9 +277,8 @@ int test_sprite_dma(void)
 
 int test_cpu_cycles_per_frame(void)
 {
-  /* A frame is always the same number of cycles; what changes is how many of
-   * them the CPU gets. This is the number every SID write timestamp in the
-   * frame depends on. */
+  /* A frame is always the same number of cycles, what changes is how many the CPU gets,
+     every SID write timestamp in the frame depends on that number */
   struct Case { const char * what; data_t d011; data_t sprites; };
   const Case cases[] = {
     { "screen off",          0x0b, 0x00 },
@@ -299,7 +293,7 @@ int test_cpu_cycles_per_frame(void)
       printf("  FAIL %s: machine did not boot\n", c.what);
       continue;
     }
-    /* park the CPU in a tight loop so it only ever does read cycles */
+    /* park the CPU in a tight loop ~ it only ever does read cycles */
     c64.machine.ram().dma_write(0x0340, 0x4c);
     c64.machine.ram().dma_write(0x0341, 0x40);
     c64.machine.ram().dma_write(0x0342, 0x03);
@@ -372,11 +366,11 @@ int test_acid800_timing(void)
   return 0;
 }
 
-/* ---- the KERNAL, now against the real chip ------------------------------ */
+/* ---- the KERNAL against the real chip ----------------------------------- */
 
 int test_kernal_boot_with_vic(void)
 {
-  /* This is the step 2.4 check again, with the raster stub gone. */
+  /* the KERNAL boot check with the raster stub gone */
   TestC64 c64;
   const bool booted = c64.boot();
   US_CHECK(booted, "the KERNAL boots against the real VIC");
@@ -389,18 +383,16 @@ int test_kernal_boot_with_vic(void)
 }
 
 
-/* ---- skipping and stepping have to be the same thing -------------------- */
+/* ---- skipping equals stepping ------------------------------------------- */
 
 /**
- * @brief The bus does not clock the VIC every cycle any more.
+ * @brief Scheduled and stepped VIC give equal results
  *
- * A raster line is sixty three cycles and about four of them do anything: BA
- * dropping for a bad line, BA coming back, the raster compare, and the line
- * boundary. The chip is left alone in between, so it has to be impossible to
- * tell that from clocking it. Two machines are run side by side, one scheduled
- * and one walking every cycle, and everything the rest of the machine can see
- * is compared on every single cycle: the raster line, where in the line it is,
- * the BA line and the interrupt line.
+ * A raster line is 63 cycles and about 4 of them do anything: BA dropping for a bad line,
+ * BA coming back, the raster compare and the line boundary ~ the chip is left alone in between.
+ * Two machines run side by side, one scheduled and one walking every cycle, and everything
+ * visible to the rest of the machine is compared each cycle: raster line, place in the line,
+ * BA line and interrupt line
  */
 int lockstep(const char * what, void (*setup)(Machine &), unsigned max_percent)
 {
@@ -416,9 +408,8 @@ int lockstep(const char * what, void (*setup)(Machine &), unsigned max_percent)
 
   constexpr uint64_t kCycles = 2ull * 1000ull * 1000ull; /* two seconds */
   uint64_t diverged_at = 0;
-  /* Which sprites were seen fetching. Sampled rather than checked every cycle,
-   * because a sprite's DMA lasts twenty one lines and this is in the inner
-   * loop of a two million cycle comparison. */
+  /* Which sprites were seen fetching ~ sampled, a sprite DMA lasts 21 lines and this is the inner
+     loop of a two million cycle comparison */
   unsigned dma_seen = 0;
 
   for (uint64_t i = 0; i < kCycles && diverged_at == 0; i++) {
@@ -445,8 +436,7 @@ int lockstep(const char * what, void (*setup)(Machine &), unsigned max_percent)
   US_CHECK_EQ_U(scheduled.machine.vic().frames(),
                 stepped.machine.vic().frames(), "and agree on the frame count");
 
-  /* Every sprite that was switched on has to have been seen fetching, or this
-   * is quietly re-testing the case with no sprites in it at all. */
+  /* Every sprite that was switched on has to have been seen fetching, else this retests the case with no sprites */
   const unsigned enabled = scheduled.machine.vic().peek(0x15);
   US_CHECK_EQ_U(dma_seen, enabled,
                 "every enabled sprite was seen fetching");
@@ -466,14 +456,12 @@ int lockstep(const char * what, void (*setup)(Machine &), unsigned max_percent)
 }
 
 /**
- * @brief Switch on all eight sprites, spread down the screen.
+ * @brief Switch on all eight sprites, spread down the screen
  *
- * The awkward case on purpose. Sprite seven's fetch window starts at cycle 69,
- * which is past the end of a 63 cycle line, so it wraps into the next one, and
- * neighbouring sprites' windows overlap each other. Their Y positions are set
- * eleven lines apart so that several are being fetched at once for part of the
- * frame and none at all for the rest, and every other one is vertically
- * expanded so its DMA runs for forty two lines rather than twenty one.
+ * Sprite 7 fetch window starts at cycle 69, past the end of a 63 cycle line,
+ * and wraps into the following one ~ neighbouring windows overlap.
+ * Y positions are 11 lines apart, every other sprite is vertically expanded
+ * (DMA runs 42 lines, normally 21)
  */
 void setup_sprites(Machine & m)
 {
@@ -486,7 +474,7 @@ void setup_sprites(Machine & m)
   m.vic().io_write(0xd015, 0xff); /* and all of them enabled */
 }
 
-/** @brief One sprite, which is what a PRG that is not a demo usually has. */
+/** @brief One sprite, as in a PRG that is no demo */
 void setup_one_sprite(Machine & m)
 {
   m.vic().io_write(0xd011, 0x1b);
@@ -496,22 +484,16 @@ void setup_one_sprite(Machine & m)
 
 int test_skipping_matches_stepping(void)
 {
-  /* No sprites: four cycles of a sixty three cycle line do anything. */
+  /* No sprites: four cycles of a 63 cycle line do anything */
   lockstep("no sprites", nullptr, 5);
 
-  /* One sprite is fetched on twenty one of three hundred and twelve lines, so
-   * the cost of having it at all should be close to nothing. This is the case
-   * that matters: a single sprite used to take the VIC from walking 1.8% of
-   * cycles to walking every one of them, which is what made programs drag on
-   * the device while the same tune as a SID file played. */
+  /* One sprite is fetched on 21 of 312 lines, the cost should be close to nothing,
+    this case matters: a single sprite made the VIC walk every cycle, up from 1.8% */
   lockstep("one sprite", setup_one_sprite, 10);
 
-  /* Eight, half of them expanded, with overlapping and wrapping windows.
-   * The bound was 40% when the scheduler stopped at every window edge of every
-   * active sprite. Since it stops only where the *union* of those windows
-   * changes it walks 5.2%, so 10 is the tripwire now: the windows are five
-   * cycles wide and two apart, and going back to per sprite edges means a stop
-   * every two cycles and this number climbing straight back through it. */
+  /* Eight sprites, half expanded, overlapping and wrapping windows ~ the scheduler
+     stops where the union of the windows changes and walks 5.2%. 10 is the tripwire:
+     windows are 5 cycles wide and 2 apart, per sprite edges would stop every 2 cycles */
   lockstep("eight sprites", setup_sprites, 10);
 
   return 0;

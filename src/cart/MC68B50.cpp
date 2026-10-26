@@ -5,7 +5,7 @@
  *
  * MC68B50.cpp
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -50,9 +50,8 @@ void MC68B50::reset(void)
 }
 
 /**
- * @brief reads a byte from MC6850 readable registers
- * Configured for Datel/Kerberos; registers for other brands would sit at
- * different offsets in this same page, see ACIARegisters_all_unused.
+ * @brief Read a byte from the MC6850 readable registers
+ * (Datel/Kerberos, see ACIARegisters_all_unused for other brands)
  */
 data_t MC68B50::io_read(addr_t addr)
 {
@@ -79,8 +78,7 @@ data_t MC68B50::io_read(addr_t addr)
 }
 
 /**
- * @brief writes a byte to MC6850 writeable registers
- * Configured for Datel/Kerberos, same caveat as io_read.
+ * @brief Write a byte to the MC6850 writeable registers (Datel/Kerberos)
  */
 void MC68B50::io_write(addr_t addr, data_t value)
 {
@@ -88,8 +86,7 @@ void MC68B50::io_write(addr_t addr, data_t value)
   switch (r) {
     case CONTROL: /* $de04 ~ control register ~ write only */
       regs_[CONTROL] = value;
-      /* Only the master reset (both counter divide bits set) changes
-       * anything CynthCart's fixed 8N1, no-interrupt-on-TX setup needs. */
+      /* Only master reset (both counter divide bits set) matters for the Cynthcart 8N1 setup */
       if ((value & CR0CR1SEL) == RES) reset();
       return;
     case STATUS:  /* $de06 ~ status register  ~ read only */
@@ -122,7 +119,7 @@ inline void MC68B50::process_midi(void)
 }
 
 /**
- * @brief drain one queued MIDI byte if there is room, called once per frame
+ * @brief Drain one queued MIDI byte if there is room
  */
 void MC68B50::emulate(void)
 {

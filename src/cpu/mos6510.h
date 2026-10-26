@@ -1,13 +1,11 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * mos6510.h
- * Cycle exact MOS 6510 core. One tick() is one bus cycle, never an
- * instruction: every read, every write and every dummy access happens in the
- * cycle the real chip would do it in.
+ * Cycle exact MOS 6510 core, one tick() is one bus cycle
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -71,7 +69,7 @@ enum class Mode : uint8_t {
 
 /* What the instruction does with the addressed byte */
 enum class Kind : uint8_t {
-  Implied, /* no operand access at all */
+  Implied, /* no operand access */
   Read,    /* reads the operand */
   Write,   /* writes the operand */
   Rmw,     /* read, dummy write, write */
@@ -83,7 +81,7 @@ enum class Kind : uint8_t {
   Brk,
   Push,
   Pull,
-  Kil,     /* the JAM/KIL opcodes, the CPU stops dead */
+  Kil,     /* JAM/KIL opcodes, CPU halts */
 };
 
 /* The operation itself */
@@ -127,7 +125,7 @@ struct OpcodeInfo {
 };
 
 /**
- * @brief MOS 6510 microprocessor, cycle exact.
+ * @brief MOS 6510 microprocessor, cycle exact
  */
 class Mos6510 final : public ClockedDevice
 {
@@ -157,15 +155,9 @@ class Mos6510 final : public ClockedDevice
     US_ALWAYS_INLINE bool flag(data_t mask) const { return (p_ & mask) != 0; }
 
     /**
-     * @brief A "hot" reset: the registers, not the machine.
+     * @brief Hot reset of the registers only
      *
-     * A, X and Y cleared, SP back to $fd, flags to $30 (clears I). Memory,
-     * chips and PC untouched, so this is not `reset()`.
-     *
-     * Called when switching song via the driver's "load another song" entry:
-     * without it the jump inherits the old song's interrupt stack and
-     * interrupt-disable, so a new song carries on from the middle of the
-     * old one instead of starting clean.
+     * A, X and Y cleared, SP to $fd, flags to $30 (clears I), memory, chips and PC untouched
      */
     US_ALWAYS_INLINE void hot_reset(void)
     {
@@ -174,19 +166,18 @@ class Mos6510 final : public ClockedDevice
       sp_ = 0xfd;
     }
 
-    /* True while the next tick would fetch a new opcode, which is also the
-     * only moment at which the register set is architecturally visible. */
+    /* True while the following tick fetches a new opcode (registers are only valid then) */
     US_ALWAYS_INLINE bool instruction_done(void) const { return state_ == State::Fetch; }
     /* Address the current instruction was fetched from */
     US_ALWAYS_INLINE addr_t instruction_pc(void) const { return insn_pc_; }
     /* Opcode currently executing */
     US_ALWAYS_INLINE data_t opcode(void) const { return opcode_; }
-    /* Set by an undocumented opcode until step 2.3 implements them */
+    /* Set by a JAM/KIL opcode */
     US_ALWAYS_INLINE bool jammed(void) const { return jammed_; }
-    /* Cycles spent in the current instruction so far */
+    /* Cycles spent in the current instruction up to the present tick */
     US_ALWAYS_INLINE unsigned insn_cycle(void) const { return cycle_; }
 
-    /** @brief Hand the CPU its MMU by type, so the per cycle access is direct. */
+    /** @brief Attach the MMU by type for direct per cycle access */
     void attach_mmu(Mmu * mmu) { mmu_ = mmu; }
 
     /* Start a reset sequence (7 cycles, reads the reset vector) */
@@ -194,7 +185,7 @@ class Mos6510 final : public ClockedDevice
 
     static const OpcodeInfo & decode(data_t opcode) US_RAM_ATTR;
   private:
-    /* Every state is exactly one bus cycle */
+    /* Every state is one bus cycle */
     enum class State : uint8_t {
       Fetch,        /* opcode fetch */
       ImpliedCycle, /* implied / accumulator dummy read */
@@ -259,11 +250,7 @@ class Mos6510 final : public ClockedDevice
     /* What kind of interrupt sequence is running */
     enum class IntrType : uint8_t { Brk, Irq, Nmi, Reset };
 
-    /* bus helpers, every one of these is a real cycle */
-    /* Every cycle of every instruction goes through one of these, so the
-     * indirect call the Memory interface would cost is worth avoiding. A
-     * whole machine hands over its MMU by type and the calls become direct;
-     * the tests, which run the CPU against a flat 64 KB, keep the interface. */
+    /* Bus helpers, each one is a real cycle (direct MMU calls when attached, else the Memory interface) */
     US_ALWAYS_INLINE data_t read(addr_t addr)
     {
       if (US_LIKELY(mmu_ != nullptr)) return mmu_->read(addr);
@@ -308,7 +295,7 @@ class Mos6510 final : public ClockedDevice
     static bool is_unstable_store(Op op) US_RAM_ATTR;
     void compare(data_t reg, data_t value) US_RAM_ATTR;
     Memory & memory_;
-    Mmu * mmu_ = nullptr;   /* the same memory, by type, when there is one */
+    Mmu * mmu_ = nullptr;   /* Same memory by type, when set */
     Bus & bus_;
 
     /* registers */
@@ -332,12 +319,12 @@ class Mos6510 final : public ClockedDevice
     bool page_crossed_ = false;
     unsigned cycle_ = 0;
 
-    /* interrupts. The levels are read off the bus once per cycle. */
+    /* Interrupts, levels are read from the bus once per cycle */
     IntrType intr_type_ = IntrType::Irq;
     bool irq_sampled_ = false; /* level as sampled one cycle ago */
     bool nmi_sampled_ = false;  /* edge as latched by the bus, one cycle ago */
     bool take_interrupt_ = false;
-    bool nmi_hijack_ = false; /* an NMI stole the vector of a BRK or IRQ */
+    bool nmi_hijack_ = false; /* NMI took the vector of a BRK or IRQ */
     bool jammed_ = false;
 
 };

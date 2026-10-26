@@ -1,16 +1,16 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * usbsid_test.cpp
- * Aggregate test runner. Same test functions as the standalone executables,
+ * Aggregate test runner, same test functions as the standalone executables,
  * reachable as subcommands:
  *
  *   usplayer-test          run everything
  *   usplayer-test bus      run one component
  *   usplayer-test list     list the subcommands
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD

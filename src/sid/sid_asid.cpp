@@ -1,10 +1,10 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * sid_asid.cpp
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -103,7 +103,7 @@ void ASIDBackend::asid_close(void)
       asid_clear();
       midiout->sendMessage(&basic_message);
     }
-    /* Free the handle on every path, an unopened port still owns one. */
+    /* Free the handle on every path, an unopened port owns one too */
     delete midiout;
     midiout = nullptr;
     port_is_open = false;
@@ -125,8 +125,10 @@ void ASIDBackend::sendSIDEnvironment(bool isPAL, int multiplier)
   const int speedMultiplier = multiplier - 1;
 
   // Time between two frames
-  /* int64_t: long is 32-bit on Windows (LLP64) and 1000000*63*312 overflows it. */
-  const int frameDeltaUs = isPAL ? (int)((int64_t)1000000*63*312/EMULATION_CYCLES_PER_SECOND_PAL) : (int)((int64_t)1000000*65*263/EMULATION_CYCLES_PER_SECOND_NTSC);
+  /* int64_t, long is 32 bit on Windows (LLP64) and 1000000*63*312 overflows it */
+  const int frameDeltaUs = isPAL
+    ? (int)((int64_t)1000000*63*312/EMULATION_CYCLES_PER_SECOND_PAL)
+    : (int)((int64_t)1000000*65*263/EMULATION_CYCLES_PER_SECOND_NTSC);
 
   // Sysex start data for an ASID message
   ASidOutBuffer[index++] = 0xf0;
@@ -192,10 +194,10 @@ void ASIDBackend::sendSIDType(bool is6581)
 }
 
 /**
- * @brief Send the pending FM/OPL pairs as one ASID 0x60 message.
+ * @brief Send the pending FM/OPL pairs as one ASID 0x60 message
  *
- * Layout: F0 2D 60 <pairs-1> <msb mask bytes> <7 bit data bytes> F7.
- * One mask byte per seven data bytes holds their high bits. No return value.
+ * Layout: F0 2D 60 <pairs-1> <msb mask bytes> <7 bit data bytes> F7
+ * One mask byte per seven data bytes holds their high bits
  */
 void ASIDBackend::asid_flush_fm(void)
 {
@@ -218,7 +220,7 @@ void ASIDBackend::asid_flush_fm(void)
 }
 
 /**
- * @brief Drop all pending SID and FM/OPL state without sending it.
+ * @brief Drop all pending SID and FM/OPL state without sending it
  */
 void ASIDBackend::asid_clear(void)
 {
@@ -229,22 +231,21 @@ void ASIDBackend::asid_clear(void)
 }
 
 /**
- * @brief Send one snapshot per SID that has changed registers, FM/OPL first.
+ * @brief Send one snapshot per SID with changed registers, FM/OPL first, return 0
  *
- * Every chip with a modified register is sent, not only the first nosids.
- * Returns 0.
+ * Every chip with a modified register is sent (all chips up to ASID_MAXSID)
  */
 int ASIDBackend::asid_flush(void)
 {
   static const int regmap[28] = {0,1,2,3,5,6,7,8,9,10,12,13,14,15,16,17,19,20,21,22,23,24,4,11,18,25,26,27};
   if (!port_is_open) return 0;
-  /* FM/OPL first keeps OPL and SID writes in tune order. */
+  /* FM/OPL first keeps OPL and SID writes in tune order */
   asid_flush_fm();
   for (int sid = 0; sid < ASID_MAXSID; sid++) {
     int i = 0, j = 0;
     unsigned int mask = 0;
     unsigned int msb = 0;
-    /* Set a mask bit per written register, and its bit 7 into msb. */
+    /* Set a mask bit per written register and its bit 7 into msb */
     for (i = 0; i < 28; i++) {
       j = regmap[i];
       if (sid_chip[sid].sidModified[j] != 0) mask |= (1u << i);
@@ -277,14 +278,14 @@ int ASIDBackend::asid_flush(void)
 }
 
 /**
- * @brief Fold one SID register write into the frame snapshot.
+ * @brief Fold one SID register write into the frame snapshot, return 0
  *
  * @param addr   register, 0x00-0x1f
  * @param byte   value written
  * @param sidno  chip, 1 based
  *
- * Registers above 0x18 are ignored: ASID reuses 0x19-0x1b as shadows for a
- * second write to the voice control registers. Returns 0.
+ * Registers above 0x18 are ignored, ASID uses 0x19-0x1b as shadows for a
+ * second write to the voice control registers
  */
 int ASIDBackend::asid_dump(uint16_t addr, uint8_t byte, int sidno)
 {
@@ -302,13 +303,13 @@ int ASIDBackend::asid_dump(uint16_t addr, uint8_t byte, int sidno)
     c.sidModified[reg] = 1;
     return 0;
   }
-  /* Written twice in one frame. */
+  /* Written twice in one frame */
   switch (reg) {
     case 0x04: case 0x0b: case 0x12: {
-      /* Control registers are 7 apart, their shadows are 1 apart. */
+      /* Control registers are 7 apart, their shadows 1 apart */
       const int shadow = (reg == 0x04) ? 0x19 : (reg == 0x0b) ? 0x1a : 0x1b;
       if (c.sidModified[shadow] != 0) {
-        /* Third write: cut the frame and start a new one. */
+        /* Third write, cut the frame and start a new one */
         asid_flush();
         c.sidRegister[reg] = data & 0xff;
         c.sidModified[reg] = 1;
@@ -319,7 +320,7 @@ int ASIDBackend::asid_dump(uint16_t addr, uint8_t byte, int sidno)
       break;
     }
     case 0x16: case 0x17: case 0x18:
-      /* Filter and volume have no shadow and their order is audible. */
+      /* Filter and volume have no shadow and their order is audible */
       asid_flush();
       c.sidRegister[reg] = data & 0xff;
       c.sidModified[reg] = 1;
@@ -331,10 +332,10 @@ int ASIDBackend::asid_dump(uint16_t addr, uint8_t byte, int sidno)
 }
 
 /**
- * @brief Route one write: FM/OPL ports, or a SID register of chips 1-4.
+ * @brief Route one write: FM/OPL ports or a SID register of chips 1-4
  *
- * FM/OPL arrives as parked registers at kMaxSids * 0x20 and up, with port
- * 0x00 the index and 0x10 the data port. Writes for chip 5 and up are dropped.
+ * FM/OPL arrives as parked registers at kMaxSids * 0x20 and up,
+ * port 0x00 is the index and 0x10 the data port. Writes for chip 5 and up are dropped
  */
 void ASIDBackend::write(addr_t reg, data_t value, uint16_t cycles)
 {

@@ -1,24 +1,14 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * keyboard.h
- * The keyboard, as the machine sees it: eight rows of eight switches wired
- * across CIA1's two ports.
+ * Keyboard as the machine sees it: 8 rows of 8 switches across the CIA1 ports.
+ * A key is held or not, the KERNAL scan finds it by driving a row of port A low
+ * and reading the columns on port B. RUN/STOP and programs reading the matrix
+ * or $cb work. Typing is a queue with a frame counter (a real key is held longer than one scan)
  *
- * Nothing here talks to the KERNAL. A key is held down or it is not, and the
- * KERNAL's own interrupt scan finds it the same way it finds a real one:
- * driving one row of port A low and reading which columns came back low on
- * port B. That is the difference between this and the shortcut step 2.10 uses,
- * where characters are put straight into the keyboard buffer at $0277: this
- * path goes through the scan, the debounce, the shift handling and the buffer,
- * so RUN/STOP works, so does a program reading the matrix itself, and so does
- * anything that watches $cb for the key currently held.
- *
- * Because a real key is held for longer than one scan, typing is a queue with
- * a frame counter rather than something that happens at once.
- *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -47,20 +37,14 @@
 
 namespace usbsid {
 
-/**
- * @brief One key, as a place in the matrix.
- *
- * Row is the port A bit the KERNAL drives low, column is the port B bit that
- * comes back low when the key is held. Both count from zero.
- */
+/** @brief One key as a place in the matrix, row is the port A bit driven low, column the port B bit read low (both from zero) */
 struct KeyPos {
   uint8_t row;
   uint8_t col;
   bool shift;   /* needs the left shift held with it */
 };
 
-/* The keys that are not characters, named because their positions are not
- * something to look up twice. */
+/* Keys that are not characters */
 constexpr KeyPos kKeyReturn   = { 0, 1, false };
 constexpr KeyPos kKeyDelete   = { 0, 0, false };
 constexpr KeyPos kKeySpace    = { 7, 4, false };
@@ -79,51 +63,42 @@ constexpr KeyPos kKeyF7       = { 0, 3, false };
 constexpr KeyPos kKeyPlus     = { 5, 0, false };
 constexpr KeyPos kKeyMinus    = { 5, 3, false };
 
-/** @brief Where a character sits in the matrix. False when it has no key. */
+/** @brief Where a character sits in the matrix, false if it has no key */
 bool key_for_char(char c, KeyPos & out);
 
 /**
- * @brief Holds keys down on a CIA and types lines of them.
+ * @brief Hold keys down on a CIA and type lines of them
  *
- * `tick_frame()` has to be called once a frame for the queue to advance. A key
- * is held for two frames and released for two, which is longer than the
- * KERNAL's scan and its repeat delay, so every keystroke registers exactly
- * once.
+ * Call tick_frame() once a frame. A key is held for two frames and released for two
  */
 class Keyboard
 {
   public:
     explicit Keyboard(Mos6526 & cia1) : cia_(cia1) {}
 
-    /** @brief Hold a key down, or let it up, right now. */
+    /** @brief Hold a key down or let it up immediately */
     void set(KeyPos key, bool pressed);
 
-    /** @brief Let everything up and forget anything queued. */
+    /** @brief Let everything up and clear the queue */
     void reset(void);
 
-    /** @brief Queue a key press and release. */
+    /** @brief Queue a key press and release */
     bool tap(KeyPos key);
 
-    /**
-     * @brief Queue a line of text, and a return if the text ends with one.
-     *
-     * Returns false when the queue is too full to take all of it.
-     */
+    /** @brief Queue a line of text (and a return if it ends with one), false if the queue is full */
     bool type(const char * text);
 
-    /** @brief Advance the queue. Call once a frame. */
+    /** @brief Advance the queue, call once a frame */
     void tick_frame(void);
 
-    /** @brief Whether anything is still waiting to be typed. */
+    /** @brief True while anything is waiting to be typed */
     bool busy(void) const { return pending_ != 0 || held_frames_ != 0; }
 
     size_t queued(void) const { return pending_; }
 
   private:
     static constexpr size_t kQueueSize = 32;
-    /* How long a key stays down, and how long the gap is. The KERNAL scans
-     * once per interrupt, so anything shorter than a frame can be missed and
-     * anything without a gap looks like the key was never let up. */
+    /* Key down and gap length, the KERNAL scans once per interrupt */
     static constexpr uint8_t kHoldFrames = 2;
     static constexpr uint8_t kGapFrames = 2;
 

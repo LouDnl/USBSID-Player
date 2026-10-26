@@ -1,24 +1,17 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * mos6526.h
  * Cycle exact MOS 6526 CIA.
  *
- * The timer is the state machine used by VICE (src/core/ciatimer.h, GPLv2,
- * Andre Fachat), which is a refinement of the delay pipeline in
- * assets/cia6526_example, this project's reference for the chip. Both work by
- * propagating events through delay stages once per clock; the difference is
- * that the load and count stages have their own propagation rules instead of
- * sharing one shift register, which is what lets a timer reload from an
- * underflow that lands on the same clock as the stop. The shift register
- * cannot express that case, and the Lorenz cia1ta/cia1tb/cia2ta/cia2tb tests
- * fail on it.
+ * Timer is the VICE state machine (src/core/ciatimer.h, GPLv2, Andre Fachat),
+ * a refinement of the delay pipeline in cia6526_example
+ * Load and count stages have their own propagation rules (reload on an
+ * underflow on the same clock as the stop) Interrupt delay, PB6/PB7 output
+ * modes, TOD and serial register follow cia6526_example
  *
- * Everything else, the interrupt delay, the PB6/PB7 output modes, TOD and the
- * serial register, follows the assets/cia6526_example model.
- *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -48,16 +41,11 @@
 
 namespace usbsid {
 
-/* Which line this CIA pulls when it raises an interrupt. CIA1 is wired to
- * IRQ, CIA2 to NMI. */
+/* Line pulled on an interrupt, CIA1 = IRQ, CIA2 = NMI */
 enum class CiaLine : uint8_t { Irq, Nmi };
 
 /**
- * @brief Told when a CIA port output changes.
- *
- * CIA2 port A carries the VIC bank, so somebody has to hear about it. This is
- * a callback and not a poll because port writes are rare and the per cycle
- * path must stay clean.
+ * @brief Called when a CIA port output changes (CIA2 port A carries the VIC bank)
  */
 class CiaPortObserver
 {
@@ -75,44 +63,38 @@ class Mos6526 final : public ClockedDevice, public IoDevice
     void tick(void) override US_RAM_ATTR;
 
     /**
-     * @brief Run up to the given tick count, in as few steps as it can.
+     * @brief Run up to the given tick count in as few steps as possible
      *
-     * The bus asks how long the chip can be left alone rather than clocking
-     * it every cycle. Any access (read/write/input change) catches it up
-     * first, so it always reads as if every cycle had been walked.
+     * Any access (read/write/input change) catches the chip up first
      */
     void catch_up(cycle_t target_ticks) US_RAM_ATTR;
 
-    /** @brief Clocks the chip can be left alone for, at least one. */
+    /** @brief Clocks the chip can be left alone for, at least one */
     uint32_t cycles_to_event(void) const US_RAM_ATTR;
 
     /**
-     * @brief Apply a run of timer A underflows in one go, or do nothing.
+     * @brief Apply a run of timer A underflows in one go, returns clocks applied or 0
      *
-     * Handles the shape cycles_to_event() cannot: timer A free-running on
-     * phi2 as a prescaler, timer B counting its underflows. Nothing in that
-     * run is externally visible until timer B underflows, so the whole run
-     * can be applied as arithmetic. Returns clocks applied, or zero when the
-     * shape does not hold.
+     * Timer A free-running on phi2 as prescaler for timer B, nothing is visible until timer B underflows
      */
     uint32_t cascade_skip(cycle_t behind) US_RAM_ATTR;
 
   private:
-    /** @brief Whether timer A is prescaling timer B and nothing else. */
+    /** @brief True when timer A prescales timer B and nothing else */
     bool cascade_shape(void) const US_RAM_ATTR;
-    /** @brief Clocks the cascade can be left alone for, 0 if not in it. */
+    /** @brief Clocks the cascade can be left alone for, 0 if not in it */
     uint32_t cascade_quiet(void) const US_RAM_ATTR;
-    /** @brief Clocks the plain counter skip is good for, 0 if it must walk. */
+    /** @brief Clocks the plain counter skip is good for, 0 if it must walk */
     uint32_t generic_quiet(void) const US_RAM_ATTR;
-    /** @brief Trim a skip so it does not step over a time of day tick. */
+    /** @brief Trim a skip to stay before a time of day tick */
     uint32_t tod_bound(uint32_t quiet) const US_RAM_ATTR;
 
   public:
 
-    /** @brief How many ticks it has actually run. */
+    /** @brief Ticks actually run */
     cycle_t ticks(void) const { return ticks_; }
 
-    /* how many cycles were walked rather than skipped, for tuning */
+    /* Cycles walked, for tuning */
     cycle_t real_ticks(void) const { return real_ticks_; }
 
     void reset(void) override;
@@ -120,8 +102,7 @@ class Mos6526 final : public ClockedDevice, public IoDevice
     data_t io_read(addr_t addr) override US_RAM_ATTR;
     void io_write(addr_t addr, data_t value) override US_RAM_ATTR;
 
-    /* Direct register access that does not touch the side effects a real read
-     * would have. For debugging and for tests. */
+    /* Register access without read side effects */
     data_t peek(uint8_t reg) const US_RAM_ATTR;
     void set_port_observer(CiaPortObserver * obs) { observer_ = obs; }
 
@@ -135,18 +116,15 @@ class Mos6526 final : public ClockedDevice, public IoDevice
     /* Current output levels, after direction and the PB6/PB7 timer modes */
     data_t port_a(void) const US_RAM_ATTR;
     data_t port_b(void) const US_RAM_ATTR;
-    /* The keyboard matrix, only meaningful on CIA1. Rows are driven from
-     * port A, columns are read back on port B, both active low. */
+    /* Keyboard matrix (CIA1 only), rows on port A, columns on port B, both active low */
     void set_key(uint8_t row, uint8_t col, bool pressed);
     void clear_keys(void);
     bool any_key_pressed(void) const { return keys_pressed_; }
 
-    /* TOD is clocked from the mains, so it needs to know how long a cycle is.
-     * The video model sets this at step 2.6. */
+    /* TOD is clocked from the mains, needs the cycle length, set by the video model */
     void set_clock_hz(uint32_t hz) { clock_hz_ = hz; }
 
-    /* State, for tests and for the status logging. These catch the chip up
-     * first: it is behind by design, and a stale counter is a wrong answer. */
+    /* State, catches the chip up first (it runs behind the bus) */
     uint16_t counter_a(void) { catch_up_now(); return ta_.counter; }
     uint16_t counter_b(void) { catch_up_now(); return tb_.counter; }
     uint16_t latch_a(void) const { return ta_.latch; }
@@ -157,13 +135,12 @@ class Mos6526 final : public ClockedDevice, public IoDevice
 
   public:
     /**
-     * @brief One timer, as a state machine.
+     * @brief One timer as a state machine
      *
-     * The bit names are VICE's. Start, one shot and the clock source come
-     * from the control register; the rest are propagation stages. Force load
-     * and step are strobes: they survive exactly one transition.
+     * Bit names are from VICE, start, one shot and clock source come from the control register
+     * Force load and step are strobes (survive one transition)
      */
-    /* "nothing is going to happen for a very long time" */
+    /* Nothing happens for a long time */
     static constexpr uint32_t kForever = 0x00ffffffu;
 
     struct Timer {
@@ -173,12 +150,12 @@ class Mos6526 final : public ClockedDevice, public IoDevice
         kStep      = 0x0004, /* one count from CNT or from timer A */
         kCrOneShot = 0x0008, /* control register bit 3 */
         kCrFLoad   = 0x0010, /* control register bit 4, a strobe */
-        kPhi2In    = 0x0020, /* counting the system clock */
+        kPhi2In    = 0x0020, /* Counting the system clock */
         kCount3    = 0x0040,
         kLoad1     = 0x0080,
         kOneShot0  = 0x0100,
         kLoad      = 0x0200,
-        kOut       = 0x0400, /* the underflow output, drives PB6/PB7 */
+        kOut       = 0x0400, /* Underflow output, drives PB6/PB7 */
         kCount     = 0x0800,
         kOneShot   = 0x1000,
         kCrMask    = 0x0039, /* start, one shot, force load, clock source */
@@ -188,8 +165,7 @@ class Mos6526 final : public ClockedDevice, public IoDevice
       uint16_t latch = 0xffff;
       uint16_t counter = 0xffff;
 
-      /* The state transition. Written out rather than tabulated: it is eight
-       * bit tests, which beats a 32 KB lookup table on the RP2350. */
+      /* State transition, 8 bit tests (a 32 KB lookup table is slower on the RP2350) */
       static US_ALWAYS_INLINE uint16_t next(uint16_t s)
       {
         uint16_t t = static_cast<uint16_t>(s & (kCrStart | kCrOneShot | kPhi2In));
@@ -203,7 +179,7 @@ class Mos6526 final : public ClockedDevice, public IoDevice
         return t;
       }
 
-      /* One clock. Returns true when the timer underflowed. */
+      /* One clock, returns true on underflow */
       US_ALWAYS_INLINE bool tick(void)
       {
         bool underflow = false;
@@ -223,8 +199,7 @@ class Mos6526 final : public ClockedDevice, public IoDevice
         return underflow;
       }
 
-      /* Control register write. Bit 5 of the register means "count CNT", so
-       * the internal phi2 bit is its inverse. */
+      /* Control register write, bit 5 = count CNT, internal phi2 bit is its inverse */
       US_ALWAYS_INLINE void set_control(data_t value)
       {
         state = static_cast<uint16_t>(
@@ -238,7 +213,7 @@ class Mos6526 final : public ClockedDevice, public IoDevice
       US_ALWAYS_INLINE void set_latch_hi(data_t value)
       {
         latch = static_cast<uint16_t>((latch & 0x00ff) | (value << 8));
-        /* a stopped timer takes the new latch straight away */
+        /* A stopped timer takes the new latch immediately */
         if ((state & kLoad) || !(state & kCrStart)) counter = latch;
       }
       /* One count from CNT or from a timer A underflow */
@@ -247,35 +222,26 @@ class Mos6526 final : public ClockedDevice, public IoDevice
         if (state & kCrStart) state |= kStep;
       }
       /**
-       * @brief How many clocks this timer can be left alone for.
+       * @brief Clocks this timer can be left alone for
        *
-       * Zero means "not a moment": something is in flight in the pipeline and
-       * every clock has to be walked. Otherwise it is the number of clocks
-       * until the timer does something visible, and the clocks before that one
-       * are nothing but a subtraction from the counter.
-       *
-       * The counting state is a fixed point of next(): start, phi2 in, and the
-       * three count stages, and it stays that way until the counter reaches
-       * zero. That is what makes the skip exact rather than approximate.
+       * 0 = something is in the pipeline, walk every clock
+       * Else clocks until the timer does something visible, the clocks before are a subtraction from the counter
+       * Counting state (start, phi2 in, three count stages) is a fixed point of next() until the counter reaches 0
        */
       US_ALWAYS_INLINE uint32_t quiet_clocks(void) const
       {
-        /* A settled state is one the transition leaves alone. A stopped timer
-         * settles into one and stays there for ever, one shot bits and all:
-         * those say what happens at the *next* underflow, and a timer that is
-         * not counting will not have one. */
+        /* Settled state = unchanged by next(), a stopped timer stays settled (one shot bits apply to the following underflow) */
         if (next(state) != state) return 0;
         if ((state & kCount3) == 0) return kForever;
 
-        /* Counting. The stages that change something part way through have to
-         * be walked; a plain phi2 countdown does not. The underflow, and with
-         * it any one shot stop, lands when the counter reaches zero. */
+        /* Counting, stages that change something part way must be walked, a plain phi2 countdown does not
+         * Underflow and one shot stop land when the counter reaches 0 */
         if ((state & (kStep | kCrFLoad | kLoad1 | kLoad | kOut)) != 0) return 0;
         if ((state & (kCrStart | kPhi2In)) != (kCrStart | kPhi2In)) return 0;
         return (counter == 0) ? 1u : counter;
       }
 
-      /** @brief Take `n` clocks off a timer that quiet_clocks() allowed. */
+      /** @brief Take n clocks off a timer that quiet_clocks() allowed */
       US_ALWAYS_INLINE void skip(uint32_t n)
       {
         if ((state & kCount3) != 0) {
@@ -294,7 +260,7 @@ class Mos6526 final : public ClockedDevice, public IoDevice
 
   private:
 
-    /* interrupt sources in ICR / IMR */
+    /* Interrupt sources in ICR / IMR */
     enum : data_t {
       kIntTimerA = 0x01,
       kIntTimerB = 0x02,
@@ -306,10 +272,9 @@ class Mos6526 final : public ClockedDevice, public IoDevice
 
     void set_int_line(bool asserted) US_RAM_ATTR;
     void update_ports(void) US_RAM_ATTR;
-    /** @brief Catch up to where the bus is, which is one tick ahead of its
-     *  cycle counter while a cycle is being executed. */
+    /** @brief Catch up to the bus (one tick ahead of its cycle counter mid-cycle) */
     void catch_up_now(void) US_RAM_ATTR;
-    /** @brief Tell the bus the schedule changed under it. */
+    /** @brief Tell the bus the schedule changed */
     void rescheduled(void) US_RAM_ATTR;
     void skip(uint32_t n) US_RAM_ATTR;
     void update_keys_pressed(void) US_RAM_ATTR;
@@ -324,16 +289,16 @@ class Mos6526 final : public ClockedDevice, public IoDevice
     /* ports */
     data_t pra_ = 0, prb_ = 0;    /* output latches */
     data_t ddra_ = 0, ddrb_ = 0;
-    data_t pa_input_ = 0xff;      /* what the outside world drives */
+    data_t pa_input_ = 0xff;      /* Driven by the outside world */
     data_t pb_input_ = 0xff;
-    data_t pa_out_ = 0xff, pb_out_ = 0xff; /* last reported outputs */
+    data_t pa_out_ = 0xff, pb_out_ = 0xff; /* Last reported outputs */
 
     /* timers */
     Timer ta_;
     Timer tb_;
-    /* the interrupt line follows one clock behind the event */
+    /* Interrupt line follows one clock behind the event */
     uint8_t int_delay_ = 0;
-    /* PB6 and PB7 pulse high for exactly one clock */
+    /* PB6 and PB7 pulse high for one clock */
     uint8_t pb6_pulse_ = 0;
     uint8_t pb7_pulse_ = 0;
     data_t cra_ = 0, crb_ = 0;
@@ -355,23 +320,22 @@ class Mos6526 final : public ClockedDevice, public IoDevice
     uint8_t sdr_bits_ = 0;
     bool sdr_pending_ = false;
 
-    /* time of day, in BCD: 10ths, seconds, minutes, hours */
+    /* Time of day in BCD: 10ths, seconds, minutes, hours */
     data_t tod_[4] = { 0, 0, 0, 0x01 };
     data_t tod_latched_[4] = { 0, 0, 0, 0x01 };
     data_t tod_alarm_[4] = { 0, 0, 0, 0 };
-    bool tod_halted_ = true;   /* stopped until the hours are written */
-    bool tod_latch_ = false;   /* reading the hours freezes the time */
-    bool tod_alarm_write_ = false; /* CRB bit 7 selects alarm instead of clock */
+    bool tod_halted_ = true;   /* Stopped until the hours are written */
+    bool tod_latch_ = false;   /* Reading the hours freezes the time */
+    bool tod_alarm_write_ = false; /* CRB bit 7 selects alarm */
     uint32_t tod_cycles_ = 0;
-    uint32_t clock_hz_ = 985248; /* PAL, changed by the video model */
+    uint32_t clock_hz_ = 985248; /* PAL, set by the video model */
 
-    /* keyboard matrix, active low, one bit per column and row */
+    /* Keyboard matrix, active low, one bit per column and row */
     data_t keyboard_[8] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
-    /* nothing held is the usual case, and the port reads are on the hot path */
+    /* No key held is the common case (port reads are hot) */
     bool keys_pressed_ = false;
 
-    /* how many clocks this chip has actually run, which is behind the bus
-     * whenever it has been left alone */
+    /* Clocks actually run (behind the bus when left alone) */
     cycle_t ticks_ = 0;
     cycle_t real_ticks_ = 0;
 };

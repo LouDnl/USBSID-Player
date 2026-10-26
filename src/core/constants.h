@@ -1,13 +1,11 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * constants.h
- * C64 memory map, fixed vectors and keyboard matrix bits.
- * Address map and PSID64 keyboard bits are carried over from
- * old player ~ src/util/constants.h so both players agree.
+ * C64 memory map, fixed vectors and keyboard matrix bits
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -37,7 +35,7 @@ namespace usbsid {
 
 /* Memory sizes */
 constexpr size_t kC64RamSize      = 0x10000; /* 64 KB main RAM */
-constexpr size_t kC64ColorRamSize = 0x0400;  /* 1 KB nybble wide colour RAM */
+constexpr size_t kC64ColorRamSize = 0x0400;  /* 1 KB nybble wide color RAM */
 constexpr size_t kC64PageSize     = 0x100;
 constexpr size_t kRomSizeBasic    = 0x2000;  /* 8 KB */
 constexpr size_t kRomSizeKernal   = 0x2000;  /* 8 KB */
@@ -72,8 +70,8 @@ constexpr addr_t kAddrNmiVector     = 0xfffa;
 constexpr addr_t kAddrResetVector   = 0xfffc;
 constexpr addr_t kAddrIrqVector     = 0xfffe;
 
-/* Keyboard matrix bits used for PSID64 style control.
- * Rows are written to $dc00, columns are read from $dc01. */
+/* Keyboard matrix bits for PSID64 style control,
+   rows written to $dc00, columns read from $dc01 */
 constexpr uint8_t kRowBitRunstop = 7;
 constexpr uint8_t kColBitRunstop = 7;
 constexpr uint8_t kRowBitSpace   = 7;

@@ -1,18 +1,15 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * test_prg.cpp
- * Step 2.10 gate: programs load and run the way they would on a real machine.
+ * Programs load and run like on a real machine
  *
- * The Acid800 CPU tests are already run by test_cpu.cpp, but by poking them
- * into memory and jumping to their entry point. Here the same programs go in
- * through the loader: booted machine, file at the address its first two bytes
- * name, BASIC told how far it reaches, RUN typed at the prompt. If the answers
- * still come out right, everything between the keyboard buffer and the SYS is
- * working, which is a good deal of KERNAL and BASIC.
+ * The Acid800 CPU tests also run in test_cpu.cpp, poked into memory,
+ * this test goes through the loader: booted machine, file at its load address,
+ * BASIC told its end, RUN typed at the prompt
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -71,7 +68,7 @@ int test_parse(void)
   {
     const data_t prg[] = {
       0x01, 0x08,                          /* load at $0801 */
-      0x0b, 0x08,                          /* link to the next line */
+      0x0b, 0x08,                          /* link to the following line */
       0x0a, 0x00,                          /* line 10 */
       0x9e, '2', '0', '6', '1',            /* SYS 2061 */
       0x00,                                /* end of line */
@@ -99,7 +96,7 @@ int test_parse(void)
     US_CHECK(f.is_p00, "and is recognised as one");
     US_CHECK_EQ_STR(f.name, "TESTPROG", "the container carries the C64 name");
     US_CHECK_EQ_U(f.load_addr, 0xc000u, "the load address is inside it");
-    US_CHECK_EQ_U(f.data_size, 3u, "and so is the program");
+    US_CHECK_EQ_U(f.data_size, 3u, "and the program is as well");
   }
 
   /* rubbish is refused */
@@ -108,7 +105,7 @@ int test_parse(void)
     const data_t two[] = { 0x01, 0x08 };
     US_CHECK(prgfile_parse(two, sizeof(two), f) == false,
              "a file with nothing after the load address is rejected");
-    US_CHECK(prgfile_parse(nullptr, 100, f) == false, "and so is nothing at all");
+    US_CHECK(prgfile_parse(nullptr, 100, f) == false, "and nothing at all is rejected too");
 
     /* a program that would not fit in memory is not one */
     std::vector<data_t> huge(0x2000, 0x00);
@@ -137,17 +134,11 @@ bool read_file(const char * path, std::vector<data_t> & out)
 }
 
 /**
- * @brief Load one Acid800 test through the player and read its verdict.
+ * @brief Load one Acid800 test through the player and read its verdict
  *
- * The programs write $00 to $d7ff when they pass and $ff when they fail, and
- * set the border colour to 5 or to 10 with it, then sit in a loop.
- *
- * The border is what is checked, not a sentinel written beforehand. Starting a
- * program now means holding keys down and waiting for the KERNAL to scan them,
- * which takes long enough that these tests are already finished by the time
- * `init_prg()` returns: a sentinel written after it would simply overwrite the
- * answer. The border says the same thing and cannot be mistaken for the state
- * a machine comes up in, which is light blue.
+ * Programs write $00 to $d7ff on pass and $ff on fail, set the border colour to 5 or 10 and loop
+ * The border is checked, a sentinel written after init_prg() returns would overwrite the answer
+ * (tests finish during the KERNAL key scan) ~ light blue is the power on border
  */
 int run_through_loader(const char * name, uint64_t cycle_limit)
 {
@@ -211,8 +202,8 @@ int run_through_loader(const char * name, uint64_t cycle_limit)
     return 1;
   }
 
-  /* It has to have ended up inside the program it loaded. Anywhere else and
-   * the right answer arrived for the wrong reason. */
+  /* It has to end up inside the program it loaded, anywhere else the right answer
+     arrived for the wrong reason */
   US_CHECK(stopped_at >= prg.load_addr && stopped_at <= prg.end_addr,
            "%s finished inside its own code, at $%04x", name, stopped_at);
 
@@ -223,9 +214,8 @@ int run_through_loader(const char * name, uint64_t cycle_limit)
 
 int test_acid800_through_loader(void)
 {
-  /* The quick ones. cpu_insn and cpu_illegal are minutes of emulated time and
-   * are already run instruction by instruction in test_cpu.cpp; what is being
-   * tested here is the path into them, not the CPU. */
+  /* The quick ones. cpu_insn and cpu_illegal take minutes of emulated time and run in
+    test_cpu.cpp ~ this tests the path into them */
   run_through_loader("cpu_flags", 60ull * 1000ull * 1000ull);
   run_through_loader("cpu_decimal", 200ull * 1000ull * 1000ull);
   run_through_loader("cpu_clisei", 60ull * 1000ull * 1000ull);
@@ -238,9 +228,8 @@ int test_acid800_through_loader(void)
 
 int test_loader_state(void)
 {
-  /* A three byte machine code program at $c000: load address, then an rts.
-   * Deliberately not one of the Acid800 tests, because those clear the whole
-   * zero page as they start and the pointers being checked here live in it. */
+  /* A three byte machine code program at $c000: load address, then an rts ~ not an Acid800
+     test, those clear the zero page where the checked pointers live */
   const data_t prg[] = { 0x00, 0xc0, 0x60 };
 
   TestC64 c64;
@@ -283,10 +272,8 @@ int test_loader_state(void)
 
 int test_prg_sweep(void)
 {
-  /* The same regression net the tune sweep is: load every program there is,
-   * start it the way a person would, and count the ones that end up making a
-   * sound. A program that stops writing registers has hit a bug somewhere
-   * between the keyboard buffer and the SID. */
+  /* Same regression net as the tune sweep: load every program, start it the way a person
+     would and count the ones that make a sound */
   unsigned total = 0, parsed = 0, played = 0, silent = 0, needs = 0;
   std::vector<std::string> files;
   const UsDir listing = us_list_dir(US_TUNE_DIR "/prg", ".prg", files);
@@ -303,9 +290,8 @@ int test_prg_sweep(void)
     c64.machine.set_sid_backend(backend);
     Player player(c64.machine);
 
-    /* A file that is not a program at all is not a failure of the loader. The
-     * collection has an assembler source with a .prg extension in it, and
-     * refusing that is the parser working. */
+    /* A file that is no program is no loader failure ~ the collection has an assembler source
+       with a .prg extension, refusing that is the parser working */
     if (!player.load_prg(bytes.data(), bytes.size())) {
       printf("    not a program: %s\n", path);
       continue;
@@ -334,9 +320,8 @@ int test_prg_sweep(void)
   printf("  %u programs, %u are programs, %u made sound, %u silent, %u need ROMs\n",
          total, parsed, played, silent, needs);
 
-  /* Missing is a machine without the collection and is a legitimate skip.
-   * Empty is a directory that is there and gave nothing, which used to be
-   * reported as a skip and passed: see us_list_dir(). */
+  /* Missing is a machine without the collection, a legitimate skip ~ empty is a directory that is
+     there and gave nothing, see us_list_dir() */
   if (listing == UsDir::Missing) {
     ++us_test_checks;
     printf("  skipped the sweep, no program directory on this machine\n");

@@ -1,16 +1,14 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * psiddrv_install.h
- * Installing the PSID/RSID driver into the machine's memory.
+ * Install the PSID/RSID driver into the machine memory
+ * The driver (psiddrv.a65 > psiddrv.o65 > psiddrv.h) and the o65
+ * relocator (reloc65.c) come from VICE and are written by
+ * Dag Lem  <resid@nimrod.no>
  *
- * The driver itself (psiddrv.a65, assembled to psiddrv.o65 and turned into
- * psiddrv.h) and the o65 relocator (reloc65.c) come from old player, which
- * took them from VICE. They are known good and were not worth rewriting; what
- * is written here is the install sequence around them.
- *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -40,39 +38,34 @@
 
 namespace usbsid {
 
-/* The driver image starts with nine bytes of workspace, then its entry jump.
- * The CBM80 vector the driver installs for itself points here, so this is
- * also where a machine autostarting from the cartridge vector would land. */
+/* Driver image starts with nine bytes of workspace, then the entry jump.
+ * The CBM80 vector it installs points to this address */
 constexpr addr_t kPsidDrvEntryOffset = 9;
 
-/* The rest of the layout, verified against old player ~ src/vsidpsid.cpp:
+/* Rest of the layout:
  *   +0..8    workspace
- *   +9..11   entry jump          (its next_prev_tune calls this jmp_addr)
- *   +12..20  the CBM80 block the driver copies to $8000  (bck_addr)
- *   +21..    the parameter block (drv_addr), whose first byte is the song
- *   +$89     the driver's "load another song" entry       (nxt_addr)
+ *   +9..11   entry jump (jmp_addr)
+ *   +12..20  CBM80 block copied to $8000 (bck_addr)
+ *   +21..    parameter block (drv_addr), first byte is the song
+ *   +$89     "load another song" entry (nxt_addr)
  */
 constexpr addr_t kPsidDrvCbm80Offset = 12;
 constexpr addr_t kPsidDrvParamOffset = 21;
 constexpr addr_t kPsidDrvNextSongOffset = 0x89;
 
 /**
- * @brief Put the tune and the driver into memory.
+ * @brief Put the tune and the driver into memory, return false if the driver could not be relocated
  *
- * @param ram      the machine's RAM, written directly (this is a load, not
- *                 something the CPU does)
- * @param tune     a parsed SID file
- * @param song     the subtune to start, 1 based, 0 means the file's default
- * @param is_pal   which video standard the machine is running
- * @param reloc_addr_out  where the driver ended up
- * @return false when the driver could not be relocated
+ * @param ram Machine RAM, written directly
+ * @param tune Parsed SID file
+ * @param song Subtune to start, 1 based, 0 is the file default
+ * @param is_pal Video standard of the machine
+ * @param reloc_addr_out Where the driver ended up
  */
 bool psiddrv_install(Ram & ram, const SidFile & tune, uint16_t song,
                      bool is_pal, addr_t & reloc_addr_out);
 
-/**
- * @brief Point the driver at a different subtune without reloading anything.
- */
+/** @brief Point the driver at a different subtune without reloading */
 void psiddrv_set_song(Ram & ram, addr_t reloc_addr, uint16_t song, bool is_pal);
 
 } /* namespace usbsid */

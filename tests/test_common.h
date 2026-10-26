@@ -1,12 +1,12 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * test_common.h
- * Minimal assert helpers. No external test framework on purpose, so the same
- * test sources can be built for the embedded target later.
+ * Minimal assert helpers, no external test framework
+ * (test sources can be built for the embedded target later)
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -43,29 +43,20 @@ static int us_test_failures = 0;
 static int us_test_checks   = 0;
 
 /**
- * @brief What listing a directory found.
- *
- * The distinction matters: a machine that simply has no tune collection must
- * still be able to run the suite, and a collection that is there but yields
- * nothing is a broken harness pretending to pass.
+ * @brief Result of listing a directory
  */
 enum class UsDir {
-  Missing,  /**< no such directory: this machine has no collection */
-  Empty,    /**< the directory is there and has nothing matching in it */
+  Missing,  /**< no such directory */
+  Empty,    /**< directory has nothing matching */
   Listed,   /**< files, sorted */
 };
 
 /**
- * @brief Every file in `dir` ending in `ext`, sorted.
- *
- * `std::filesystem` and not a pipe to `ls`: a shell pipe can fail, truncate, or
- * be cut short without any of it being visible to the caller, and the sweeps
- * would then report "skipped" and pass. Sorted, so a failure names the same
- * tune on every machine and a bisect can be repeated.
+ * @brief List files in dir ending in ext, sorted
  *
  * @param dir  directory to read
- * @param ext  extension to keep, with the dot, compared case insensitively
- * @param out  appended to, not cleared
+ * @param ext  extension to keep, with the dot, case insensitive
+ * @param out  appended to
  */
 static UsDir us_list_dir(const char * dir, const char * ext,
                          std::vector<std::string> & out)
@@ -126,8 +117,7 @@ static UsDir us_list_dir(const char * dir, const char * ext,
 
 #define US_TEST_BEGIN(name) printf("[TEST] %s\n", (name))
 
-/* Tests that boot the stock KERNAL and BASIC pass without checks in a build
- * that has no ROMs compiled in (EMBED_ROMS=0) */
+/* Tests that boot the stock KERNAL and BASIC pass without checks when no ROMs are compiled in (EMBED_ROMS=0) */
 #if US_EMBED_ROMS
 #define US_NEEDS_STOCK_ROMS(name) ((void)0)
 #else

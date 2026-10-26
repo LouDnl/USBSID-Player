@@ -1,11 +1,11 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
- * host/session_net.cpp
+ * session_net.cpp
  * See session_net.h.
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -53,7 +53,7 @@ bool NetSessionSink::attach(Machine & machine)
 
 bool NetSessionSink::prepare(Machine & machine, const SidFile * tune)
 {
-  /* A program says nothing about its chips: two, as the command line does */
+  /* A program has no chip count, two as the command line */
   const uint8_t chips = (sids_ > 0) ? sids_
                       : static_cast<uint8_t>((tune != nullptr) ? tune->sid_count : 2);
   net_.set_sid_count(chips);
@@ -64,7 +64,7 @@ bool NetSessionSink::prepare(Machine & machine, const SidFile * tune)
 
 bool NetSessionSink::frame_done(const std::atomic<bool> & stopping)
 {
-  /* The server is the clock: backpressure, not the wall clock, paces this. */
+  /* Server backpressure is the clock */
   net_.wait_for_room(stopping);
   return net_.is_connected();
 }

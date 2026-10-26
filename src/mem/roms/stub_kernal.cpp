@@ -1,13 +1,13 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * stub_kernal.cpp
- * A free replacement KERNAL for playing tunes without the Commodore ROMs.
- * Layout after libsidplayfp's KernalRomBank (SystemROMBanks.h): the entry
- * points a PSID player and tune rips touch, at their stock addresses.
+ * Free replacement KERNAL for playing tunes without the Commodore ROMs
+ * Layout after libsidplayfp KernalRomBank (SystemROMBanks.h), entry
+ * points at stock addresses
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -68,9 +68,8 @@ constexpr data_t kJsr    = 0x20;
 constexpr data_t kJmp    = 0x4c;
 constexpr data_t kJmpInd = 0x6c;
 
-/* Jump table slot and stock routine address of each KERNAL call, see
- * https://sta.c64.org/cbm64krnfunc.html. Both get an RTS, for rips that
- * call either. */
+/* Jump table slot and stock routine address of each KERNAL call, both get an RTS
+ * https://sta.c64.org/cbm64krnfunc.html */
 constexpr addr_t kKernalCalls[] = {
   0xff81, 0xff5b,  0xff84, 0xfda3,  0xff87, 0xfd50,  0xff8a, 0xfd15,
   0xff8d, 0xfd1a,  0xff90, 0xfe18,  0xff93, 0xedb9,  0xff96, 0xedc7,
@@ -85,12 +84,12 @@ constexpr addr_t kKernalCalls[] = {
 };
 
 /**
- * @brief Copy bytes into the image at a C64 address.
+ * @brief Copy bytes into the image at a C64 address
  *
- * @param rom   image for $e000-$ffff
- * @param addr  C64 address of the first byte
- * @param bytes code or data
- * @param len   number of bytes
+ * @param rom    Image for $e000-$ffff
+ * @param addr   C64 address of the first byte
+ * @param bytes  Code or data
+ * @param len    Number of bytes
  */
 void put(data_t * rom, addr_t addr, const data_t * bytes, size_t len)
 {
@@ -98,9 +97,9 @@ void put(data_t * rom, addr_t addr, const data_t * bytes, size_t len)
 }
 
 /**
- * @brief Build the stub into rom.
+ * @brief Build the stub into rom
  *
- * @param rom kRomSizeKernal byte destination
+ * @param rom  Destination of kRomSizeKernal bytes
  */
 void build(data_t * rom)
 {
@@ -118,8 +117,7 @@ void build(data_t * rom)
   };
   put(rom, 0xea7e, irq_exit, sizeof(irq_exit));
 
-  /* $fce2 reset: start a cartridge with a CBM80 signature, otherwise set up
-   * the IO chips like the stock IOINIT and idle */
+  /* $fce2 reset: start a cartridge with a CBM80 signature, else IOINIT and idle */
   const data_t reset[] = {
     kLdxImm, 0xff, kSei, kTxs, kCld,
     kJsr, 0x02, 0xfd,             /* cartridge check */

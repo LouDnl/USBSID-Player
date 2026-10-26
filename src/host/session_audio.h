@@ -1,12 +1,12 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
- * host/session_audio.h
- * Session output to the default audio device: reSIDfp synthesis through
- * AudioOut. The device ring is the clock, the wall clock while it stalls.
+ * session_audio.h
+ * Session output to the default audio device, reSIDfp through AudioOut
+ * Device ring is the clock, wall clock while it stalls
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -38,7 +38,7 @@
 
 namespace usbsid {
 
-/** @brief Software synthesis settings for AudioSessionSink. */
+/** @brief Software synthesis settings for AudioSessionSink */
 struct AudioSinkOptions {
   unsigned rate = 48000;                 /* asked of the device, it may differ */
   bool stereo = false;                   /* pan multi-SID tunes per the v5 hint */
@@ -48,7 +48,7 @@ struct AudioSinkOptions {
   unsigned buffer_ms = 120;              /* ring between emulation and device */
 };
 
-/** @brief reSIDfp into the default audio device. */
+/** @brief reSIDfp into the default audio device */
 class AudioSessionSink final : public SessionSink
 {
   public:
@@ -60,7 +60,7 @@ class AudioSessionSink final : public SessionSink
     bool attach(Machine & machine) override;
     bool prepare(Machine & machine, const SidFile * tune) override;
     bool frame_done(const std::atomic<bool> & stopping) override;
-    /** @brief Wall clock pacing only while the device has stalled. */
+    /** @brief Wall clock pacing only while the device is stalled */
     bool wall_clock(void) const override { return audio_.stalled(); }
     void silence(Machine & machine) override;
     void restore(Machine & machine) override;
@@ -68,7 +68,7 @@ class AudioSessionSink final : public SessionSink
     uint64_t underruns(void) const override;
     uint64_t clipped(void) const override { return soft_.clipped(); }
 
-    /** @brief The device's error text after a failed attach(). */
+    /** @brief Device error text after a failed attach() */
     const char * error(void) const { return audio_.error(); }
 
   private:

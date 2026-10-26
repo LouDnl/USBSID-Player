@@ -1,12 +1,12 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * test_player.cpp
- * Step 2.8 gate: PSID and RSID parsing, the driver install, and a tune that
- * actually runs and writes SID registers, headless.
+ * PSID and RSID parsing, the driver install and a tune that runs and writes
+ * SID registers, headless
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -89,7 +89,7 @@ int test_parse_synthetic(void)
   US_CHECK(tune.song_uses_cia(1) == false, "song 1 is raster driven");
   US_CHECK_EQ_U(tune.data_size, 4u, "the payload is what follows the header");
 
-  /* rubbish is rejected rather than half accepted */
+  /* rubbish is rejected */
   std::vector<data_t> junk(200, 0x55);
   SidFile bad;
   US_CHECK(sidfile_parse(junk.data(), junk.size(), bad) == false,
@@ -101,8 +101,7 @@ int test_parse_synthetic(void)
 
 /* ---- the CIA1 timer the driver is entered with --------------------------- */
 
-/* Load a one song raster PSID flagged for the given video standard and return
- * the CIA1 timer A latch after the driver setup. */
+/* Load a one song raster PSID flagged for the given video standard, return the CIA1 timer A latch after the driver setup */
 static uint16_t cia1_latch_after_setup(uint8_t video_flags)
 {
   std::vector<data_t> file(0x7c + 4, 0);
@@ -128,8 +127,7 @@ static uint16_t cia1_latch_after_setup(uint8_t video_flags)
 
 int test_cia1_default_timer(void)
 {
-  /* The SID format documents $4025 for PAL and $4295 for NTSC. The NTSC bytes
-   * were once swapped ($9542), which played NTSC tunes at the wrong speed. */
+  /* $4025 for PAL and $4295 for NTSC */
   US_CHECK_EQ_U(cia1_latch_after_setup(0x04), 0x4025u, "PAL CIA1 timer A latch is $4025");
   US_CHECK_EQ_U(cia1_latch_after_setup(0x08), 0x4295u, "NTSC CIA1 timer A latch is $4295");
   return 0;
@@ -177,7 +175,7 @@ int test_v5_sid_count(void)
   US_CHECK(parse_v5_multi(0x34, 0xe0, t) == false,
            "cfg 3 start $DE00 count 4 is rejected");
 
-  /* cfg 3 with SID #2 override at $DF00: the next address is past $DFE0 */
+  /* cfg 3 with SID #2 override at $DF00: the following address is past $DFE0 */
   US_CHECK(parse_v5_multi(0x32, 0xf0, t), "cfg 3 start $DF00 count 2 parses");
   US_CHECK_EQ_U(t.sid_count, 2u, "cfg 3 start $DF00 count 2 yields two SIDs");
   US_CHECK(parse_v5_multi(0x33, 0xf0, t) == false,
@@ -298,7 +296,7 @@ int test_tune_runs(void)
   US_CHECK_EQ_U(flushes, 50u, "one flush per frame");
   US_CHECK(volume_seen != 0, "the tune set a volume");
 
-  /* the first few writes, so a change of behaviour is visible in the log */
+  /* the first few writes, a change of behaviour shows in the log */
   unsigned shown = 0;
   for (size_t i = 0; i < trace.count() && shown < 5; i++) {
     if (trace.at(i).kind != 'w') continue;
@@ -321,17 +319,11 @@ int test_tune_runs(void)
   return 0;
 }
 
-/* ---- the sweep's own listing --------------------------------------------- */
+/* ---- the sweep listing --------------------------------------------------- */
 
 int test_dir_listing(void)
 {
-  /* The sweeps are the regression net for the whole emulation, and for a while
-   * the net had a hole in it: they listed the collection through
-   * `popen("ls ...")`, which reported 160 tunes, then 62, then 0 on three
-   * consecutive runs of an unchanged tree, and a sweep that found nothing
-   * printed "skipped" and passed. This is the test that the replacement cannot
-   * do that again.
-   */
+  /* A sweep that lists nothing must not pass as skipped, listing has to be reliable and repeatable */
   namespace fs = std::filesystem;
   std::error_code ec;
 
@@ -343,23 +335,21 @@ int test_dir_listing(void)
   std::vector<std::string> got;
 
   /* A directory that is not there is a machine without the collection. */
-  US_CHECK(us_list_dir((root / "nothing-here").string().c_str(), ".sid", got)
-             == UsDir::Missing, "a missing directory says so");
+  US_CHECK(us_list_dir((root / "nothing-there").string().c_str(), ".sid", got)
+             == UsDir::Missing, "a missing directory is reported");
 
-  /* A directory that is there and yields nothing is the case that used to pass
-   * quietly. It has to be distinguishable from the one above. */
+  /* A directory that is there and yields nothing must be distinguishable from the one above */
   US_CHECK(us_list_dir(root.string().c_str(), ".sid", got) == UsDir::Empty,
            "an empty directory is not the same as a missing one");
   US_CHECK_EQ_U(got.size(), 0u, "nothing was listed from an empty directory");
 
-  /* Files, sorted, and only the extension asked for. Written out of order on
-   * purpose: a sweep that fails has to name the same tune on every machine. */
+  /* Files, sorted, only the extension asked for ~ written out of order on purpose, a failing sweep names the same tune on every machine */
   for (const char * name : { "b.sid", "a.sid", "c.SID", "notes.txt", "d.prg" }) {
     FILE * f = fopen((root / name).string().c_str(), "wb");
     if (f != nullptr) { fputc('x', f); fclose(f); }
   }
   US_CHECK(us_list_dir(root.string().c_str(), ".sid", got) == UsDir::Listed,
-           "a directory with files says so");
+           "a directory with files is reported as listed");
   US_CHECK_EQ_U(got.size(), 3u, "three .sid files, and not the .txt or the .prg");
   if (got.size() == 3) {
     US_CHECK_EQ_STR(fs::path(got[0]).filename().string().c_str(), "a.sid",
@@ -368,8 +358,7 @@ int test_dir_listing(void)
                     "the extension test is case insensitive");
   }
 
-  /* Appends rather than clears, which is what lets one sweep walk two
-   * directories into one list. */
+  /* Appends, one sweep can walk two directories into one list */
   const size_t before = got.size();
   us_list_dir(root.string().c_str(), ".prg", got);
   US_CHECK_EQ_U(got.size(), before + 1, "a second call appends");
@@ -382,9 +371,7 @@ int test_dir_listing(void)
 
 int test_tune_sweep(void)
 {
-  /* Load every tune in the collection, run a second of each, and report how
-   * many produced SID writes. This is the regression net for everything the
-   * emulation does: a tune that stops writing has hit a bug somewhere. */
+  /* Load every tune in the collection, run a second of each and report how many produced SID writes ~ a tune that stops writing hit a bug */
   static const char * const dirs[] = { US_TUNE_DIR "/psid", US_TUNE_DIR "/rsid" };
 
   unsigned total = 0, parsed = 0, played = 0, silent = 0;
@@ -419,9 +406,7 @@ int test_tune_sweep(void)
     if (!player.init_tune(0)) continue;
 
     backend.reset();
-    /* Six seconds, not one: several tunes unpack or wait for a couple of
-     * seconds before their first register write, and judging them after one
-     * second calls a working tune silent. */
+    /* Six seconds, several tunes unpack or wait a couple of seconds before their first register write */
     player.run_frames(300);
 
     if (backend.writes > 50) ++played;
@@ -431,10 +416,7 @@ int test_tune_sweep(void)
   printf("  %u tunes, %u parsed, %u played, %u silent\n",
          total, parsed, played, silent);
 
-  /* No collection on this machine at all: the suite still has to run, and a
-   * skip is honest. A collection that is *there* and yielded nothing is not:
-   * that is a broken harness reporting a pass, which is what this whole
-   * arrangement replaced. See us_list_dir(). */
+  /* No collection on this machine: the suite still runs and a skip is fine ~ a collection that is there and yields nothing is a broken harness, see us_list_dir() */
   if (present == 0) {
     ++us_test_checks;
     printf("  skipped the sweep, no tune directories on this machine\n");
@@ -444,8 +426,7 @@ int test_tune_sweep(void)
   US_CHECK(total > 0, "the sweep found tunes to run");
   if (total == 0) return us_test_failures;
   US_CHECK_EQ_U(parsed, total, "every tune in the collection parses");
-  /* Every tune in the collection plays. A single tune dropping out of this
-   * is a regression worth stopping for. */
+  /* Every tune in the collection plays, one dropping out is a regression */
   US_CHECK_EQ_U(played, total, "every tune plays");
 
   return 0;
@@ -453,18 +434,9 @@ int test_tune_sweep(void)
 
 } /* namespace */
 
-/* ---- the recorded boot state still matches the ROMs -------------------- *
- *
- * `src/player/boot_image.h` is what a C64 looks like once the KERNAL has
- * reached the BASIC prompt, recorded so that starting a tune does not have to
- * spend 2 240 002 cycles working it out again. It is generated, and generated
- * files rot: if the ROMs in src/mem/roms are ever replaced, the table goes on
- * describing the old ones and every tune starts on a machine that never
- * existed. So it is checked against the real thing here.
- *
- * Regenerate with temp/tools/gen_boot_image.cpp if this fails after a
- * deliberate ROM change.
- */
+/* ---- the recorded boot state matches the ROMs --------------------------- */
+/* src/player/boot_image.h = recorded C64 state once the KERNAL reached the BASIC prompt (saves 2 240 002 cycles per tune start) */
+/* Generated file, checked against the real boot ~ regenerate with temp/tools/gen_boot_image.cpp after a ROM change in src/mem/roms */
 int test_boot_image_matches_roms(void)
 {
   TestC64 c64;
@@ -495,8 +467,7 @@ int test_boot_image_matches_roms(void)
   US_CHECK_EQ_U(phase, kBootImagePhase,
                 "and finishes at the point in the frame the table records");
 
-  /* every byte, both ways round: nothing recorded that is not there, and
-   * nothing there that is not recorded */
+  /* every byte both ways: nothing recorded that is missing, nothing there that is unrecorded */
   unsigned wrong = 0, missing = 0, count = 0;
   uint16_t next = 0;
   for (uint32_t addr = 0; addr < 0x10000; addr++) {
@@ -527,7 +498,7 @@ int test_boot_image_matches_roms(void)
 int test_win1252_to_utf8(void)
 {
   char out[kUtf8FieldSize];
-  /* 0xe1 a-acute: two bytes; 0x80 euro sign: three; ASCII passes through */
+  /* 0xe1 a-acute: two bytes. 0x80 euro sign: three ~ ASCII passes through */
   const char in[] = { 'M', 'i', 'h', static_cast<char>(0xe1), ' ',
                       static_cast<char>(0x80), 0 };
   win1252_to_utf8(in, out, sizeof(out));

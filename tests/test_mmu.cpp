@@ -1,17 +1,16 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * test_mmu.cpp
- * Step 2.4 gate: the full 32 entry PLA mode table, the processor port, and
- * the KERNAL booting far enough to print the BASIC banner.
+ * Full 32 entry PLA mode table, the processor port and the KERNAL booting
+ * far enough to print the BASIC banner
  *
- * The expected bank map below is written out literally from the documented
- * mode table (https://www.c64-wiki.com/wiki/Bank_Switching#Mode_Table) while
- * the PLA itself derives the same thing from rules, so a mistake in one
- * cannot hide in the other.
+ * Expected bank map is written out literally from the mode table
+ * (https://www.c64-wiki.com/wiki/Bank_Switching#Mode_Table),
+ * the PLA derives it from rules
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -198,14 +197,11 @@ int test_memory_map(void)
   US_CHECK_EQ_U(m.mmu().read(0xbfff), roms.basic[kRomSizeBasic - 1], "end of BASIC");
   US_CHECK_EQ_U(m.mmu().read(0xe000), roms.kernal[0], "KERNAL visible at $e000");
   US_CHECK_EQ_U(m.mmu().read(0xffff), roms.kernal[kRomSizeKernal - 1], "end of KERNAL");
-  /* A chip that is fitted answers for its own page. The machine has a VIC,
-   * so $d000 is the VIC and not the RAM underneath. */
+  /* A fitted chip answers for its page ~ the machine has a VIC, $d000 is the VIC and the RAM underneath is hidden */
   m.ram().dma_write(0xd012, 0x5a);
   US_CHECK(m.mmu().read(0xd012) != 0x5au, "the VIC answers for its own page");
 
-  /* An empty socket does not drive the bus, so the access falls through to
-   * the RAM underneath instead of floating. The expansion IO page has
-   * nothing in it. */
+  /* An empty socket does not drive the bus, the access falls through to the RAM underneath ~ the expansion IO page is empty */
   m.ram().dma_write(0xde00, 0x5a);
   US_CHECK_EQ_U(m.mmu().read(0xde00), 0x5au, "an empty IO slot reads the RAM under it");
   m.mmu().write(0xde01, 0x3c);
@@ -260,7 +256,7 @@ int test_vic_view(void)
   /* bank 1: no character generator, RAM all the way */
   m.mmu().set_vic_bank(1);
   US_CHECK_EQ_U(m.mmu().vic_read(0x1000), 0x22u,
-                "bank 1 has no character ROM, so $5000 shows through");
+                "bank 1 has no character ROM, $5000 shows through");
 
   return 0;
 }
@@ -280,8 +276,7 @@ bool screen_contains(Ram & ram, const data_t * codes, size_t len)
 
 int test_kernal_boot(void)
 {
-  /* The machine is complete apart from the SID now, so this is the real boot
-   * path: KERNAL init, the screen editor's raster wait, BASIC's banner. */
+  /* Machine complete apart from the SID. Real boot path: KERNAL init, screen editor raster wait, BASIC banner */
   constexpr uint64_t kCycleLimit = 20ull * 1000ull * 1000ull;
 
   /* "COMMODORE 64 BASIC" and "READY." in screen codes */

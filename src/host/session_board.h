@@ -1,12 +1,12 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
- * host/session_board.h
- * Session output to USBSID-Pico boards through the driver. Frames are paced
- * on the wall clock, the boards play every write at its cycle.
+ * session_board.h
+ * Session output to USBSID-Pico boards through the driver
+ * Frames are paced on the wall clock, boards play each write at its cycle
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -38,7 +38,7 @@
 
 namespace usbsid {
 
-/** @brief One or more USBSID-Pico boards. */
+/** @brief One or more USBSID-Pico boards */
 class BoardSessionSink final : public SessionSink
 {
   public:
@@ -61,7 +61,7 @@ class BoardSessionSink final : public SessionSink
     void restore(Machine & machine) override;
     void detach(Machine & machine) override;
 
-    /** @brief The opened boards, for board information. */
+    /** @brief The opened boards */
     const UsbSidBackend & boards(void) const { return usb_; }
 
   private:

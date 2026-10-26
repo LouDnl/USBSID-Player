@@ -1,12 +1,11 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
- * host/audio_out.cpp
- * The one translation unit that compiles miniaudio. See audio_out.h for why the
- * ring exists.
+ * audio_out.cpp
+ * The one translation unit that compiles miniaudio (see header)
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -32,10 +31,8 @@
 #include <cstring>
 #include <thread>
 
-/* miniaudio is vendored under lib/miniaudio and is public domain or MIT-0, so
- * it sits happily inside a GPLv2 project. Only the parts that are used: it
- * defaults to compiling every backend on the platform plus decoders for several
- * file formats, none of which this needs, and the build time shows it. */
+/* miniaudio is vendored under lib/miniaudio (public domain or MIT-0)
+ * Decoders and the other unused parts are disabled to cut build time */
 #define MA_IMPLEMENTATION
 #define MA_NO_DECODING
 #define MA_NO_ENCODING
@@ -48,9 +45,8 @@ namespace usbsid {
 
 namespace {
 
-/* The device callback, with miniaudio's exact signature so no cast is needed.
- * Audio thread: it may not allocate, lock, or touch anything the main thread
- * writes apart from the ring's tail index. */
+/* Device callback with the miniaudio signature, runs on the audio thread
+ * No allocating, locking or touching main thread data except the ring tail */
 void us_audio_callback(ma_device * dev, void * output, const void * input,
                        ma_uint32 frames)
 {
@@ -58,12 +54,11 @@ void us_audio_callback(ma_device * dev, void * output, const void * input,
   if (dev == nullptr || output == nullptr) return;
   AudioOut * self = static_cast<AudioOut *>(dev->pUserData);
   if (self == nullptr) return;
-  /* miniaudio's `frames` is audio frames; fill() (and the ring underneath)
-   * wants raw interleaved samples - see push()'s own note. */
+  /* miniaudio frames are audio frames, fill() wants raw interleaved samples */
   self->fill(static_cast<int16_t *>(output), frames * self->channels());
 }
 
-/** @brief Steady clock in microseconds. Lock free, safe on the audio thread. */
+/** @brief Steady clock in microseconds, lock free */
 int64_t steady_us(void)
 {
   return std::chrono::duration_cast<std::chrono::microseconds>(
@@ -83,9 +78,7 @@ void AudioOut::fill(int16_t * out, size_t frames)
   last_fill_us_.store(steady_us(), std::memory_order_relaxed);
   const size_t got = pop(out, frames);
   if (got < frames) {
-    /* Silence for the rest, and say so. Inventing silence is the only thing a
-     * device callback can do when it is starved, but doing it quietly makes a
-     * host that cannot keep up look like a quiet tune. */
+    /* Silence for the rest, counted as underrun */
     std::memset(out + got, 0, (frames - got) * sizeof(int16_t));
     underruns_.fetch_add(frames - got, std::memory_order_relaxed);
   }
@@ -111,23 +104,20 @@ bool AudioOut::open(unsigned rate, unsigned channels, unsigned buffer_ms)
     return false;
   }
 
-  /* What it actually gave us. Asking for 44100 on a device fixed at 48000 gets
-   * a resampler for free whether or not that was wanted, so the synthesis is
-   * configured for this and not for the request. */
+  /* Rate the device actually gave, synthesis is configured for this */
   rate_ = dev->sampleRate;
   if (rate_ == 0) rate_ = rate;
   channels_ = channels;
 
   const size_t ms = (buffer_ms < 20u) ? 20u : buffer_ms;
-  /* Ring is raw interleaved samples (see push()'s own note), so this many
-   * frames of buffering is `* channels_` that many samples. */
+  /* Ring holds raw interleaved samples, frames * channels_ */
   size_t frames = (static_cast<size_t>(rate_) * ms) / 1000u;
   if (frames < 1024) frames = 1024;
-  ring_.assign(frames * channels_ + 1, 0);   /* one spare, so full and empty differ */
+  ring_.assign(frames * channels_ + 1, 0);   /* One spare, full differs from empty */
   head_.store(0, std::memory_order_relaxed);
   tail_.store(0, std::memory_order_relaxed);
   underruns_.store(0, std::memory_order_relaxed);
-  /* Stall time counts from the start, a device that never calls back stalls */
+  /* Stall time counts from the start */
   last_fill_us_.store(steady_us(), std::memory_order_relaxed);
 
   if (ma_device_start(dev) != MA_SUCCESS) {
@@ -148,11 +138,8 @@ void AudioOut::close(void)
   if (device_ != nullptr) {
     ma_device * dev = static_cast<ma_device *>(device_);
     device_ = nullptr;
-    /* ma_device_uninit() has no timeout and can block forever on at least
-     * one real backend (PipeWire/PulseAudio, a corked stream on a suspended
-     * sink), so teardown runs on its own detached thread instead of
-     * blocking this call. Leaked if it never finishes; process exit tears
-     * it down regardless. */
+    /* ma_device_uninit() can block forever on PipeWire/PulseAudio (corked stream
+     * on a suspended sink), detached thread, leaked if it never finishes */
     std::thread([dev] {
       ma_device_uninit(dev);
       delete dev;
@@ -195,7 +182,7 @@ size_t AudioOut::push(const int16_t * samples, size_t n)
     ring_[h] = samples[i];
     h = (h + 1) % cap;
   }
-  /* Release: the samples above must be visible before the index that says so. */
+  /* Release, samples must be visible before the index */
   head_.store(h, std::memory_order_release);
   return take;
 }
@@ -227,9 +214,7 @@ bool AudioOut::stalled(void) const
 void AudioOut::drain(void)
 {
   if (!open_) return;
-  /* Wait for the device to play what is already queued, so a tune that has
-   * finished is heard to its end instead of being cut off by close(). Bounded,
-   * because a device that has stopped consuming would otherwise hang the exit. */
+  /* Play out what is queued, bounded in case the device stopped consuming */
   for (int i = 0; i < 400 && queued() > 0 && !stalled(); i++) {
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
   }

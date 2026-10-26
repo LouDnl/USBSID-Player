@@ -1,12 +1,12 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * mos906114_pla.h
- * The 906114 PLA: it turns the three processor port latches and the two
- * cartridge lines into the bank map the MMU decodes against.
+ * The 906114 PLA, turns the three processor port latches and two cartridge
+ * lines into the bank map
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -35,21 +35,21 @@
 namespace usbsid {
 
 /**
- * @brief What a bank switching zone currently contains.
+ * @brief Contents of a bank switching zone
  */
 enum class Bank : uint8_t {
   Ram,     /* plain RAM */
   Basic,   /* BASIC ROM at $a000 */
   Kernal,  /* KERNAL ROM at $e000 */
   CharRom, /* character generator at $d000 */
-  Io,      /* VIC, SID, colour RAM, CIAs, expansion IO */
+  Io,      /* VIC, SID, color RAM, CIAs, expansion IO */
   CartLo,  /* cartridge ROML at $8000 */
   CartHi,  /* cartridge ROMH at $a000 or $e000 */
   Open,    /* unmapped, reads float */
 };
 
 /**
- * @brief The seven bank switching zones of a C64.
+ * @brief The seven bank switching zones of a C64
  *
  * https://www.c64-wiki.com/wiki/Bank_Switching#Bank_Switching_Zones
  */
@@ -80,16 +80,15 @@ class Mos906114Pla
     void reset(void);
 
     /**
-     * @brief Recompute the bank map.
+     * @brief Recompute the bank map
      *
-     * @param port    the three low bits of the processor port at $01
-     * @param game    expansion port GAME line, 1 = not asserted (no cartridge)
-     * @param exrom   expansion port EXROM line, 1 = not asserted
+     * @param port   three low bits of the processor port at $01
+     * @param game   expansion port GAME line, 1 = not asserted (no cartridge)
+     * @param exrom  expansion port EXROM line, 1 = not asserted
      */
     void update(data_t port, bool game, bool exrom);
 
-    /* Cartridge lines, kept so a later cartridge implementation has a place
-     * to drive them from. With no cartridge both are high. */
+    /* Cartridge lines, both high with no cartridge */
     void set_cartridge_lines(bool game, bool exrom);
 
     US_ALWAYS_INLINE Bank bank(Zone zone) const
@@ -105,12 +104,10 @@ class Mos906114Pla
     US_ALWAYS_INLINE data_t port(void) const { return port_; }
     US_ALWAYS_INLINE bool game(void) const { return game_; }
     US_ALWAYS_INLINE bool exrom(void) const { return exrom_; }
-    /* Ultimax is EXROM high and GAME low, the one configuration that unmaps
-     * most of the address space */
+    /* Ultimax is EXROM high and GAME low, unmaps most of the address space */
     US_ALWAYS_INLINE bool ultimax(void) const { return exrom_ && !game_; }
 
-    /* Mode number as used by the documentation tables, 0..31:
-     * bit 0 LORAM, 1 HIRAM, 2 CHAREN, 3 GAME, 4 EXROM */
+    /* Mode number 0..31: bit 0 LORAM, 1 HIRAM, 2 CHAREN, 3 GAME, 4 EXROM */
     US_ALWAYS_INLINE uint8_t mode(void) const { return mode_; }
 
   private:

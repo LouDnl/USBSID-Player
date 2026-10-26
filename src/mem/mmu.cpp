@@ -1,10 +1,10 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * mmu.cpp
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -47,8 +47,7 @@ Mmu::Mmu(Ram & ram, Mos906114Pla & pla)
 
 void Mmu::reset(void)
 {
-  /* Everything is an input after reset, so the three latches read as the
-   * pull ups: LORAM, HIRAM and CHAREN all high, which is mode 31. */
+  /* All inputs after reset, LORAM HIRAM CHAREN read high (mode 31) */
   port_dir_  = 0x00;
   port_data_ = 0x00;
   vic_bank_  = 0;
@@ -65,15 +64,14 @@ data_t Mmu::port_read(void) const
 
 void Mmu::update_banks(void)
 {
-  /* The PLA sees the effective level on the pins, which for an input bit is
-   * the pull up and not the latch. */
+  /* PLA sees the pin level, pull up for an input bit */
   pla_.update(port_read(), pla_.game(), pla_.exrom());
 }
 
 data_t Mmu::read_rom(Bank bank, addr_t addr) const
 {
   switch (bank) {
-    /* An absent BASIC or character ROM reads the RAM underneath */
+    /* Absent BASIC or character ROM reads the RAM underneath */
     case Bank::Basic:
       if (US_UNLIKELY(roms.basic == nullptr)) return ram_.read(addr);
       return roms.basic[addr - kAddrBasicFirstPage];
@@ -88,14 +86,7 @@ data_t Mmu::read_rom(Bank bank, addr_t addr) const
 }
 
 /**
- * @brief The IO block.
- *
- * A chip only answers if it is actually fitted. A socket with nothing in it
- * does not drive the bus, so the access falls through to the RAM underneath,
- * which is also how the existing player mirrors SID writes into RAM. That
- * matters in practice: a machine with no second SID still reads and writes
- * $d420 sensibly, and test programs that use a spare IO address as a
- * scratchpad behave the same as on the real thing.
+ * @brief The IO block, a chip only answers if fitted, otherwise the access falls through to the RAM underneath
  */
 data_t Mmu::read_io(addr_t addr)
 {
@@ -104,10 +95,8 @@ data_t Mmu::read_io(addr_t addr)
       return (vic_ != nullptr) ? vic_->io_read(addr) : ram_.read(addr);
     case 0x0400: case 0x0500: case 0x0600: case 0x0700: /* $d400-$d7ff SID */
       return (sid_ != nullptr) ? sid_->io_read(addr) : ram_.read(addr);
-    case 0x0800: case 0x0900: case 0x0a00: case 0x0b00: /* $d800-$dbff colour */
-      /* Colour RAM is four bits wide. The upper nybble is whatever the VIC
-       * last put on the bus; returning the nybble alone keeps it predictable
-       * and nothing in a SID player depends on the floating half. */
+    case 0x0800: case 0x0900: case 0x0a00: case 0x0b00: /* $d800-$dbff color */
+      /* color RAM is 4 bits wide, upper nybble is not driven */
       return ram_.read_color(addr);
     case 0x0c00:                                        /* $dc00-$dcff CIA1 */
       return (cia1_ != nullptr) ? cia1_->io_read(addr) : ram_.read(addr);
@@ -155,7 +144,7 @@ void Mmu::write_io(addr_t addr, data_t value)
 
 data_t Mmu::read(addr_t addr)
 {
-  /* The 6510 intercepts its own port before anything else sees the address */
+  /* 6510 port is handled first */
   if (US_UNLIKELY(addr <= kAddrMemoryLayout)) {
     return (addr == kAddrDataDirection) ? port_dir_ : port_read();
   }
@@ -182,7 +171,7 @@ data_t Mmu::read(addr_t addr)
     case Bank::CartHi:
     case Bank::Open:
     default:
-      /* No cartridge support: those zones read as open bus */
+      /* No cartridge support, open bus */
       return kOpenBus;
   }
 }
@@ -195,10 +184,9 @@ void Mmu::write(addr_t addr, data_t value)
     } else {
       port_data_ = value;
     }
-    US_LOG_IF(pla, "[PLA] $%04x:%02x port, mode now %02x\n", addr, value,
+    US_LOG_IF(pla, "[PLA] $%04x:%02x port, new mode %02x\n", addr, value,
               port_read());
-    /* The RAM underneath keeps a copy: the CPU cannot see it, but the VIC
-     * reads that address as ordinary RAM. */
+    /* RAM underneath keeps a copy, VIC reads it as RAM */
     ram_.dma_write(addr, value);
     update_banks();
     return;
@@ -210,8 +198,7 @@ void Mmu::write(addr_t addr, data_t value)
     return;
   }
 
-  /* Writes always land in the RAM underneath, whatever is mapped over it.
-   * That is what makes writing through the KERNAL ROM work. */
+  /* Writes always land in the RAM underneath (write through KERNAL ROM) */
   US_LOG_IF(read_writes, "[W] $%04x:%02x ram\n", addr, value);
   ram_.write(addr, value);
 }

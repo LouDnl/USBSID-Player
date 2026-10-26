@@ -1,16 +1,14 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * sid_backend.h
- * Where SID register writes go.
+ * Where SID register writes go
  *
- * The emulation decides *what* is written and *when*, in cycles. A backend
- * decides what to do with that: send it to USBSID-Pico, throw it away, or
- * record it. Keeping the two apart is what lets the whole player be tested
- * without hardware, and it is the seam a software SID would slot into later.
+ * The emulation decides what is written and when (in cycles)
+ * A backend sends it to USBSID-Pico, throws it away or records it
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -44,32 +42,28 @@ class SidBackend
     virtual ~SidBackend(void) = default;
 
     /**
-     * @brief One register write.
+     * @brief Write one register
      *
-     * @param reg     physical register, chip number already folded in:
-     *                $00-$1f is the first SID, $20-$3f the second, and so on,
-     *                up to kMaxSids (15, see sidfile.h) chips at $1c0-$1df.
-     *                addr_t (16 bit), not data_t: 15 chips no longer fit the
-     *                top 3 bits of an 8 bit register byte the way 8 did. A
-     *                backend that only ever talks to a real board (at most 4
-     *                sockets) still gets a value under $80 for those and can
-     *                drop anything at or above it exactly as before - see
-     *                UsbSidBackend::write() and EmbeddedSidBackend::write().
-     * @param value   the byte written
-     * @param cycles  cycles since the previous event, never more than $ffff
+     * @param reg    physical register with the chip number folded in
+     *               $00-$1f is the first SID, $20-$3f the second etc
+     *               up to kMaxSids (15, see sidfile.h) chips at $1c0-$1df
+     *               addr_t is 16 bit, 15 chips do not fit in an 8 bit register byte
+     *               Backends for a real board (max 4 sockets) drop anything at or above $80
+     * @param value  byte written
+     * @param cycles cycles since the previous event, max $ffff
      */
     virtual void write(addr_t reg, data_t value, uint16_t cycles) = 0;
 
-    /** @brief One register read. Backends without real hardware may guess. */
+    /** @brief Read one register, backends without hardware may guess */
     virtual data_t read(addr_t reg, uint16_t cycles) { (void)reg; (void)cycles; return 0; }
 
     /**
-     * @brief A read the machine answered itself, reported for recording only.
+     * @brief Report a read answered by the machine, for recording only
      *
-     * Not a bus access: the cycle base is untouched and nothing is sent on.
+     * No bus access, cycle base untouched, nothing is sent on
      *
      * @param reg    register the access maps to
-     * @param value  what the tune read
+     * @param value  value the tune read
      * @param cycles cycles since the previous event
      */
     virtual void note_read(addr_t reg, data_t value, uint16_t cycles)
@@ -77,16 +71,16 @@ class SidBackend
       (void)reg; (void)value; (void)cycles;
     }
 
-    /** @brief More than $ffff cycles passed with nothing to write. */
+    /** @brief More than $ffff cycles passed with nothing to write */
     virtual void wait(uint16_t cycles) { (void)cycles; }
 
-    /** @brief End of frame: push whatever is buffered. */
+    /** @brief End of frame, push buffered writes */
     virtual void flush(void) {}
 
     virtual void reset(void) {}
 };
 
-/** @brief Throws everything away. The default, and what the tests run on. */
+/** @brief Throws everything away, the default */
 class NullSidBackend final : public SidBackend
 {
   public:

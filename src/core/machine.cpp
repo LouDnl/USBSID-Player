@@ -1,10 +1,10 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * machine.cpp
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -34,7 +34,7 @@ Machine::Machine(void)
     vic_(bus_, VideoModel::Pal6569), keyboard_(cia1_), sid_(bus_, null_sid_)
 {
   bus_.attach_cpu(&cpu_);
-  /* and again by their real types, so a cycle costs four direct calls */
+  /* Direct calls by real type, 4 per cycle */
   bus_.attach_fast(&vic_, &cia1_, &cia2_, &cpu_);
   cpu_.attach_mmu(&mmu_);
   bus_.attach_cia1(&cia1_);
@@ -44,7 +44,7 @@ Machine::Machine(void)
   mmu_.attach_cia2(&cia2_);
   mmu_.attach_vic(&vic_);
   mmu_.attach_sid(&sid_);
-  /* the FM/OPL addresses live in the second expansion IO page */
+  /* FM/OPL addresses are in the second expansion IO page */
   mmu_.attach_io2(&sid_);
   cia2_.set_port_observer(this);
   vic_.set_frame_observer(&sid_);
@@ -55,15 +55,14 @@ Machine::Machine(void)
 void Machine::set_video_model(VideoModel model)
 {
   vic_.set_model(model);
-  /* the CIAs divide the system clock down to the TOD tick */
+  /* CIAs divide the system clock down to the TOD tick */
   cia1_.set_clock_hz(vic_.timing().clock_hz);
   cia2_.set_clock_hz(vic_.timing().clock_hz);
 }
 
 void Machine::cia_port_changed(uint8_t port, data_t value)
 {
-  /* Only CIA2 reports here. Port A bits 0 and 1 select the 16 KB bank the
-   * VIC sees, inverted: %11 is bank 0. */
+  /* CIA2 port A bits 0 and 1 select the 16 KB VIC bank, inverted (%11 = bank 0) */
   if (port == 0) {
     mmu_.set_vic_bank(static_cast<uint8_t>(~value & 0x03));
   }
@@ -74,7 +73,7 @@ void Machine::power_on(void)
   ram_.reset();
   pla_.reset();
   mmu_.reset();
-  bus_.reset(); /* also resets the cpu, which fetches the reset vector */
+  bus_.reset(); /* Also resets the cpu */
 }
 
 void Machine::reset(void)

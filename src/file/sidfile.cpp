@@ -1,10 +1,10 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * sidfile.cpp
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -49,8 +49,7 @@ void copy_text(char * dst, const data_t * src, size_t n)
   dst[n] = 0;
 }
 
-/* A second or third SID address is a byte holding the middle nybbles of
- * $dxx0. Only some of them are legal. */
+/* Second or third SID address byte holds the middle nybbles of $dxx0, only some are legal */
 addr_t decode_sid_addr(uint8_t byte)
 {
   if (byte == 0) return 0;
@@ -62,14 +61,10 @@ addr_t decode_sid_addr(uint8_t byte)
 }
 
 /**
- * @brief Decode the v5 96 byte metadata area at +0x16.
+ * @brief Decode the v5 96 byte metadata area at +0x16
  *
- * Three Windows-1252 strings, name then author then released, each
- * null-terminated except released may instead fill the area exactly. Returns
- * false when the layout does not hold (any field missing, empty, or run past
- * the 96 bytes), which tells the caller to fall back to the fixed 32 byte
- * fields instead. See the v5 section of the file format doc for the worked
- * example this mirrors exactly.
+ * Three Windows-1252 strings (name, author, released), NUL terminated except released may fill the area.
+ * Returns false if the layout does not hold, caller falls back to the fixed 32 byte fields
  */
 bool parse_meta_v5(const data_t * area, char * name, size_t name_cap,
                     char * author, size_t author_cap,
@@ -110,13 +105,7 @@ bool parse_meta_v5(const data_t * area, char * name, size_t name_cap,
   return true;
 }
 
-/* ---- v5 SID panning ------------------------------------------------------
- *
- * flags bits 6-7 (layout) and 8-9 (mode). Every formula below is transcribed
- * from the spec's own description of each mode/layout combination and was
- * checked against every row of the spec's worked tables (N = 1 to 15) while
- * this was written; nothing here is guessed.
- */
+/* ---- v5 SID panning (flags bits 6-7 layout, 8-9 mode) ---- */
 
 void pan_fill(SidPan * out, uint8_t start, uint8_t count, SidPan p)
 {
@@ -156,7 +145,7 @@ void pan_reverse_lr(SidPan * out, uint8_t n)
   }
 }
 
-/* Stable partition: every non-Center entry first, in order, then every Center. */
+/* Stable partition, non Center entries first then Center */
 void pan_move_center_to_end(SidPan * out, uint8_t n)
 {
   SidPan tmp[kMaxSids];
@@ -185,7 +174,7 @@ void pan_group(SidPanLayout layout, uint8_t n, SidPan * out)
   }
 
   if (layout == SidPanLayout::LCR) {
-    /* 1-9 SIDs: one group. 10-15: a group of 6, then the remaining 4-9. */
+    /* 1-9 SIDs one group, 10-15 a group of 6 then the remaining 4-9 */
     const uint8_t g1 = static_cast<uint8_t>((n <= 9) ? n : 6);
     const uint8_t g2 = static_cast<uint8_t>(n - g1);
     uint8_t pos = 0;
@@ -286,8 +275,7 @@ uint32_t SidFile::embedded_song_length_ms(uint16_t song) const
 {
   if (song_length_table == nullptr || song < 1 || song > song_length_table_count) return 0;
   const data_t * p = song_length_table + (static_cast<size_t>(song - 1) * 4);
-  /* Each byte is two BCD digits. Word 0 is MM:SS, word 1 is milliseconds with
-   * its top nibble always zero (0x0500 = 500ms), per the spec's own example. */
+  /* Each byte is two BCD digits, word 0 = MM:SS, word 1 = milliseconds (top nibble zero) */
   auto bcd = [](data_t b) -> uint32_t {
     return static_cast<uint32_t>((b >> 4) * 10u + (b & 0x0fu));
   };
@@ -308,20 +296,13 @@ bool sidfile_parse(const data_t * bytes, size_t len, SidFile & out)
 
   out.is_rsid = rsid;
   out.version = be16(bytes + 0x04);
-  /* Versions 1 to 5 are the documented ones. The four SID community also
-   * ships an extended header, 130 bytes long, that carries a fourth chip
-   * address; old player lists those offsets as SIDFILEPLUS, and real files
-   * ship version numbers above 4 for it too. It is accepted here rather than
-   * rejected, because the tunes exist and play. It cannot collide with a
-   * real v5 file: v5 keeps the ordinary 0x7c byte header, so "plus" is only
-   * ever true when dataOffset says the header is bigger than that. */
+  /* Versions 1 to 5 are documented. Also accept the 130 byte extended header with a fourth
+   * chip address (SIDFILEPLUS), seen with version numbers above 4. A v5 file keeps the 0x7c byte
+   * header, plus is only true when dataOffset says the header is bigger */
   const bool plus = (out.version > 4) && (len >= 0x82) && (be16(bytes + 0x06) >= 0x82);
   const bool v5 = (out.version == 5) && !plus;
   if (!plus && (out.version < 1 || out.version > 5)) return false;
-  /* RSID is "based on PSIDv2NG" (spec, "Some words about the Real C64 SID
-   * file format") - it does not exist before v2. `plus` is a non-spec
-   * community extension this parser accepts leniently regardless of what it
-   * claims to be, so it stays out of every RSID MUST check added below. */
+  /* RSID is based on PSIDv2NG, absent before v2. plus is accepted leniently and skips the RSID checks below */
   if (!plus && out.is_rsid && out.version < 2) return false;
 
   out.data_offset = be16(bytes + 0x06);
@@ -332,23 +313,9 @@ bool sidfile_parse(const data_t * bytes, size_t len, SidFile & out)
   out.start_song  = be16(bytes + 0x10);
   out.speed       = be32(bytes + 0x12);
 
-  /* RSID reserves loadAddress and speed (spec: "The above fields MUST be
-   * checked and if any differ from the above then the tune MUST be
-   * rejected"). loadAddress==0 is what triggers the payload-prefix
-   * convention below, so this check has to run on the raw header value,
-   * before that substitution happens.
-   *
-   * playAddress is deliberately NOT enforced here even though the spec
-   * reserves it too: this player installs the same psiddrv-style driver for
-   * every tune (psiddrv_install.cpp, called unconditionally from
-   * Player::init_tune() regardless of is_rsid) and that driver calls
-   * tune.play_addr on every frame interrupt, RSID or not - it does not
-   * implement the spec's separate assumption that an RSID installs its own
-   * interrupt handler and is never polled externally. A real file
-   * (tests/.../rsid/Edge_of_Disgrace_FAKERSID.sid, named for exactly this)
-   * has a nonzero playAddress and depends on this player actually using it;
-   * rejecting the file over the reserved-field technicality would silence a
-   * tune that plays correctly today. */
+  /* RSID reserves loadAddress and speed, reject if set. Runs on the raw header value.
+   * playAddress is not enforced, the driver calls play_addr for every tune and
+   * some files (Edge_of_Disgrace_FAKERSID.sid) depend on it */
   if (!plus && out.is_rsid && (out.load_addr != 0 || out.speed != 0)) {
     return false;
   }
@@ -357,8 +324,7 @@ bool sidfile_parse(const data_t * bytes, size_t len, SidFile & out)
   if (out.start_song == 0) out.start_song = 1;
   if (out.start_song > out.songs) out.start_song = 1;
 
-  /* v5 allows a variable length metadata area; fall back to the classic fixed
-   * 32 byte fields whenever it does not parse cleanly (see parse_meta_v5). */
+  /* Use the fixed 32 byte fields if the v5 variable length area does not parse */
   if (!v5 || !parse_meta_v5(bytes + 0x16, out.name, sizeof(out.name),
                              out.author, sizeof(out.author),
                              out.released, sizeof(out.released))) {
@@ -375,15 +341,11 @@ bool sidfile_parse(const data_t * bytes, size_t len, SidFile & out)
     out.reserved   = be16(bytes + 0x7a);
   }
 
-  /* Flags bit 0: the payload is Compute!'s Sidplayer MUS data, not code this
-   * player can call - see SidFile::is_mus_player's own comment. Applies to
-   * v2-5; always false for v1, which has no flags field (out.flags stays 0). */
+  /* Flags bit 0, MUS data (v2-5 only, v1 has no flags) */
   out.is_mus_player = (out.flags & 0x01) != 0;
 
-  /* v5 specific flags bits: 6-7 panning layout, 8-9 panning mode, 10 embedded
-   * song lengths, 11 FM OPL. Versions 3 and 4 use bits 6-9 for the second and
-   * third chip's SID model instead; that meaning is not read into anything
-   * today, so nothing needs guarding here beyond not misreading it as v5. */
+  /* v5 flags bits 6-7 panning layout, 8-9 panning mode, 10 embedded song lengths, 11 FM OPL.
+   * v3 and v4 use bits 6-9 for the SID model of chips 2 and 3, not read */
   if (v5) {
     out.pan_layout = static_cast<SidPanLayout>((out.flags >> 6) & 0x03);
     out.pan_mode   = static_cast<SidPanMode>((out.flags >> 8) & 0x03);
@@ -396,9 +358,7 @@ bool sidfile_parse(const data_t * bytes, size_t len, SidFile & out)
   const data_t * payload = bytes + out.data_offset;
   size_t payload_size = len - out.data_offset;
 
-  /* The song length table, when present, is the last (songs * 4) bytes of
-   * the whole file and is not part of the C64 payload; strip it before the
-   * load-address-prefix handling below, which operates on the payload only. */
+  /* Song length table is the last (songs * 4) bytes of the file, strip it from the payload */
   if (out.has_embedded_song_lengths) {
     const size_t table_bytes = static_cast<size_t>(out.songs) * 4;
     if (table_bytes <= payload_size && table_bytes <= len) {
@@ -406,12 +366,11 @@ bool sidfile_parse(const data_t * bytes, size_t len, SidFile & out)
       out.song_length_table = bytes + (len - table_bytes);
       out.song_length_table_count = out.songs;
     } else {
-      out.has_embedded_song_lengths = false; /* declared but does not fit: ignore rather than fail the whole file */
+      out.has_embedded_song_lengths = false; /* declared but does not fit, ignore */
     }
   }
 
-  /* A load address of zero means the first two bytes of the payload are the
-   * address, exactly like a PRG. */
+  /* Load address zero means the first two payload bytes are the address */
   if (out.load_addr == 0) {
     if (payload_size < 2) return false;
     out.load_addr = static_cast<addr_t>(payload[0] | (payload[1] << 8));
@@ -419,36 +378,25 @@ bool sidfile_parse(const data_t * bytes, size_t len, SidFile & out)
     payload_size -= 2;
   }
 
-  /* RSID requires the header's loadAddress to be $0000 (checked above), so
-   * every surviving RSID reaches here through the branch just above: "The
-   * effective load address MUST be read from the first two bytes at
-   * dataOffset and MUST be at least $07E8" (spec, +08 loadAddress). */
+  /* RSID load address must be at least $07E8 */
   if (!plus && out.is_rsid && out.load_addr < 0x07e8) return false;
 
   out.data = payload;
   out.data_size = payload_size;
   out.load_last_addr = (payload_size > 0)
     ? static_cast<addr_t>(out.load_addr + payload_size - 1)
-    : out.load_addr; /* payload_size == 0 would otherwise underflow */
+    : out.load_addr; /* empty payload */
 
-  /* Flags bit 1 in an RSID says the tune is a C64 BASIC program. The spec then
-   * requires initAddress to be zero, and the tune is started by RUN rather than
-   * by calling anything. Read before the defaulting below, which would otherwise
-   * hide the zero that identifies it. */
+  /* RSID flags bit 1 = C64 BASIC program, started by RUN. Read before init_addr defaults to the load address */
   const bool rsid_basic_flag = out.is_rsid && ((out.flags & 0x02) != 0);
   out.is_basic = rsid_basic_flag && (out.init_addr == 0);
-  /* "MUST be used for RSID with C64 BASIC flag set" (spec, +0A initAddress):
-   * the flag and a nonzero initAddress together is not a BASIC tune with a
-   * stray value, it is a malformed RSID. */
+  /* RSID with the BASIC flag and a nonzero initAddress is malformed */
   if (!plus && rsid_basic_flag && out.init_addr != 0) return false;
 
-  /* An init address of zero means "the load address", except for the BASIC case
-   * above, where there is no init address at all. */
+  /* Init address zero means the load address (not for BASIC) */
   if (out.init_addr == 0) out.init_addr = out.load_addr;
 
-  /* "For RSID with the C64 BASIC flag cleared, the effective initialization
-   * address MUST NOT be lower than $07E8 or point to a ROM or I/O area
-   * ($A000-$BFFF or $D000-$FFFF)" (spec, +0A initAddress). */
+  /* RSID without the BASIC flag, init must be >= $07E8 and outside ROM/IO ($A000-$BFFF, $D000-$FFFF) */
   if (!plus && out.is_rsid && !out.is_basic) {
     if (out.init_addr < 0x07e8 ||
         (out.init_addr >= 0xa000 && out.init_addr <= 0xbfff) ||
@@ -457,14 +405,14 @@ bool sidfile_parse(const data_t * bytes, size_t len, SidFile & out)
     }
   }
 
-  /* flags bits 2 and 3: the video standard the tune was written for */
+  /* Flags bits 2 and 3, video standard */
   switch ((out.flags >> 2) & 0x03) {
     case 0x01: out.video_model = VideoModel::Pal6569;    out.video_known = true; break;
     case 0x02: out.video_model = VideoModel::Ntsc6567R8; out.video_known = true; break;
-    default: break; /* unknown or "any", the caller decides */
+    default: break; /* unknown or any, caller decides */
   }
 
-  /* flags bits 4 and 5: which SID the tune expects */
+  /* Flags bits 4 and 5, expected SID */
   switch ((out.flags >> 4) & 0x03) {
     case 0x01: out.sid_model = SidModel::Mos6581; break;
     case 0x02: out.sid_model = SidModel::Mos8580; break;
@@ -472,14 +420,12 @@ bool sidfile_parse(const data_t * bytes, size_t len, SidFile & out)
     default:   out.sid_model = SidModel::Unknown; break;
   }
 
-  /* Extra chips. Version 3 puts the second chip in the high byte of the
-   * reserved word, version 4 adds a third in the low byte, v5 replaces both
-   * bytes with multiSidConfig (chip count + address step configuration) and
-   * sidAddressConfigStart (an optional override for SID2's address). */
+  /* Extra chips. v3 has the second in the high byte of the reserved word, v4 adds a third in the low byte.
+   * v5 has multiSidConfig (count + step config) and sidAddressConfigStart (override for SID2) */
   out.sid_addr[0] = 0xd400;
   out.sid_count = 1;
   if (plus) {
-    /* the extended header puts one address per word */
+    /* Extended header has one address per word */
     const addr_t second = decode_sid_addr(bytes[0x7a]);
     const addr_t third  = decode_sid_addr(bytes[0x7c]);
     const addr_t fourth = decode_sid_addr(bytes[0x7e]);
@@ -502,13 +448,10 @@ bool sidfile_parse(const data_t * bytes, size_t len, SidFile & out)
       } else if (cfg_sel == 4) { steps[0] = 0x0020; steps[1] = 0x0060; step_count = 2; }
       else if (cfg_sel == 5)   { steps[0] = 0x0020; steps[1] = 0x00e0; step_count = 2; }
       else if (cfg_sel == 6)   { steps[0] = 0x0100; steps[1] = 0x0300; step_count = 2; }
-      /* 7-15 are reserved: step_count stays 0 and no further chip is generated. */
+      /* 7-15 reserved, no further chips */
 
       if (step_count > 0) {
-        /* 0x00 or anything outside the valid ranges means "use the standard
-         * start", i.e. no override: decode_sid_addr() already returns 0 for
-         * both, which is exactly what falling through to the plain step
-         * below needs. */
+        /* 0x00 or an invalid value gives no override */
         const addr_t override_addr = decode_sid_addr(addr_start_byte);
         const uint8_t want = (total > kMaxSids) ? kMaxSids : total;
         uint32_t addr = 0xd400;
@@ -519,23 +462,18 @@ bool sidfile_parse(const data_t * bytes, size_t len, SidFile & out)
           } else {
             next = addr + steps[(k - 1) % step_count];
             if (next > 0xd7e0 && next < 0xde00) {
-              /* Landed in the invalid $D800-$DDF0 gap: resume at $DE00,
-               * keeping whatever remainder carried past $D800. A value
-               * already at or past $DE00 is either valid as is or past
-               * $DFE0, which the check below stops. */
+              /* Landed in the invalid $D800-$DDF0 gap, resume at $DE00 */
               next = 0xde00 + (next - 0xd800);
             }
           }
-          if (next > 0xdfe0) break; /* past the end of the high block: stop */
-          /* An FM/OPL tune reserves the whole $DF00-$DFFF range; a SID chip
-           * generated inside it is an invalid configuration, not just an
-           * ignorable one. */
+          if (next > 0xdfe0) break; /* past the high block */
+          /* FM/OPL reserves $DF00-$DFFF, a SID there is invalid */
           if (out.has_fm_opl && next >= 0xdf00 && next <= 0xdfff) return false;
           addr = next;
           out.sid_addr[out.sid_count++] = static_cast<addr_t>(addr);
         }
       }
-      /* Reject a count above the addresses the configuration generates */
+      /* Count above the generated addresses is invalid */
       if (out.sid_count < total) return false;
     }
   } else {
@@ -557,9 +495,7 @@ bool sidfile_parse(const data_t * bytes, size_t len, SidFile & out)
 
 const char * win1252_to_utf8(const char * src, char * dst, size_t cap)
 {
-  /* 0x80-0x9f per the WHATWG windows-1252 table; the five undefined bytes
-   * (0x81, 0x8d, 0x8f, 0x90, 0x9d) map to their C1 code points. 0xa0-0xff
-   * equal their code point. */
+  /* 0x80-0x9f per the WHATWG windows-1252 table, undefined bytes map to C1 code points, 0xa0-0xff equal their code point */
   static constexpr uint16_t kHighMap[32] = {
     0x20AC, 0x0081, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
     0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x008D, 0x017D, 0x008F,

@@ -1,11 +1,11 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * ram.h
- * 64 KB main RAM plus the 1 KB nybble wide colour RAM.
+ * 64 KB main RAM plus 1 KB nybble wide color RAM
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -35,15 +35,10 @@
 namespace usbsid {
 
 /**
- * @brief C64 RAM.
+ * @brief C64 RAM, plain storage without address decoding
  *
- * Plain storage, no address decoding: the MMU decides what a given address
- * means. Colour RAM is kept separate because it is only 4 bits wide and is
- * never banked out.
- *
- * The array is a member, not a heap allocation, so the embedded build can
- * place the whole object in RAM through US_RAM_DATA and there is no
- * allocation in the per cycle path.
+ * color RAM is separate (4 bits wide, never banked out)
+ * Array is a member, embedded build places it with US_RAM_DATA
  */
 class Ram
 {
@@ -52,23 +47,16 @@ class Ram
     ~Ram(void) = default;
 
     /**
-     * @brief Power on pattern.
-     *
-     * A real C64 powers up with alternating blocks of $00 and $ff, 64 bytes
-     * each. Some tunes and a fair number of PRGs depend on it, so it is the
-     * default rather than an all zero fill.
+     * @brief Power on pattern, alternating 64 byte blocks of $00 and $ff
      */
     void reset(void);
-    /* Fill everything with one value, used by the CPU test harness which
-     * wants a plain all RAM machine */
+    /* Fill everything with one value */
     void fill(data_t value);
 
     US_ALWAYS_INLINE data_t read(addr_t addr) const { return ram_[addr]; }
     US_ALWAYS_INLINE void write(addr_t addr, data_t value) { ram_[addr] = value; }
 
-    /* Colour RAM is 4 bits wide. Reads return the upper nybble as open bus
-     * would on hardware; the MMU decides what to or in, so here the raw
-     * nybble is returned and the write masks. */
+    /* color RAM is 4 bits wide, raw nybble is returned and writes are masked */
     US_ALWAYS_INLINE data_t read_color(addr_t addr) const
     {
       return color_[addr & (kC64ColorRamSize - 1)] & 0x0f;
@@ -78,13 +66,11 @@ class Ram
       color_[addr & (kC64ColorRamSize - 1)] = value & 0x0f;
     }
 
-    /* Direct access for loaders and for the SID register mirror. Same thing
-     * as read()/write(), named after the old player dma_ helpers so the
-     * loader code reads the same way. */
+    /* Direct access for loaders and the SID register mirror */
     US_ALWAYS_INLINE data_t dma_read(addr_t addr) const { return ram_[addr]; }
     US_ALWAYS_INLINE void dma_write(addr_t addr, data_t value) { ram_[addr] = value; }
 
-    /* Bulk load, clamped at the end of memory. Returns bytes written. */
+    /* Bulk load, clamped at end of memory, returns bytes written */
     size_t load(addr_t addr, const data_t * data, size_t len);
 
     const data_t * data(void) const { return ram_; }

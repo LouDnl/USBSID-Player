@@ -1,11 +1,11 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
- * host/session_board.cpp
+ * session_board.cpp
  * See session_board.h.
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -45,8 +45,7 @@ bool BoardSessionSink::attach(Machine & machine)
 {
   if (!usb_.is_open() && !usb_.open(board_order_)) return false;
 
-  /* What the hardware is and what an access costs, before the tune's init
-   * writes go out, the same as the command line player sets it up */
+  /* Hardware layout and access cost, set before the init writes go out */
   SidConfig & config = machine.sid().config();
   config.access_overhead = overhead_;
   config.sids_socket_one = usb_.sids_socket_one();
@@ -63,7 +62,7 @@ bool BoardSessionSink::attach(Machine & machine)
 bool BoardSessionSink::prepare(Machine & machine, const SidFile * tune)
 {
   (void)tune;
-  /* The tune's clock before its init writes go out */
+  /* Tune clock, before the init writes */
   usb_.set_clock_rate(machine.vic().timing().clock_hz);
   return usb_.is_open();
 }
@@ -78,8 +77,7 @@ void BoardSessionSink::silence(Machine & machine)
 {
   if (!usb_.is_open() || held_) return;
   held_ = true;
-  /* Zeroed registers keep the silence through an unmute, the board's MUTE
-   * makes it immediate */
+  /* Zeroed registers keep the silence after unmute, board MUTE is immediate */
   Mos6581_8580 & sid = machine.sid();
   const uint8_t chips = (sid.config().count == 0) ? 1 : sid.config().count;
   for (uint8_t c = 0; c < chips; c++) {

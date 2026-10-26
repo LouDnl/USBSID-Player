@@ -1,22 +1,17 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * test_embedded.cpp
- * Step 2.11 gate, desktop half: the C API the firmware calls, and the backend
- * that talks to the firmware's bus.
+ * C API the firmware calls and the backend that talks to the firmware bus
  *
- * The firmware side is stubbed here by defining its bus functions in this
- * file. They are declared weak in sid_embedded.h precisely so that a strong
- * definition wins, which means this test exercises the real call path: the
- * emulation writes a register, the SID layer translates and times it, the
- * embedded backend calls what it believes is the firmware, and the call lands
- * in the counters below. Nothing is mocked in between.
+ * Firmware bus functions are stubbed in this file, declared weak in
+ * sid_embedded.h, a strong definition wins ~ the real call path is exercised,
+ * nothing is mocked in between
  *
- * The other half of the gate, that the same sources cross compile for the
- * RP2350 and fit, is temp/tools/build_embedded.sh.
+ * Cross compiling for the RP2350 is checked by temp/tools/build_embedded.sh
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -55,7 +50,7 @@
 
 using namespace usbsid;
 
-/* ---- the firmware, as far as the player is concerned -------------------- */
+/* ---- the firmware as the player sees it --------------------------------- */
 
 namespace {
 
@@ -80,16 +75,9 @@ FirmwareStub g_fw;
 
 } /* namespace */
 
-/* The board's microsecond clock, simulated.
- *
- * It does not run on its own. Time passes here only where it passes on the
- * device: when the bus sits out a delay, when the player blocks waiting for
- * the clock, and when the emulation spends host cycles. That makes the clock
- * a measuring instrument rather than a stub, which is the only way to see
- * device tempo without a device. `g_sim` below drives it.
- *
- * `g_free_running` puts it back to the old behaviour, a millisecond per read,
- * for the tests that only want a clock that moves. */
+/* Simulated microsecond clock of the board ~ time passes only when the bus sits out a delay,
+ * the player blocks on the clock or the emulation spends host cycles. g_sim drives it.
+ * g_free_running gives a millisecond per read for tests that only need a moving clock */
 static uint64_t g_fake_us = 0;
 static uint32_t g_clock_reads = 0;
 static bool g_free_running = true;
@@ -101,49 +89,29 @@ static uint64_t fake_time_us_64(void)
   return g_fake_us;
 }
 
-/* The player asks for this rather than spinning when it is available, which
- * is what lets the simulated clock be advanced by exactly what was asked for
- * instead of by however many times the spin happened to read it. */
+/* The player waits on this when available, the simulated clock then advances by exactly the wait asked for */
 static void fake_busy_wait_us(uint32_t us)
 {
   g_fake_us += us;
 }
 
-/* ---- the bus, and how long it takes ------------------------------------- *
- *
- * A cycled write is a *pre* delay: the PIO sits out the gap and only then
- * puts the value on the bus. The call itself returns as soon as the delay and
- * the value fit in the state machine's queue, so a few writes can be in
- * flight at once and the emulation runs underneath them. When the queue is
- * full the core blocks, and that is what paces playback.
- *
- * Reproducing that here, queue and all, is the point: it is what makes the
- * difference between a tune whose writes come close together, where the queue
- * stays full and the delays are free, and a tune with one long gap a frame,
- * where the queue has drained and the delay is served after the emulation
- * that produced it rather than alongside it.
- */
+/* ---- the bus and how long it takes -------------------------------------- */
+/* Cycled write = pre delay: the PIO sits out the gap, then puts the value on the bus */
+/* The call returns when delay and value fit in the state machine queue, a full queue blocks the core and paces playback */
+/* Dense tunes keep the queue full (free delays), one long gap a frame drains it (delay served after the emulation) */
 
 namespace {
 
 struct DeviceSim {
   static constexpr int kFifo = 4;      /* writes that fit in the PIO queue */
-  /* Cycles the bus operation costs on top of its pre delay. One: the delay
-   * loop in bus_control.pio counts `delay_word + 1` PHI periods and the write
-   * lands on the edge after it, so two writes with a pre delay of zero are one
-   * PHI apart. See TODO 7 for the same cycle counted twice on the wire. */
+  /* Cycles of the bus operation on top of its pre delay: 1. bus_control.pio counts delay_word + 1 PHI periods, the write lands on the following edge ~ two writes with pre delay 0 are one PHI apart */
   static constexpr uint32_t kAccess = 1;
 
   bool active = false;
   uint32_t clock_hz = 985248;
-  /* What the board manages for *this tune*, in thousands of emulated cycles
-   * per second of host time. A single idle-benchmark constant cannot express
-   * this: a tune driving its digi from a CIA timer costs the emulation
-   * nearly twice as much per cycle as idle, so it is measured per tune, on
-   * this machine, and scaled onto the board by the reference below. That
-   * measurement is wall clock and therefore noisy, so it is opt in via
-   * `USP_CALIBRATE=1`; the default here is a real tune's board figure rather
-   * than the idle one, so the suite stays deterministic. */
+  /* Board speed for this tune, in thousands of emulated cycles per second of host time.
+   * Measured per tune on this machine (wall clock, noisy), opt in via USP_CALIBRATE=1 and scaled by the reference below.
+   * Default is the board figure of a real tune */
   uint32_t host_kcycles = 1457;  /* Krakout.sid, RP2350 @ 200 MHz */
 
   uint64_t queue[kFifo] = { 0 };
@@ -151,14 +119,8 @@ struct DeviceSim {
   int count = 0;
   uint64_t pio_free_us = 0;
 
-  /* How far each *gap* between consecutive writes comes out from the gap the
-   * tune asked for. Deliberately the gap and not the position: a position
-   * error is an offset, and an offset that grows slowly is a tempo question,
-   * which the test above already measures. What a digi hears is the spacing.
-   *
-   * The tune's own spacing is accumulated from the gaps the SID layer reports,
-   * before the backend has touched them, so this measures the backend and the
-   * board together and nothing else. */
+  /* Deviation of each gap between consecutive writes from the gap the tune asked for ~ a digi hears the spacing.
+   * Tune spacing is accumulated from the gaps the SID layer reports, before the backend touches them */
   uint64_t ideal_cycles = 0;
   uint64_t prev_ideal_cycles = 0;
   uint64_t prev_landed_us = 0;
@@ -183,7 +145,7 @@ struct DeviceSim {
   uint64_t us_for(uint64_t cycles) const
   { return (cycles * 1000000ull) / clock_hz; }
 
-  /** @brief Host time to emulate this many C64 cycles. */
+  /** @brief Host time to emulate this many C64 cycles */
   void emulate(uint64_t cycles)
   {
     if (!active) return;
@@ -253,11 +215,7 @@ static void fake_reset_sid_registers(void) { ++g_fw.register_resets; }
 
 static void fake_apply_clockrate(int n_clock, bool suspend_sids);
 
-/* Bound once, at load, in place of the definitions these used to be. The backend
- * reaches the firmware through pointers now, because a weak undefined symbol is
- * an ELF idea and this suite builds on Mach-O and PE as well; see the note in
- * src/sid/sid_embedded.h. Assigning them is also more honest about what the
- * tests are doing than defining the firmware's own names was. */
+/* Bound once at load ~ the backend reaches the firmware through pointers, a weak undefined symbol is an ELF idea and this suite builds on Mach-O and PE too ~ see src/sid/sid_embedded.h */
 namespace {
 struct BindFakeFirmware {
   BindFakeFirmware(void)
@@ -283,7 +241,7 @@ static void fake_apply_clockrate(int n_clock, bool suspend_sids)
 
 namespace {
 
-/* ---- the backend on its own --------------------------------------------- */
+/* ---- the backend alone -------------------------------------------------- */
 
 int test_backend(void)
 {
@@ -297,44 +255,34 @@ int test_backend(void)
   US_CHECK_EQ_U(g_fw.writes, 1u, "the write reached the firmware");
   US_CHECK_EQ_U(g_fw.last_reg, 0x18u, "with the register");
   US_CHECK_EQ_U(g_fw.last_value, 0x0fu, "the value");
-  /* the gap as given: performing the access costs the hardware a cycle of its
-   * own, and that cycle was taken off upstream by the SID layer's access
-   * overhead. Taking it off here as well made every write a cycle early */
+  /* the gap as given: the access costs the hardware a cycle, taken off upstream by the SID layer access overhead */
   US_CHECK_EQ_U(g_fw.last_cycles, 42u, "and the cycle delay, passed through");
 
-  /* a second chip is $20 up, and the backend passes the physical register
-   * through untouched: the translation happened before it got here */
+  /* a second chip is $20 up, the backend passes the physical register through untouched */
   backend.write(0x21, 0x77, 7);
   US_CHECK_EQ_U(g_fw.last_reg, 0x21u, "the second chip's register is passed on");
 
   US_CHECK_EQ_U(backend.read(0x1b, 3), 0x00u, "a read comes back from the bus");
   US_CHECK_EQ_U(g_fw.reads, 1u, "and reached the firmware");
 
-  /* From here on the clock is the simulated one, so a wait can be measured
-   * rather than merely observed to have happened. */
+  /* From this point the clock is the simulated one, a wait can be measured */
   g_free_running = false;
   backend.set_clock_hz(985248);
 
-  /* A gap too long for sixteen bits is not a bus operation, it is time to sit
-   * out. There is nothing to send, so it is waited out against the board's
-   * clock and counted. */
+  /* A gap too long for sixteen bits is not a bus operation, nothing is sent ~ it is waited out against the board clock and counted */
   const uint32_t before = g_fw.writes;
-  backend.wait(1); /* the first access is what starts the pacer's clock */
+  backend.wait(1); /* first access starts the pacer clock */
   const uint64_t wait_started = g_fake_us;
   backend.wait(0xffff);
   US_CHECK_EQ_U(g_fw.writes, before, "a wait is not a bus operation");
   US_CHECK_EQ_U(backend.cycles_waited(), 0x10000u, "but it is accounted for");
-  /* $ffff PAL cycles is 66.5 ms and none of it has been spent elsewhere, so
-   * all of it has to be waited out here */
+  /* $ffff PAL cycles = 66.5 ms, none spent elsewhere ~ all of it is waited out */
   const uint64_t waited_us = g_fake_us - wait_started;
   US_CHECK(waited_us > 66000 && waited_us < 67000,
            "and the time was actually waited out: %llu us of 66517",
            static_cast<unsigned long long>(waited_us));
 
-  /* The fix, on its own. A gap wide enough to pace is one the emulation has
-   * already spent host time producing. Whatever of it has gone already must
-   * not be spent a second time, and none of it is handed to the hardware as a
-   * pre delay, because the hardware would serve that from a standing start. */
+  /* A gap wide enough to pace has cost the emulation host time already ~ that part is not spent again and none of it goes to the hardware as pre delay (served from a standing start) */
   backend.reset();
   backend.write(0x00, 0x11, 100);       /* starts the clock */
   g_fake_us += 20000;                   /* ~20000 cycles, spent emulating */
@@ -348,7 +296,7 @@ int test_backend(void)
   US_CHECK_EQ_U(backend.cycles_paced(), 20000u,
                 "the whole gap is accounted as paced");
 
-  /* And the same gap with nothing spent on it still takes its full time */
+  /* the same gap with nothing spent on it still takes its full time */
   backend.reset();
   backend.write(0x00, 0x11, 100);
   const uint64_t before_full = g_fake_us;
@@ -385,31 +333,14 @@ bool read_file(const char * path, std::vector<data_t> & out)
   return got == out.size();
 }
 
-/* ---- device tempo, for both shapes of tune ------------------------------- *
- *
- * What a tune costs the device is two things that do not add up the same way
- * for every tune: the host time to emulate it, and the time the bus spends
- * sitting out the gaps between its writes. Whether they overlap depends
- * entirely on how the writes are spaced.
- *
- * A digi tune writes six hundred times a frame, thirty cycles apart. The bus
- * queue never empties, so the emulation runs underneath it and the frame
- * costs what the bus costs, which is a frame.
- *
- * A tune with a play routine and an idle loop writes twenty five times a
- * frame and then does nothing for nineteen thousand cycles. The queue drains
- * during that gap, so unless the player sits it out itself the emulation
- * spends the gap and then the bus spends it again, and the frame costs half
- * again what it should. That is what this measures, for one tune of each
- * shape, against a simulated board clock.
- */
+/* ---- device tempo, for both shapes of tune ------------------------------ */
+/* Digi tune: ~600 writes a frame, 30 cycles apart ~ the bus queue never empties, the emulation runs underneath and a frame costs what the bus costs */
+/* Play routine + idle loop: ~25 writes a frame, then ~19000 idle cycles ~ the queue drains during the gap, an unpaced player pays the gap twice (frame costs half again) */
 
 struct SimBackend final : public SidBackend {
   EmbeddedSidBackend inner;
 
-  /* The gap the SID layer reports has already had the access overhead taken
-   * off it, so the cycles the emulation actually ran is one more. That same
-   * untouched gap is the tune's timeline, which the landing error is against. */
+  /* Gap reported by the SID layer has the access overhead taken off, the cycles actually emulated are one more ~ the untouched gap is the tune timeline the landing error is measured against */
   void write(addr_t reg, data_t value, uint16_t cycles) override
   {
     g_sim.ideal_cycles += static_cast<uint32_t>(cycles) + 1u;
@@ -424,22 +355,10 @@ struct SimBackend final : public SidBackend {
   void reset(void) override { inner.reset(); }
 };
 
-/* ---- putting the board's speed on this machine's scale ------------------- *
- *
- * The simulated board needs to know how fast the real one emulates *this*
- * tune. A constant cannot say that: measured on the board with
- * `usplayer_benchmark(1000000)`, an RP2350 at 200 MHz reports 1314 kcycles/s
- * at idle, 1457 with `psid/Krakout.sid` loaded and 1009 with
- * `rsid/Coma_Light_13_tune_4.sid`. The tune is most of the number.
- *
- * So it is measured here instead, per tune, and scaled onto the board by a
- * reference tune whose board figure is known. That keeps the calibration
- * honest on any machine: both sides of the ratio move together with the
- * desktop's speed, so only the board's number has to be carried in the tree.
- *
- * To re-measure the reference: load `psid/Krakout.sid`, stop it, then send the
- * benchmark config command, and put what it prints in kRefBoardKcycles.
- */
+/* ---- scaling the board speed to this machine ---------------------------- */
+/* Board measured with usplayer_benchmark(1000000): RP2350 at 200 MHz gives 1314 kcycles/s idle, 1457 with psid/Krakout.sid, 1009 with rsid/Coma_Light_13_tune_4.sid */
+/* Measured per tune in this test and scaled by a reference tune with a known board figure, the ratio follows the desktop speed ~ only the board number is carried in the tree */
+/* Re-measure the reference: load psid/Krakout.sid, stop it, send the benchmark config command, put the output in kRefBoardKcycles */
 constexpr const char * kRefTune = US_TUNE_DIR "/psid/Krakout.sid";
 constexpr double kRefBoardKcycles = 1457.0;  /* RP2350 @ 200 MHz, 2026-08-04 */
 
@@ -449,7 +368,7 @@ double wall_s(void)
     std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
-/** @brief kcycles/s this machine emulates a tune at, or 0 if it is not there. */
+/** @brief kcycles/s this machine emulates a tune at, 0 if the tune is missing */
 double desktop_kcycles(const char * path)
 {
   std::vector<data_t> bytes;
@@ -464,9 +383,7 @@ double desktop_kcycles(const char * path)
 
   player.run_frames(20);            /* settle, and warm the caches */
 
-  /* Best of three. This is a wall clock measurement on a machine that is
-   * doing other things, so the fastest run is the one least interfered with,
-   * and averaging would fold the interference in instead of dropping it. */
+  /* Best of three, wall clock on a busy machine ~ the fastest run has the least interference */
   double best = 0.0;
   for (int i = 0; i < 3; i++) {
     const cycle_t started = c64.machine.cycles();
@@ -480,7 +397,7 @@ double desktop_kcycles(const char * path)
   return best;
 }
 
-/** @brief Board kcycles/s per desktop kcycles/s, measured once. */
+/** @brief Board kcycles/s per desktop kcycles/s, measured once */
 double board_scale(void)
 {
   if (getenv("USP_CALIBRATE") == nullptr) return 0.0; /* opt in, it is noisy */
@@ -491,19 +408,17 @@ double board_scale(void)
     scale = (ref > 0.0) ? (kRefBoardKcycles / ref) : 0.0;
     if (scale > 0.0) {
       printf("  this machine runs %.0f kcycles/s on %s, where the board does "
-             "%.0f, so it is %.0fx the board\n", ref, "Krakout.sid",
+             "%.0f, making it %.0fx the board\n", ref, "Krakout.sid",
              kRefBoardKcycles, 1.0 / scale);
     } else {
-      printf("  no reference tune, so the board's speed is the old constant\n");
+      printf("  no reference tune, the board's speed is the old constant\n");
     }
   }
   return scale;
 }
 
 /**
- * @brief Play a tune against the simulated board and report how fast it ran.
- *
- * Returns the tempo as a multiple of real time, or 0 if the tune is not there.
+ * @brief Play a tune on the simulated board, return tempo as a multiple of real time (0 if missing)
  */
 double measure_tempo(const char * path, int frames, double & paced_fraction,
                      uint32_t frame_overhead_us = 0, uint64_t * mean_err_us = nullptr)
@@ -523,15 +438,14 @@ double measure_tempo(const char * path, int frames, double & paced_fraction,
   const uint32_t hz = vic_timing(c64.machine.video_model()).clock_hz;
   sim.inner.set_clock_hz(hz);
 
-  /* What the board would manage on this tune. See board_scale(). */
+  /* What the board would manage on this tune ~ see board_scale() */
   const double scale = board_scale();
   if (scale > 0.0) {
     const double mine = desktop_kcycles(path);
     if (mine > 0.0) g_sim.host_kcycles = static_cast<uint32_t>(mine * scale);
   }
 
-  /* Settle first: the opening frames of a tune are not its steady state, and
-   * the boot before them is not part of its timeline at all. */
+  /* Settle first, the opening frames and the boot are not steady state */
   player.run_frames(30);
 
   g_free_running = false;
@@ -542,11 +456,7 @@ double measure_tempo(const char * path, int frames, double & paced_fraction,
 
   const cycle_t started = c64.machine.cycles();
   const uint64_t clock_started = g_fake_us;
-  /* Core 0 does not only run the player. loop_sidplayer() emulates one frame
-   * and returns, and usbsid.c then runs tud_task(), MIDI, config and the LED
-   * before coming back. That is real time in which nothing feeds the bus, so
-   * the state machine's queue drains and the next pre delay would be served
-   * from a standing start. This is what trim_to_now() exists for. */
+  /* Core 0 also runs tud_task(), MIDI, config and the LED after loop_sidplayer() emulates a frame ~ nothing feeds the bus then, the queue drains and the following pre delay is served from a standing start (trim_to_now) */
   for (int i = 0; i < frames; i++) {
     player.run_frame();
     g_fake_us += frame_overhead_us;
@@ -575,9 +485,7 @@ int test_device_tempo(void)
   Case cases[] = {
     { US_TUNE_DIR "/psid/Aint_Somebody.sid", "PSID, play routine and idle loop", true },
     { US_TUNE_DIR "/rsid/50Kent_in_da_Club.sid", "RSID, digi, writes every frame", false },
-    /* Filled in from USP_TEMPO_TUNE, so a tune from the collection can be put
-     * through the simulated board without its path living in the tree. It is
-     * measured and printed but not asserted on: we do not know its shape. */
+    /* From USP_TEMPO_TUNE, a tune from the collection run through the simulated board ~ printed only, shape unknown */
     { nullptr, "from USP_TEMPO_TUNE", false },
   };
   cases[2].path = getenv("USP_TEMPO_TUNE");
@@ -601,17 +509,16 @@ int test_device_tempo(void)
     printf("  %-28s %-34s %.2fx realtime, %.0f%% of its cycles paced\n",
            name, c.shape, tempo, paced * 100.0);
 
-    if (&c == &cases[2]) continue; /* a probe, not a case with known answers */
+    if (&c == &cases[2]) continue; /* probe, no known answers */
 
-    /* Faster than real time is what the pacer's floor prevents, and slower is
-     * the bug it was written for. Either way the tune is not playing right. */
+    /* Faster than real time breaks the pacer floor, slower is the bug it was written for */
     US_CHECK(tempo > 0.95 && tempo < 1.05,
              "%s plays at the right speed on the simulated board (%.2fx)",
              name, tempo);
 
     if (c.expect_paced) {
       US_CHECK(paced > 0.80,
-               "%s is a tune the bus queue cannot hide, so the player sits its "
+               "%s is a tune the bus queue cannot hide, the player sits its "
                "gaps out itself (%.0f%%)", name, paced * 100.0);
     } else {
       US_CHECK(paced < 0.05,
@@ -625,22 +532,12 @@ int test_device_tempo(void)
 }
 
 /**
- * @brief The player has to survive core 0 being somewhere else.
+ * @brief Player must survive core 0 being elsewhere
  *
- * `loop_sidplayer()` emulates one frame and returns, and usbsid.c then runs
- * tud_task(), MIDI, config and the LED before coming back. Every microsecond
- * of that is time in which nothing feeds the bus. A pre delay starts when its
- * DMA fires, not when the previous write finished, so once the state machine's
- * queue has drained that time is spent twice: once by the core, and again by
- * the board sitting out the full gap from a standing start.
- *
- * `trim_to_now()` is the ceiling for that: it takes the time already lost off
- * the next pre delay, correcting on every write rather than only on gaps wide
- * enough for `wait_until_due()`'s floor to fire, which a dense digi never hits.
- *
- * The per gap figure is reported alongside because it is the thing a digi
- * actually hears, but it is not what discriminates here: with the bus queue
- * saturated it stays inside a microsecond either way.
+ * loop_sidplayer() emulates a frame, usbsid.c then runs tud_task(), MIDI, config and the LED. Nothing feeds the bus meanwhile
+ * A pre delay starts when its DMA fires ~ with the queue drained that time is spent twice, by the core and by the board
+ * trim_to_now() takes the time already lost off the following pre delay on every write, gaps too narrow for the wait_until_due() floor included
+ * The per gap figure is reported too, it stays inside a microsecond with a saturated bus queue
  */
 int test_write_landing(void)
 {
@@ -663,16 +560,11 @@ int test_write_landing(void)
 
     if (overhead == 0) { baseline = tempo; continue; }
 
-    /* Against its own baseline, not against 1.00x. Whether this tune keeps up
-     * at all is a question about how fast the board emulates it, which is
-     * TODO 11 and not this test's business. What is this test's business is
-     * that taking the core away must not cost tempo on top of that, which is
-     * what it did before trim_to_now(): the untrimmed player loses 3% here at
-     * 800 us a frame and gets worse the longer core 0 is away. */
+    /* Compare with the tune baseline ~ taking core 0 away must not cost tempo on top of it (untrimmed player loses 3% at 800 us a frame, more the longer core 0 is away) */
     US_CHECK(tempo > baseline - 0.02,
              "%u us a frame of housekeeping costs no tempo (%.2fx against a "
              "baseline of %.2fx)", overhead, tempo, baseline);
-    /* A PAL cycle is about a microsecond, so this is a thousand cycles. */
+    /* A PAL cycle is about a microsecond, this is a thousand cycles */
     US_CHECK(mean_err < 1000,
              "and the gaps between writes are still the tune's (%llu us out)",
              static_cast<unsigned long long>(mean_err));
@@ -681,7 +573,7 @@ int test_write_landing(void)
   return 0;
 }
 
-/* ---- the API, driven the way usbsid.c drives it ------------------------- */
+/* ---- the API as usbsid.c drives it -------------------------------------- */
 
 int test_api(void)
 {
@@ -694,17 +586,10 @@ int test_api(void)
 
   g_fw.clear();
 
-  /* A clock that jumps a millisecond every time it is read is not a clock the
-   * pacer can be measured against. It made the player look a millisecond late
-   * at every write, so trim_to_now() took the whole pre delay off every one of
-   * them and the cycle accounting below had nothing left to count. Here time
-   * moves only when something spends it, which is what the device does. */
+  /* A clock that jumps a millisecond per read cannot measure the pacer ~ in this stub time moves only when something spends it, like on the device */
   g_free_running = false;
 
-  /* The firmware mallocs the file, hands it over, and frees it before the
-   * next call. Doing exactly that here is the point: if the API kept the
-   * pointer instead of copying, everything after this would read freed
-   * memory. */
+  /* The firmware mallocs the file, hands it over and frees it before the following call ~ the API must copy it, or everything after reads freed memory */
   uint8_t * heap = static_cast<uint8_t *>(malloc(bytes.size()));
   US_CHECK(heap != nullptr, "the tune buffer allocates");
   if (heap == nullptr) return 0;
@@ -748,17 +633,9 @@ int test_api(void)
   US_CHECK_EQ_U(usplayer_sid_writes(), g_fw.writes,
                 "every write the SID layer made reached the firmware");
 
-  /* Fifty PAL frames are 50 * 63 * 312 = 982800 cycles, and every one of them
-   * has to be accounted for somewhere, because on the device these numbers
-   * *are* the clock. There are three places it can go. What the firmware
-   * receives is the gap between accesses, less the one cycle the access costs
-   * by itself, taken off by the SID layer as its access overhead and not taken
-   * off again by the backend. A gap too wide for the bus queue to hide is sat
-   * out by the player instead and counted as paced. A gap too long to fit in
-   * sixteen bits is waited. So the sum of the delays, plus that one cycle per
-   * access, plus the paced and the waited, has to come back to the span.
-   * Anything missing here is playback running fast on hardware by exactly
-   * that much. */
+  /* Fifty PAL frames = 50 * 63 * 312 = 982800 cycles, all accounted for.
+   * Firmware gets the gap between accesses minus the 1 cycle access overhead taken off by the SID layer ~ gaps too wide for the bus queue are paced by the player, gaps over sixteen bits are waited.
+   * Delays + 1 cycle per access + paced + waited must come back to the span, anything missing is playback running fast on hardware */
   const uint64_t frame_cycles = 50ull * 63ull * 312ull;
   const uint64_t per_access = 1ull;
   const uint64_t accounted = g_fw.total_cycles + (per_access * frame_writes) +
@@ -772,8 +649,7 @@ int test_api(void)
 
   US_CHECK(accounted <= frame_cycles,
            "no more time is sent than actually passed");
-  /* The tail, between the last write and the end of the last frame, is the
-   * only thing that legitimately goes unsent, and it is a fraction of a frame */
+  /* The tail between the last write and the end of the last frame is the only part legitimately unsent, a fraction of a frame */
   US_CHECK(accounted + 19656 > frame_cycles,
            "and everything but the last partial frame is accounted for: "
            "%llu of %llu",
@@ -785,7 +661,7 @@ int test_api(void)
   emu_pause_playing(true);
   for (int i = 0; i < 5; i++) loop_sidplayer();
   US_CHECK_EQ_U(g_fw.writes, at_pause, "a paused player writes nothing");
-  US_CHECK(usplayer_paused(), "and says so");
+  US_CHECK(usplayer_paused(), "and reports it");
   emu_pause_playing(false);
   for (int i = 0; i < 5; i++) loop_sidplayer();
   US_CHECK(g_fw.writes > at_pause, "unpausing starts it again");
@@ -798,11 +674,7 @@ int test_api(void)
   emu_write_byte(0x033d, 0xa5);
   US_CHECK_EQ_U(emu_dma_read_ram(0x033d), 0xa5u,
                 "a CPU write lands in the same RAM");
-  /* $fffc is the reset vector when the KERNAL is banked in, and whatever the
-   * tune put there when it is not. Which of the two depends on what the tune
-   * did to $01, so the bank is set here and put back afterwards: this runs
-   * between frames, but leaving a tune banked differently than it left itself
-   * would break it at the next interrupt. */
+  /* $fffc is the reset vector with the KERNAL banked in, else whatever the tune put there ~ the bank is set and restored afterwards, a tune left banked differently would break at the following interrupt */
   const uint8_t port = emu_read_byte(0x0001);
   emu_write_byte(0x0001, 0x37);
   US_CHECK_EQ_U(emu_read_byte(0xfffc), 0xe2u,
@@ -850,9 +722,7 @@ int test_api(void)
 
 int test_api_prg(void)
 {
-  /* The firmware calls load_prg() and then goes straight to loop_sidplayer(),
-   * with no init in between, so load_prg() has to come back with a machine
-   * that is already running the program. */
+  /* The firmware calls load_prg() then loop_sidplayer() with no init in between, load_prg() must return a machine already running the program */
   char path[512];
   snprintf(path, sizeof(path), "%s/tests/Acid800/cpu_flags.prg", US_ASSET_DIR);
 
@@ -871,17 +741,15 @@ int test_api_prg(void)
   for (int i = 0; i < 10; i++) loop_sidplayer();
   US_CHECK_EQ_U(usplayer_frames(), frames + 10u, "and loop_sidplayer runs it");
 
-  /* a program is not a tune, and asking for its subtunes must not do anything
-   * peculiar */
+  /* a program is not a tune, asking for its subtunes must do nothing peculiar */
   next_subtune();
   previous_subtune();
   US_CHECK(usplayer_playing(), "still running after the tune only calls");
 
-  /* The keyboard reaches the running program through the matrix. The two
-   * subtune calls above each queued a key, so start from an empty queue. */
+  /* The keyboard reaches the program through the matrix ~ the two subtune calls above each queued a key, start from an empty queue */
   usplayer_keys_clear();
   US_CHECK(usplayer_type("x"), "the API can type at a program");
-  US_CHECK(usplayer_typing(), "and says so");
+  US_CHECK(usplayer_typing(), "and reports it");
   for (int i = 0; i < 12; i++) loop_sidplayer();
   US_CHECK(usplayer_typing() == false, "and the keystroke goes in");
 
@@ -902,11 +770,7 @@ int test_api_prg(void)
 
 int test_benchmark(void)
 {
-  /* The stub clock runs a millisecond per read and is read twice, so the
-   * answer here is arithmetic rather than a measurement. What is being
-   * checked is that it runs the machine, times it, and puts the backend back
-   * where it found it, because it is called from a player that may be loaded.
-   */
+  /* The stub clock runs a millisecond per read and is read twice, the answer is arithmetic ~ checked: it runs the machine, times it and restores the backend (called from a player that may be loaded) */
   g_fw.clear();
 
   SidBackend * before = nullptr;
@@ -926,10 +790,7 @@ int test_benchmark(void)
 
 int test_footprint(void)
 {
-  /* The RP2350 has 520 KB of SRAM and the firmware needs most of what is left
-   * over. This is not a target, it is a tripwire: if a change doubles the
-   * static footprint, the build on device stops fitting and the failure shows
-   * up here first, off device, with a number attached. */
+  /* The RP2350 has 520 KB of SRAM and the firmware needs most of the rest ~ a tripwire: a doubled static footprint stops fitting on device and fails in this test first, with a number */
   const uint32_t bytes = usplayer_static_footprint();
   printf("  static footprint: %u bytes (%.1f KB)\n", bytes,
          static_cast<double>(bytes) / 1024.0);
@@ -944,9 +805,7 @@ int test_footprint(void)
 
 int test_no_tune(void)
 {
-  /* Every entry point has to survive being called in the wrong order. The
-   * firmware calls them from an interrupt driven state machine, and a config
-   * command can arrive at any point in it. */
+  /* Every entry point must survive a call in the wrong order, the firmware calls them from an interrupt driven state machine and a config command can arrive at any point */
   load_sidtune(nullptr, 0, 0);
   init_sidplayer();
   start_sidplayer(false);

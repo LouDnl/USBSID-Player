@@ -1,14 +1,12 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * mos6526.cpp
- * The timer state machine follows VICE (src/core/ciatimer.h, GPLv2), the rest
- * follows the delay pipeline model in assets/cia6526_example, with the TOD and
- * the serial register filled in. See mos6526.h for why the timer is the VICE
- * shape and not the shift register.
+ * Timer state machine follows VICE (src/core/ciatimer.h, GPLv2), the rest follows
+ * the delay pipeline model in cia6526_example (TOD and serial register added)
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -91,23 +89,18 @@ void Mos6526::set_int_line(bool asserted)
   }
 }
 
-/* ------------------------------------------------------------------------ *
- * ports
- * ------------------------------------------------------------------------ */
+/* ports */
 
 data_t Mos6526::port_a(void) const
 {
   data_t value = static_cast<data_t>((pra_ | ~ddra_) & pa_input_);
 
-  /* The matrix reads both ways round. Port A drives the rows and port B reads
-   * the columns, which is how the KERNAL scans, but the connection is just a
-   * switch: driving a column low from port B pulls every row that has a key
-   * held on that column low as well. Programs that read the joystick on port
-   * A see this, and so does anything checking for a key without scanning. */
+  /* Matrix works both ways, port A drives rows and port B reads columns (KERNAL scan)
+   * A column driven low from port B also pulls every row with a key held on that column low */
   if (keys_pressed_) {
     const data_t cols = static_cast<data_t>((prb_ | ~ddrb_) & pb_input_);
     for (uint8_t r = 0; r < 8; r++) {
-      /* keyboard_ is active low: a zero bit is a key held down */
+      /* keyboard_ is active low, 0 = key held */
       if ((static_cast<data_t>(~keyboard_[r]) & ~cols) != 0) {
         value = static_cast<data_t>(value & ~(1u << r));
       }
@@ -120,7 +113,7 @@ data_t Mos6526::port_b(void) const
 {
   data_t value = static_cast<data_t>((prb_ | ~ddrb_) & pb_input_);
 
-  /* the keyboard matrix: every row driven low pulls its columns low */
+  /* Keyboard matrix, a row driven low pulls its columns low */
   if (keys_pressed_) {
     const data_t rows = static_cast<data_t>((pra_ | ~ddra_) & pa_input_);
     for (uint8_t r = 0; r < 8; r++) {
@@ -128,7 +121,7 @@ data_t Mos6526::port_b(void) const
     }
   }
 
-  /* PB6 and PB7 belong to the timers when the timer output modes are on */
+  /* PB6 and PB7 belong to the timers in the timer output modes */
   value = static_cast<data_t>((value & ~pb67_timer_mode_) |
                               (pb67_timer_out_ & pb67_timer_mode_));
   return value;
@@ -170,7 +163,7 @@ void Mos6526::set_cnt(bool high)
 void Mos6526::set_flag(bool high)
 {
   catch_up_now();
-  /* FLAG raises its interrupt on the falling edge */
+  /* FLAG interrupts on the falling edge */
   if (flag_ && !high) trigger_interrupt(kIntFlag);
   flag_ = high;
 }
@@ -200,21 +193,17 @@ void Mos6526::update_keys_pressed(void)
   keys_pressed_ = (all != 0xff);
 }
 
-/* ------------------------------------------------------------------------ *
- * interrupts
- * ------------------------------------------------------------------------ */
+/* interrupts */
 
 void Mos6526::trigger_interrupt(data_t source)
 {
   icr_ = static_cast<data_t>(icr_ | source);
   if ((imr_ & source) != 0 && !int_low_) {
-    int_delay_ |= 0x01; /* the line follows one clock later */
+    int_delay_ |= 0x01; /* Line follows one clock later */
   }
 }
 
-/* ------------------------------------------------------------------------ *
- * time of day
- * ------------------------------------------------------------------------ */
+/* time of day */
 
 data_t Mos6526::bcd_increment(data_t value, data_t limit, bool & carry)
 {
@@ -232,13 +221,13 @@ void Mos6526::tod_tick(void)
   if (tod_halted_) return;
 
   bool carry = false;
-  tod_[0] = bcd_increment(tod_[0], 0x10, carry); /* tenths, 0..9 */
+  tod_[0] = bcd_increment(tod_[0], 0x10, carry); /* Tenths, 0..9 */
   if (carry) {
-    tod_[1] = bcd_increment(tod_[1], 0x60, carry); /* seconds */
+    tod_[1] = bcd_increment(tod_[1], 0x60, carry); /* Seconds */
     if (carry) {
-      tod_[2] = bcd_increment(tod_[2], 0x60, carry); /* minutes */
+      tod_[2] = bcd_increment(tod_[2], 0x60, carry); /* Minutes */
       if (carry) {
-        /* hours are 1..12 with the AM/PM flag in bit 7 */
+        /* Hours 1..12, AM/PM flag in bit 7 */
         const data_t pm = static_cast<data_t>(tod_[3] & 0x80);
         data_t hours = static_cast<data_t>(tod_[3] & 0x1f);
         bool dummy = false;
@@ -257,28 +246,18 @@ void Mos6526::tod_tick(void)
   }
 }
 
-/* ------------------------------------------------------------------------ *
- * the clock
- * ------------------------------------------------------------------------ */
+/* the clock */
 
-/* ------------------------------------------------------------------------ *
- * scheduling
- *
- * The bus asks how long this chip can be ignored and then ignores it. Every
- * way into the chip catches it up first, so nothing can observe the gap.
- * ------------------------------------------------------------------------ */
+/* scheduling */
 
 /**
- * @brief What the plain counter skip is good for, zero if it must walk.
+ * @brief Clocks the plain counter skip is good for, 0 if it must walk
  *
- * Kept separate from cycles_to_event() because the answer it gives is the one
- * `catch_up()`'s `skip()` can act on: a subtraction from each timer's counter.
- * The cascade's answer is not, and letting it reach that path put timer A's
- * counter at zero, a value it never holds while counting.
+ * Separate from cycles_to_event() (the cascade answer must not reach skip(), it zeroes timer A)
  */
 uint32_t Mos6526::generic_quiet(void) const
 {
-  /* Anything with a pipeline stage in flight has to be walked cycle by cycle */
+  /* A pipeline stage in flight must be walked cycle by cycle */
   if (int_delay_ != 0 || pb6_pulse_ != 0 || pb7_pulse_ != 0) { US_PROF(cia_pipeline); return 0; }
   if (cnt_ != cnt_prev_) { US_PROF(cia_cnt); return 0; }
   if (sdr_pending_ || sdr_bits_ != 0) { US_PROF(cia_serial); return 0; }
@@ -289,8 +268,7 @@ uint32_t Mos6526::generic_quiet(void) const
   if (b == 0) {
     US_PROF(cia_timer_b);
 #if defined(US_PROFILE) && US_PROFILE
-    /* Which of quiet_clocks()'s four refusals it was. Diagnostic only, and in
-     * the same order the function tests them so the classification matches. */
+    /* Which of the four quiet_clocks() refusals, same order as the function */
     const uint16_t s = tb_.state;
     if (Timer::next(s) != s) {
       US_PROF(cia_b_transition);
@@ -312,7 +290,7 @@ uint32_t Mos6526::generic_quiet(void) const
 
 uint32_t Mos6526::tod_bound(uint32_t quiet) const
 {
-  /* the time of day counter is the one thing that ticks regardless */
+  /* Time of day counter always ticks */
   const uint32_t hz = ((cra_ & 0x80) != 0) ? 50u : 60u;
   const uint32_t period = clock_hz_ / (hz * 10u);
   const uint32_t tod_left = (period > tod_cycles_) ? (period - tod_cycles_) : 1u;
@@ -321,15 +299,13 @@ uint32_t Mos6526::tod_bound(uint32_t quiet) const
 
 uint32_t Mos6526::cycles_to_event(void) const
 {
-  /* Anything with a pipeline stage in flight has to be walked cycle by cycle */
+  /* A pipeline stage in flight must be walked cycle by cycle */
   if (int_delay_ != 0 || pb6_pulse_ != 0 || pb7_pulse_ != 0) return 1;
   if (cnt_ != cnt_prev_) return 1;
   if (sdr_pending_ || sdr_bits_ != 0) return 1;
 
-  /* The cascade is the one shape where both timers are permanently busy and
-   * yet nothing is visible from outside until timer B underflows. Asked
-   * individually they answer "not a moment" for ever, which is true of each of
-   * them and useless. Only the bus is told this; see catch_up(). */
+  /* Cascade: both timers are busy but nothing is visible until timer B underflows,
+     only the bus is notified (see catch_up()) */
   uint32_t quiet = cascade_quiet();
   if (quiet == 0) quiet = generic_quiet();
   if (quiet == 0) return 1;
@@ -347,27 +323,22 @@ void Mos6526::skip(uint32_t n)
 }
 
 /**
- * @brief Timer A free running on phi2 as a prescaler, timer B counting it.
+ * @brief Timer A free running on phi2 as prescaler for timer B
  *
- * Checked from the control registers only, never from the timer state
- * machines: with a latch of two there is no clock on which both timers are
- * settled, since timer B is propagating a count on two of every three
- * cycles. Whether the state actually repeats is established separately by
- * walking a period in cascade_skip().
+ * Checked from the control registers only (with a latch of two, timer B propagates a count on 2 of every 3 cycles)
+ * cascade_skip() walks a period to check the state repeats
  */
 bool Mos6526::cascade_shape(void) const
 {
   typedef Timer T;
 
-  /* Timer A free running on phi2, its underflow raising no interrupt, driving
-   * no port pin and shifting no serial bit, so a run of them is invisible. */
+  /* Timer A free running on phi2, underflow raises no interrupt, drives no port pin, shifts no serial bit */
   if ((ta_.state & (T::kCrStart | T::kPhi2In)) != (T::kCrStart | T::kPhi2In)) return false;
   if ((ta_.state & (T::kCrOneShot | T::kOneShot0 | T::kOneShot)) != 0) return false;
   if ((imr_ & kIntTimerA) != 0) return false;
   if ((cra_ & 0x42) != 0) return false;
 
-  /* Timer B counting timer A's underflows and nothing else. Mode 10 or 11 in
-   * CRB bits 6 and 5, and for 11 the CNT line has to be high. */
+  /* Timer B counting timer A underflows, mode 10 or 11 in CRB bits 6 and 5 (11 needs CNT high) */
   if ((crb_ & 0x40) == 0 || (crb_ & 0x02) != 0) return false;
   if ((crb_ & 0x20) != 0 && !cnt_) return false;
   if ((tb_.state & T::kCrStart) == 0) return false;
@@ -377,12 +348,7 @@ bool Mos6526::cascade_shape(void) const
 }
 
 /**
- * @brief How long the cascade can be left alone for.
- *
- * Without this the bus wakes the chip every clock, `catch_up()` is always one
- * clock behind, and cascade_skip() never has room to do anything. Timer B's
- * underflow is the next thing anyone outside can see, so the answer is the run
- * up to one count short of it.
+ * @brief Clocks the cascade can be left alone for, up to one count short of the timer B underflow
  */
 uint32_t Mos6526::cascade_quiet(void) const
 {
@@ -398,8 +364,7 @@ uint32_t Mos6526::cascade_skip(cycle_t behind)
 {
   const uint32_t period = static_cast<uint32_t>(ta_.latch) + 1u;
 
-  /* At least two periods to be worth it, and a period of one or two is too
-   * tight for timer B's count to have propagated inside it. */
+  /* At least two periods, a period of 1 or 2 is too tight for timer B to propagate its count */
   if (period < 3 || behind < 2u * period) return 0;
   if (tb_.counter < 3) return 0;
   if (!cascade_shape()) return 0;
@@ -409,7 +374,7 @@ uint32_t Mos6526::cascade_skip(cycle_t behind)
   if (cnt_ != cnt_prev_) return 0;
   if (sdr_pending_ || sdr_bits_ != 0) return 0;
 
-  /* Walk one period and see whether it is a repeat. */
+  /* Walk one period and check for a repeat */
   const Timer before_a = ta_;
   const Timer before_b = tb_;
   const cycle_t started = ticks_;
@@ -423,16 +388,15 @@ uint32_t Mos6526::cascade_skip(cycle_t behind)
     int_delay_ == 0 && pb6_pulse_ == 0 && pb7_pulse_ == 0 &&
     !sdr_pending_ && sdr_bits_ == 0 && cnt_ == cnt_prev_;
 
-  if (!repeats) return walked; /* not the shape after all, but time did pass */
+  if (!repeats) return walked; /* Not the shape, time did pass */
 
-  /* Stop one count short of timer B's own underflow: that one is visible. */
+  /* Stop one count short of the timer B underflow (visible) */
   uint64_t reps = static_cast<uint64_t>(tb_.counter) - 1u;
 
   const uint64_t left = static_cast<uint64_t>(behind) - walked;
   if (reps > left / period) reps = left / period;
 
-  /* The time of day counter ticks regardless, so the run may not step over
-   * it. `skip()` defers it the same way. */
+  /* Time of day counter always ticks, do not step over it (skip() defers it the same way) */
   const uint32_t hz = ((cra_ & 0x80) != 0) ? 50u : 60u;
   const uint32_t tod_period = clock_hz_ / (hz * 10u);
   const uint32_t tod_left =
@@ -458,11 +422,7 @@ void Mos6526::catch_up(cycle_t target_ticks)
 
     if (cascade_skip(behind) != 0) continue;
 
-    /* Deliberately not cycles_to_event(): that one may answer for the cascade,
-     * and the skip below is a plain subtraction from both counters, which is
-     * meaningless for a timer being counted by another timer rather than by
-     * clocks. Letting the cascade's answer reach it put timer A's counter at
-     * zero, a value it never holds while it is counting. */
+    /* Not cycles_to_event(), the skip below subtracts from both counters (invalid for a cascade) */
     uint32_t quiet = generic_quiet();
     if (quiet != 0) quiet = tod_bound(quiet);
 
@@ -480,8 +440,7 @@ void Mos6526::catch_up(cycle_t target_ticks)
 
 void Mos6526::catch_up_now(void)
 {
-  /* While a cycle is being executed the bus counter still names the cycle, so
-   * a chip that has kept up has run one tick more than that. */
+  /* Mid-cycle the bus counter names the cycle in progress, a caught up chip has run one tick more */
   catch_up(bus_.catch_up_target());
 }
 
@@ -496,8 +455,7 @@ void Mos6526::tick(void)
   ++real_ticks_;
   bool ports_changed = false;
 
-  /* CNT counts on its rising edge. Timer A takes it when CRA bit 5 is set,
-   * timer B when its input mode is "CNT". */
+  /* CNT counts on its rising edge, timer A when CRA bit 5 is set, timer B in input mode CNT */
   const bool cnt_rising = (cnt_ && !cnt_prev_);
   cnt_prev_ = cnt_;
   if (cnt_rising) {
@@ -505,7 +463,7 @@ void Mos6526::tick(void)
     if ((crb_ & 0x60) == 0x20) tb_.step_once();
   }
 
-  /* ---- timer A ---- */
+  /* timer A */
   const bool ta_underflow = ta_.tick();
   if (ta_underflow) {
     icr_ = static_cast<data_t>(icr_ | kIntTimerA);
@@ -515,7 +473,7 @@ void Mos6526::tick(void)
 
     if ((cra_ & 0x02) != 0) {
       if ((cra_ & 0x04) == 0) {
-        /* one clock high pulse on PB6 */
+        /* One clock high pulse on PB6 */
         pb67_timer_out_ = static_cast<data_t>(pb67_timer_out_ | 0x40);
         pb6_pulse_ = 2;
       } else {
@@ -524,11 +482,11 @@ void Mos6526::tick(void)
       ports_changed = true;
     }
 
-    /* the serial register shifts on every second underflow in output mode */
+    /* Serial register shifts on every second underflow in output mode */
     if ((cra_ & 0x40) != 0 && (sdr_bits_ != 0 || sdr_pending_)) {
       if (sdr_pending_ && sdr_bits_ == 0) {
         sdr_shift_ = sdr_;
-        sdr_bits_ = 16; /* two underflows per bit */
+        sdr_bits_ = 16; /* 2 underflows per bit */
         sdr_pending_ = false;
       }
       if (sdr_bits_ != 0) {
@@ -542,7 +500,7 @@ void Mos6526::tick(void)
 
   }
 
-  /* ---- timer B ---- */
+  /* timer B */
   const bool tb_underflow = tb_.tick();
   if (tb_underflow) {
     icr_ = static_cast<data_t>(icr_ | kIntTimerB);
@@ -561,15 +519,12 @@ void Mos6526::tick(void)
     }
   }
 
-  /* Timer A feeding timer B in the cascade modes. This is applied after both
-   * timers have been clocked, so the step lands on the next clock: doing it
-   * before timer B ticks makes it count one cycle early, which the Lorenz
-   * cia1tab test spots immediately. */
+  /* Timer A feeds timer B in the cascade modes, applied after both timers are clocked (step lands on the following clock) */
   if (ta_underflow && (crb_ & 0x40) != 0 && ((crb_ & 0x20) == 0 || cnt_)) {
     tb_.step_once();
   }
 
-  /* ---- the PB6/PB7 pulses last exactly one clock ---- */
+  /* PB6/PB7 pulses last one clock */
   if (pb6_pulse_ != 0 && --pb6_pulse_ == 0) {
     pb67_timer_out_ = static_cast<data_t>(pb67_timer_out_ & ~0x40);
     ports_changed = true;
@@ -581,17 +536,17 @@ void Mos6526::tick(void)
 
   if (ports_changed) update_ports();
 
-  /* ---- the interrupt line goes low one clock after the event ---- */
+  /* Interrupt line goes low one clock after the event */
   if ((int_delay_ & 0x02) != 0 && !int_low_) {
     set_int_line(true);
   }
   int_delay_ = static_cast<uint8_t>((int_delay_ << 1) & 0x02);
 
-  /* ---- time of day, clocked from the mains ---- */
+  /* Time of day, clocked from the mains */
   {
-    /* CRA bit 7 selects a 50 Hz or a 60 Hz supply */
+    /* CRA bit 7 selects 50 Hz or 60 Hz */
     const uint32_t hz = ((cra_ & 0x80) != 0) ? 50u : 60u;
-    const uint32_t period = clock_hz_ / (hz * 10u); /* tenths of a second */
+    const uint32_t period = clock_hz_ / (hz * 10u); /* Tenths of a second */
     if (++tod_cycles_ >= period) {
       tod_cycles_ = 0;
       tod_tick();
@@ -599,9 +554,7 @@ void Mos6526::tick(void)
   }
 }
 
-/* ------------------------------------------------------------------------ *
- * registers
- * ------------------------------------------------------------------------ */
+/* registers */
 
 data_t Mos6526::peek(uint8_t reg) const
 {
@@ -620,8 +573,7 @@ data_t Mos6526::peek(uint8_t reg) const
     case 0x0b: return tod_[3];
     case 0x0c: return sdr_;
     case 0x0d: return static_cast<data_t>(icr_ | (int_low_ ? kIntAny : 0));
-    /* the start bit reads back from the timer, because a one shot timer
-     * clears it by itself */
+    /* Start bit reads back from the timer (one shot clears it) */
     case 0x0e: return static_cast<data_t>((cra_ & ~0x01) | (ta_.running() ? 1 : 0));
     default:   return static_cast<data_t>((crb_ & ~0x01) | (tb_.running() ? 1 : 0));
   }
@@ -646,8 +598,7 @@ data_t Mos6526::io_read(addr_t addr)
     case 0x06: return static_cast<data_t>(tb_.counter & 0xff);
     case 0x07: return static_cast<data_t>(tb_.counter >> 8);
 
-    /* Reading the hours freezes the whole time, reading the tenths lets it
-     * run again. Anything else would let the time change between two reads. */
+    /* Reading the hours freezes the time, reading the tenths releases it */
     case 0x08: {
       const data_t v = tod_latch_ ? tod_latched_[0] : tod_[0];
       tod_latch_ = false;
@@ -668,9 +619,7 @@ data_t Mos6526::io_read(addr_t addr)
     case 0x0c: return sdr_;
 
     case 0x0d: {
-      /* Reading the ICR returns the events, releases the interrupt line and
-       * clears every event, all at once. That single behaviour is the source
-       * of most CIA race conditions. */
+      /* Reading the ICR returns the events, releases the interrupt line and clears all events */
       data_t value = icr_;
       if (int_low_) {
         value = static_cast<data_t>(value | kIntAny);
@@ -717,8 +666,7 @@ void Mos6526::io_write(addr_t addr, data_t value)
     case 0x06: tb_.set_latch_lo(value); break;
     case 0x07: tb_.set_latch_hi(value); break;
 
-    /* TOD. CRB bit 7 decides whether a write sets the clock or the alarm.
-     * Writing the hours stops the clock, writing the tenths starts it. */
+    /* TOD, CRB bit 7 selects clock or alarm, writing the hours stops the clock, writing the tenths starts it */
     case 0x08:
       if (tod_alarm_write_) {
         tod_alarm_[0] = static_cast<data_t>(value & 0x0f);
@@ -751,13 +699,13 @@ void Mos6526::io_write(addr_t addr, data_t value)
       break;
 
     case 0x0d:
-      /* bit 7 says whether the other bits are set or cleared */
+      /* Bit 7 sets or clears the other bits */
       if ((value & 0x80) != 0) {
         imr_ = static_cast<data_t>(imr_ | (value & 0x1f));
       } else {
         imr_ = static_cast<data_t>(imr_ & ~(value & 0x1f));
       }
-      /* an already pending event now delivers its interrupt */
+      /* A pending event delivers its interrupt */
       if ((imr_ & icr_) != 0 && !int_low_) {
         int_delay_ |= 0x01;
       }
@@ -766,7 +714,7 @@ void Mos6526::io_write(addr_t addr, data_t value)
     case 0x0e: {
       ta_.set_control(value);
 
-      /* starting the timer sets the toggle output high */
+      /* Starting the timer sets the toggle output high */
       if ((value & 0x01) != 0 && (cra_ & 0x01) == 0) {
         pb67_toggle_ = static_cast<data_t>(pb67_toggle_ | 0x40);
       }
@@ -787,16 +735,14 @@ void Mos6526::io_write(addr_t addr, data_t value)
         }
       }
 
-      /* Force load is a strobe: it does its work and always reads back as 0 */
+      /* Force load is a strobe, reads back as 0 */
       cra_ = static_cast<data_t>(value & ~0x10);
       update_ports();
       break;
     }
 
     default: {
-      /* Timer B has four input modes in bits 5 and 6. Only mode 00 counts
-       * phi2; the other three are stepped from CNT or from timer A, so the
-       * timer is told to ignore phi2 by setting the CNT bit. */
+      /* Timer B input modes in bits 5 and 6, only mode 00 counts phi2, others step from CNT or timer A (CNT bit set ignores phi2) */
       tb_.set_control((value & 0x40) != 0
                         ? static_cast<data_t>(value | 0x20)
                         : value);
@@ -828,7 +774,7 @@ void Mos6526::io_write(addr_t addr, data_t value)
     }
   }
 
-  /* the schedule the bus is holding may no longer be right */
+  /* Bus schedule may be outdated */
   rescheduled();
 }
 

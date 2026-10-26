@@ -1,11 +1,11 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * test_session.cpp
  * The playback session: engine thread, commands, song lengths, pacing.
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -41,9 +41,7 @@ using namespace usbsid;
 namespace {
 
 /**
- * @brief A three song PSID: init sets the volume, play bumps a register.
- *
- * @return the file bytes
+ * @brief Build a three song PSID, init sets the volume, play bumps a register, return the file bytes
  */
 std::vector<data_t> three_song_tune(void)
 {
@@ -66,9 +64,7 @@ std::vector<data_t> three_song_tune(void)
 }
 
 /**
- * @brief Poll the status until a condition holds or time runs out.
- *
- * @return true when the condition held in time
+ * @brief Poll the status until a condition holds or time runs out, return true when it held in time
  */
 bool wait_for(Session & s, std::function<bool(const SessionStatus &)> done,
               int timeout_ms = 5000)

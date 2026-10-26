@@ -1,11 +1,11 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * sid_asid.h
  * The backend that talks to the hardware.
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -46,11 +46,10 @@ namespace usbsid {
 #define ASID_FM_MAX_PAIRS 16
 
 /**
- * @brief Play calls per frame for the ASID environment message.
+ * @brief Play calls per frame for the ASID environment message
  *
- * Raster driven tunes play once per frame. A CIA driven tune is called every
- * latch + 1 cycles. The multiplier is the frame length over that period,
- * rounded and clamped to 1..16.
+ * Raster driven tunes play once per frame, a CIA driven tune every latch + 1 cycles
+ * The multiplier is the frame length over that period, rounded and clamped to 1..16
  */
 inline int asid_speed_multiplier(bool uses_cia, uint16_t cia_latch,
                                  uint32_t cycles_per_frame)
@@ -64,8 +63,7 @@ inline int asid_speed_multiplier(bool uses_cia, uint16_t cia_latch,
 }
 
 /**
- * @brief Sends register writes to any ASID supporting Midi endpoint.
- *
+ * @brief Send register writes to any ASID supporting Midi endpoint
  */
 class ASIDBackend final : public SidBackend
 {
@@ -90,7 +88,7 @@ class ASIDBackend final : public SidBackend
     std::vector<unsigned char> message;
     std::vector<unsigned char> basic_message;
 
-    /* FM/OPL index/data pairs waiting for an ASID 0x60 message. */
+    /* FM/OPL index/data pairs waiting for an ASID 0x60 message */
     std::vector<unsigned char> fm_pairs;
     unsigned char fm_addr = 0;
 

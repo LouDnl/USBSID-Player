@@ -1,13 +1,12 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * io_device.h
- * A chip that lives in the $d000-$dfff IO block. The MMU decodes the block
- * and hands the full address through; each chip masks it down to its own
- * register set, because the mirroring differs per chip.
+ * Chip in the $d000-$dfff IO block, gets the full address and masks
+ * it to its register set
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD

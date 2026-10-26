@@ -1,11 +1,11 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * test_roms.cpp
  * The stub KERNAL and playing without the Commodore ROMs.
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -49,11 +49,7 @@ using namespace us_test;
 namespace {
 
 /**
- * @brief Counts writes and hashes the write stream (FNV-1a).
- *
- * The delay before the first write is left out: it depends on which
- * instruction the boot was in when the tune was entered, a start offset of
- * a cycle or two, not a difference in the tune.
+ * @brief Count writes and hash the write stream (FNV-1a), without the delay before the first write
  */
 class HashSidBackend final : public SidBackend
 {
@@ -82,9 +78,7 @@ class HashSidBackend final : public SidBackend
 };
 
 /**
- * @brief Read a whole file.
- *
- * @return false when it cannot be read or is empty
+ * @brief Read a whole file, return false when it cannot be read or is empty
  */
 bool read_file(const char * path, std::vector<data_t> & out)
 {
@@ -117,8 +111,8 @@ int test_stub_layout(void)
            at(kStubIdleLoop + 2) == (kStubIdleLoop >> 8), "idle loop jumps to itself");
 
 #if US_EMBED_ROMS
-  /* Where the stub mirrors the stock KERNAL, it has to be byte identical:
-   * that is what keeps the cycle counts of reset and interrupt entry the same. */
+  /* Where the stub mirrors the stock KERNAL it has to be byte identical, the cycle
+     counts of reset and interrupt entry stay the same */
   struct Range { addr_t first; addr_t last; const char * what; };
   static const Range kSame[] = {
     { 0xfce2, 0xfcf4, "reset up to IOINIT" },
@@ -176,7 +170,7 @@ int test_rom_store(void)
 struct RunResult { bool started; uint32_t writes; uint32_t hash; };
 
 /**
- * @brief Run a tune for 300 frames.
+ * @brief Run a tune for 300 frames
  *
  * @param bytes  the file
  * @param roms   ROM set, nullptr for the build default
@@ -252,8 +246,7 @@ int test_prg_without_roms(void)
   std::unique_ptr<RomStore> store(new RomStore());
   store->set(nullptr, nullptr, nullptr);
 
-  /* A BASIC line that SYSes into machine code: 10 SYS2061, then a loop that
-   * writes the SID volume register forever. */
+  /* A BASIC line that SYSes into machine code (10 SYS2061), then a loop writing the SID volume register forever */
   const data_t prg[] = {
     0x01, 0x08,                                     /* load address $0801 */
     0x0b, 0x08, 0x0a, 0x00, 0x9e, 0x32, 0x30, 0x36, 0x31, 0x00, 0x00, 0x00,
@@ -285,7 +278,7 @@ int test_prg_without_roms(void)
     Player player(c64.machine);
     US_CHECK(player.load_prg(basic, sizeof(basic)), "the BASIC program parses");
     US_CHECK(player.needs_roms(), "and needs ROMs");
-    US_CHECK(!player.init_prg(), "so it does not start without them");
+    US_CHECK(!player.init_prg(), "it does not start without them");
   }
   return 0;
 }

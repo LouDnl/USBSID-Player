@@ -3,7 +3,7 @@
 # Requires bin2h: https://github.com/elnormous/bin2h
 
 ##
-# Set build type here
+# Set build type
 # Release/Test/Debug
 BUILDTYPE = Release
 

@@ -1,17 +1,16 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * sid_embedded.h
- * The backend used when the player *is* the firmware.
+ * The backend used when the player is the firmware
  *
- * On the desktop the register writes travel over USB to a USBSID-Pico. On the
- * device there is no USB in the middle: the firmware's own bus code drives the
- * SID directly, and it already takes a cycle delay with every access. So this
- * backend is a thin adapter onto two firmware functions, and the cycle exact
- * deltas the emulation produces are handed straight to the hardware.
+ * On the desktop register writes travel over USB to a USBSID-Pico
+ * On the device the firmware bus code drives the SID directly and takes a
+ * cycle delay with every access. This backend is a thin adapter onto two
+ * firmware functions, the cycle exact deltas go straight to the hardware
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -38,48 +37,43 @@
 #include "sid_backend.h"
 #include "types.h"
 
-/* The firmware side of the bridge: USBSID-Pico's own bus functions, reached
- * through pointers rather than `__attribute__((weak))` - weak-undefined-is-
- * null is an ELF-only property, and macOS/Windows builds fail or collide on
- * it. Under `EMBEDDED` these are initialised to the real addresses in
- * sid_embedded.cpp; everywhere else they start null and a test assigns them. */
+/* The firmware side of the bridge, USBSID-Pico bus functions reached through pointers
+ * Weak symbols are ELF only, macOS/Windows builds fail or collide on them
+ * Under EMBEDDED these are initialised to the real addresses in sid_embedded.cpp
+ * Otherwise null and a test assigns them */
 extern "C" {
   extern void (*us_cycled_write)(uint8_t address, uint8_t data, uint16_t cycles);
   extern uint8_t (*us_cycled_read)(uint8_t address, uint16_t cycles);
   extern void (*us_reset_sid)(void);
   extern void (*us_reset_sid_registers)(void);
-  /* the Pico SDK's microsecond clock, the only real time this backend has */
+  /* Pico SDK microsecond clock, the only real time this backend has */
   extern uint64_t (*us_time_us_64)(void);
-  /* Optional: block for this long. Nothing sets it on the device, where the
-   * fallback spin on us_time_us_64 is what a busy wait would have been anyway.
-   * It exists so a test can run the pacer against a clock it controls, which is
-   * the only way to measure device tempo without a device. */
+  /* Optional block for this long, nothing sets it on the device (the spin on
+   * us_time_us_64 is the busy wait), a test sets it to run the pacer against a controlled clock */
   extern void (*us_busy_wait_us)(uint32_t us);
 }
 
 namespace usbsid {
 
 /**
- * @brief Sends register writes to the SID bus of the firmware we run inside.
+ * @brief Send register writes to the SID bus of the firmware it runs inside
  *
- * `cycled_write_operation` takes the gap since the previous access and waits
- * it out *before* putting the value on the bus. For writes that come close
- * together that is both exact and free: the PIO still has earlier writes
- * queued, so it is sitting out one gap while the emulation produces the next,
- * and the hardware, being the slower of the two, sets the pace.
+ * cycled_write_operation takes the gap since the previous access and waits it
+ * out before putting the value on the bus. For writes close together this is
+ * exact and free, the PIO has earlier writes queued and sits out one gap while
+ * the emulation produces the following one. The hardware is the slower of the two and sets the pace
  *
- * A wide gap breaks that. The queue drains during it, so by the time this
- * backend is handed the gap it has already spent the host time to emulate it,
- * and the hardware then spends the same gap again from a standing start. The
- * two are serialised and the frame takes half again as long as it should.
- * A tune with a play routine and an idle loop is entirely made of such gaps:
- * one write burst and then nineteen thousand cycles of nothing, every frame.
+ * A wide gap drains the queue. The host time to emulate it is already spent
+ * when the gap arrives and the hardware spends the same gap again from a
+ * standing start, the frame takes half again as long as it should
+ * A tune with a play routine and an idle loop is made of such gaps, one write
+ * burst and then nineteen thousand cycles of nothing, every frame
  *
- * So gaps wide enough to have drained the queue are not sent to the hardware
- * at all. They are sat out here instead, against the board's own clock, and
- * only the time that has *not* already gone into emulating them is waited.
- * The hardware gets a token delay and the write. Everything narrower keeps
- * the exact pre delay it had, which is what digi playback depends on.
+ * Gaps wide enough to drain the queue are not sent to the hardware
+ * They are sat out in this class against the board clock, only the time not
+ * already spent emulating them is waited
+ * The hardware gets a token delay and the write
+ * Narrower gaps keep the exact pre delay (digi playback depends on it)
  */
 class EmbeddedSidBackend final : public SidBackend
 {
@@ -92,74 +86,70 @@ class EmbeddedSidBackend final : public SidBackend
     void flush(void) override {}
     void reset(void) override;
 
-    /** @brief Whether the firmware bus functions are actually linked in. */
+    /** @brief Check if the firmware bus functions are linked in */
     static bool hardware_present(void)
     {
       return us_cycled_write != nullptr;
     }
 
-    /** @brief Reset the chips themselves, not just this object's counters. */
+    /** @brief Reset the chips and the counters */
     void reset_hardware(void);
 
-    /** @brief The SID clock the board is running at, for waiting in real time. */
+    /** @brief Set the SID clock of the board, for waiting in real time */
     void set_clock_hz(uint32_t hz);
     uint32_t clock_hz(void) const { return clock_hz_; }
 
     /**
-     * @brief Start the pacer's clock from now.
+     * @brief Start the pacer clock from the current time
      *
-     * The pacer measures a tune's timeline from the first access it sees. That
-     * has to be the first access of the tune and not of the KERNAL boot before
-     * it, so the player calls this when playback starts.
+     * The pacer measures the tune timeline from the first access it sees
+     * That must be the first access of the tune (the KERNAL boot before it is skipped)
+     * Called by the player when playback starts
      */
     void resync_clock(void) { paced_ = false; due_cycles_ = 0; }
 
     /**
-     * @brief Whether wide gaps are sat out in real time.
+     * @brief Sit out wide gaps in real time
      *
-     * On for playback, which is the whole point. Off while a tune is being
-     * set up: booting a machine and loading a program is not part of anyone's
-     * timeline, nobody is listening to it, and pacing it only makes the wait
-     * before the first note longer than the work actually takes. Switching it
-     * back on restarts the clock.
+     * On for playback. Off while a tune is set up, booting and loading is no
+     * part of the timeline and pacing it only lengthens the wait before the first note
+     * Switching on restarts the clock
      */
     void set_pacing(bool on) { pacing_ = on; if (on) resync_clock(); }
 
     uint32_t writes(void) const { return writes_; }
     uint32_t reads(void) const { return reads_; }
     uint64_t cycles_waited(void) const { return waited_; }
-    /** @brief Cycles the pacer has sat out itself rather than sending them. */
+    /** @brief Cycles the pacer sat out */
     uint64_t cycles_paced(void) const { return paced_cycles_; }
-    /** @brief Cycles taken off pre delays to make up time already lost. */
+    /** @brief Cycles taken off pre delays to make up lost time */
     uint64_t cycles_trimmed(void) const { return trimmed_cycles_; }
-    /** @brief Writes that found the timeline already behind. */
+    /** @brief Writes that found the timeline behind */
     uint32_t late_writes(void) const { return late_writes_; }
 
   private:
-    /** @brief Account for a gap and decide what the hardware should be told. */
+    /** @brief Account for a gap and decide what the hardware is told */
     uint16_t schedule(uint16_t cycles) US_RAM_ATTR;
-    /** @brief Block until the accounted timeline catches up with the clock. */
+    /** @brief Block until the timeline catches up with the clock */
     void wait_until_due(void) US_RAM_ATTR;
-    /** @brief Shorten a pre delay by however much of it has already gone by. */
+    /** @brief Shorten a pre delay by the part that has gone by */
     uint16_t trim_to_now(uint16_t hw) US_RAM_ATTR;
 
     uint32_t writes_ = 0;
     uint32_t reads_ = 0;
     uint64_t waited_ = 0;
-    uint32_t clock_hz_ = 985248; /* PAL, until a tune says otherwise */
+    uint32_t clock_hz_ = 985248; /* PAL until a tune says otherwise */
 
-    /* The pacer. `due_cycles_` is the tune's own timeline measured from
-     * `origin_us_` on the board's clock, and the microseconds one cycle takes
-     * is kept in 16.16 fixed point so putting the two together is a multiply
-     * and a shift rather than a division per access. */
+    /* The pacer, due_cycles_ is the tune timeline measured from origin_us_ on the board clock
+     * Microseconds per cycle is kept in 16.16 fixed point (multiply and shift, no division per access) */
     uint64_t origin_us_ = 0;
     uint64_t due_cycles_ = 0;
     uint64_t paced_cycles_ = 0;
     uint64_t trimmed_cycles_ = 0;
     uint32_t late_writes_ = 0;
     uint32_t us_per_cycle_q16_ = 0;
-    bool paced_ = false;      /* whether origin_us_ has been set yet */
-    bool pacing_ = true;      /* whether wide gaps are waited at all */
+    bool paced_ = false;      /* origin_us_ set */
+    bool pacing_ = true;      /* wide gaps are waited */
 };
 
 } /* namespace usbsid */

@@ -1,15 +1,12 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * cynthcart_embedded.cpp
- * Wires the MC68B50 ACIA onto the player's machine and drives Cynthcart
- * through the ordinary PRG boot path (see player/player.cpp Player::init_prg,
- * which already boots the KERNAL, pokes the binary in and types RUN, exactly
- * what Cynthcart's "$0801, 10 SYS2061" stub needs). Embedded only, see
- * docs/API_EMBEDDED.md: nothing here is wanted on desktop.
+ * Wires the MC68B50 ACIA onto the player machine and runs Cynthcart through
+ * the PRG boot path (Player::init_prg), embedded only (docs/API_EMBEDDED.md)
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -32,9 +29,7 @@
 
 #include "cynthcart_embedded.h"
 
-#include "pico.h" /* cynthcart.h's __in_flash(...) needs pico/platform/sections.h,
-                   * pulled in transitively here; pico/platform.h refuses to be
-                   * included directly. */
+#include "pico.h" /* needed for __in_flash(...) of cynthcart.h, pico/platform.h cannot be included directly */
 #include "usplayer.h"
 #include "core/machine.h"
 #include "MC68B50.h"
@@ -48,16 +43,13 @@ void start_cynthcart(void)
 {
   usbsid::Machine & machine = usbsid::usplayer_machine();
 
-  /* One ACIA for the life of the firmware, same "everything here is
-   * statically allocated" reasoning as usplayer.cpp's g_machine. */
+  /* One ACIA for the life of the firmware, statically allocated */
   static usbsid::MC68B50 acia(machine.bus());
   g_acia = &acia;
   g_acia->reset();
   machine.mmu().attach_io1(g_acia);
 
-  /* Boots the KERNAL, pokes cynthcart[] in at its load address and types
-   * "run", the same as load_sidtune()+init_sidplayer()+start_sidplayer()
-   * does for a tune. */
+  /* Boots the KERNAL, pokes cynthcart[] in at its load address and types "run" */
   load_prg(cynthcart, sizeof(cynthcart), false);
 }
 
@@ -69,14 +61,8 @@ void stop_cynthcart(void)
 
 unsigned int run_cynthcart(void)
 {
-  /* One instruction per call, not one frame: loop_sidplayer()'s frame
-   * granularity (Player::run_frame() -> machine_.run(cycles_to_frame_end()))
-   * only let a queued MIDI byte become visible to the CPU once every ~20ms,
-   * and only one byte per call regardless of how many were queued - a
-   * throughput cap under real MIDI traffic, not just a fixed latency. The
-   * old emudore loop stepped and drained the ACIA together every iteration;
-   * Machine::step_instruction() is the same pairing, at the same real
-   * instruction-boundary IRQ-sample point a 6502 uses anyway. */
+  /* One instruction per call, a frame per call delays MIDI bytes by ~20ms and passes one byte per frame.
+   * Machine::step_instruction() samples IRQ at the instruction boundary like a 6502 */
   if (g_acia == nullptr) return 0;
   usbsid::usplayer_machine().step_instruction();
   g_acia->emulate();

@@ -1,28 +1,20 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * mos6569.h
- * MOS 6569 / 6567 video interface controller, timing only.
+ * MOS 6569 / 6567 video interface controller, timing only
+ * (no pixel pipeline, no display)
  *
- * There is no pixel pipeline and there is no display. What this chip does
- * here is the part a SID player actually depends on:
+ *   - raster counter and raster interrupt
+ *   - bad line condition (steals 40 cycles from the CPU)
+ *   - sprite DMA and the cycles it steals
+ *   - frame boundary, flushes the SID buffer
  *
- *   - the raster counter and the raster interrupt, at the right cycle,
- *   - the bad line condition and the 40 cycles it steals from the CPU,
- *   - sprite DMA and the cycles it steals,
- *   - the frame boundary, which is where the SID buffer is flushed.
+ * Sprite collisions are not emulated (requires a rendered picture),
+ * registers and interrupt bits exist but are never set
  *
- * Cycles stolen from the CPU are not cosmetic: every one of them shifts every
- * following SID write in the frame, which is exactly the error this player
- * exists to remove.
- *
- * Not emulated, because both need a rendered picture: sprite to sprite and
- * sprite to background collisions. Their registers and interrupt bits exist
- * and behave, but nothing ever sets a collision. A renderer, if one is ever
- * added, plugs into the same cycle table.
- *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -54,10 +46,7 @@
 namespace usbsid {
 
 /**
- * @brief Told when the VIC finishes a frame.
- *
- * The SID layer flushes its buffer here, which is what the current player
- * does at the end of vsync.
+ * @brief Called when the VIC finishes a frame, the SID layer flushes its buffer
  */
 class VicFrameObserver
 {
@@ -76,33 +65,22 @@ class Mos6569 final : public ClockedDevice, public IoDevice
     void reset(void) override;
 
     /**
-     * @brief Run up to the given tick count, skipping what it can.
+     * @brief Run up to the given tick count, skipping uneventful cycles
      *
-     * A raster line is sixty three cycles and about four of them are
-     * interesting: where BA goes low for a bad line, where it comes back, the
-     * raster compare at the top, and the line boundary. In between the chip
-     * counts, and counting can be done in one step. Anything that looks at it
-     * catches it up first, the same as the CIAs.
-     *
-     * With sprites fetching, every cycle is walked: the fetch windows overlap
-     * and wrap into the next line, and a SID player almost never has sprites
-     * on, so the simple thing is the right thing.
+     * Per line only BA low (bad line), BA back, the raster compare and the line boundary matter
+     * With sprites fetching every cycle is walked (fetch windows overlap and wrap into the following line)
      */
     void catch_up(cycle_t target_ticks) US_RAM_ATTR;
 
-    /** @brief Ticks it can be left alone for, at least one. */
+    /** @brief Ticks it can be left alone for, at least one */
     uint32_t cycles_to_event(void) const US_RAM_ATTR;
 
     /**
-     * @brief Cycles left until the frame ends, counting the wrap itself.
-     *
-     * Running exactly this many lands on the frame boundary. It exists so the
-     * player does not have to poll the frame counter every cycle: polling it
-     * catches the chip up every cycle, which is the whole saving thrown away.
+     * @brief Cycles left until the frame ends (wrap included), running this many lands on the frame boundary
      */
     uint32_t cycles_to_frame_end(void) US_RAM_ATTR;
 
-    /** @brief Cycles actually walked rather than skipped, for tuning. */
+    /** @brief Cycles actually walked, for tuning */
     cycle_t real_ticks(void) const { return real_ticks_; }
 
     data_t io_read(addr_t addr) override US_RAM_ATTR;
@@ -114,17 +92,16 @@ class Mos6569 final : public ClockedDevice, public IoDevice
     VideoModel model(void) const { return model_; }
     const VicTiming & timing(void) const { return *timing_; }
 
-    /* Where in the frame we are. These catch the chip up: it runs behind the
-     * bus by design, and a stale raster line is a wrong answer. */
+    /* Position in the frame, catches the chip up first (it runs behind the bus) */
     uint16_t raster(void) { catch_up_now(); return raster_; }
     uint16_t cycle_in_line(void) { catch_up_now(); return cycle_; }
     bool badline(void) { catch_up_now(); return badline_; }
     uint64_t frames(void) { catch_up_now(); return frames_; }
 
-    /* register state, for tests and for the player */
+    /* Register state */
     data_t peek(uint8_t reg) const US_RAM_ATTR;
 
-    /** @brief The raster counter as $d011/$d012 shows it. See the definition. */
+    /** @brief Raster counter as $d011/$d012 shows it */
     uint16_t visible_raster(void) const US_RAM_ATTR;
     data_t irq_flags(void) const { return irq_flags_; }
     data_t irq_enable(void) const { return irq_enable_; }
@@ -133,13 +110,13 @@ class Mos6569 final : public ClockedDevice, public IoDevice
   private:
     enum : data_t {
       kIrqRaster    = 0x01,
-      kIrqSpriteBg  = 0x02, /* needs a rendered picture, never set here */
-      kIrqSprite    = 0x04, /* idem */
+      kIrqSpriteBg  = 0x02, /* Needs a rendered picture, never set */
+      kIrqSprite    = 0x04, /* Same */
       kIrqLightpen  = 0x08,
       kIrqAny       = 0x80,
     };
 
-    /* Registers, by their offset in the $d000 page */
+    /* Registers by offset in the $d000 page */
     enum : uint8_t {
       kRegControl1  = 0x11,
       kRegRaster    = 0x12,
@@ -168,49 +145,35 @@ class Mos6569 final : public ClockedDevice, public IoDevice
     VicFrameObserver * observer_ = nullptr;
 
     uint16_t cycle_ = 1;       /* 1 .. cycles_per_line */
-    cycle_t ticks_ = 0;       /* how far it has been advanced */
-    cycle_t real_ticks_ = 0;  /* how much of that was walked */
+    cycle_t ticks_ = 0;       /* Ticks advanced */
+    cycle_t real_ticks_ = 0;  /* Ticks walked */
     uint16_t raster_ = 0;
-    uint16_t raster_irq_ = 0;  /* nine bits, from $d012 and $d011 bit 7 */
+    uint16_t raster_irq_ = 0;  /* 9 bits, $d012 and $d011 bit 7 */
     uint64_t frames_ = 0;
 
     bool badline_ = false;
-    bool den_seen_ = false;    /* DEN was set somewhere in raster $30 */
+    bool den_seen_ = false;    /* DEN set somewhere in raster $30 */
     bool ba_ = true;
 
     data_t regs_[0x40] = { 0 };
     data_t irq_flags_ = 0;
     data_t irq_enable_ = 0;
 
-    /* sprite DMA, enough of it to steal the right cycles */
+    /* Sprite DMA, enough to steal the right cycles */
     bool sprite_dma_[8] = { false };
     uint8_t sprite_line_[8] = { 0 };
     bool sprite_expand_toggle_[8] = { false };
 
-    /* Which cycles of a line the sprites currently in DMA pull BA low on, and
-     * from each cycle where the next change to that is.
-     *
-     * Both were worked out from the eight windows every time they were needed,
-     * which was on every tick (`update_ba()`) and on every scheduling decision
-     * (`cycles_to_event()`), with a wrap loop inside. They only change when a
-     * sprite's DMA does, which is twice a line at most, so they are built
-     * there instead.
-     *
-     * The edge list is what lets the scheduler skip properly. Stopping at
-     * every individual window edge meant a stop every two cycles once several
-     * sprites were active, because the windows are five cycles wide and two
-     * apart, so they merge and most of those edges are inside a merged run and
-     * change nothing. These are the edges of the union and nothing else: every
-     * cycle whose BA differs from the cycle before it, the previous line's
-     * last cycle counting as the one before cycle one, which is what makes the
-     * windows that wrap come out right. */
+    /* Cycles of a line where sprite DMA pulls BA low, rebuilt when sprite DMA changes (max twice a line)
+     * Edge list = cycles whose BA differs from the previous cycle (previous line last cycle precedes cycle 1)
+     * Sprite windows are 5 cycles wide and 2 apart, they merge, only the union edges count */
     static constexpr uint16_t kMaxLineCycles = 72; /* PAL 63, NTSC 65 */
     bool sprite_ba_low_[kMaxLineCycles] = { false };
     uint8_t sprite_ba_edges_[16] = { 0 };
     uint8_t sprite_ba_nedges_ = 0;
     bool sprite_ba_any_ = false;
 
-    /** @brief Rebuild the two tables above from `sprite_dma_`. */
+    /** @brief Rebuild the two tables above from sprite_dma_ */
     void rebuild_sprite_ba(void) US_RAM_ATTR;
 };
 

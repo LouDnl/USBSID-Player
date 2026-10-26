@@ -1,10 +1,10 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * songlengths.cpp
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -36,7 +36,7 @@ namespace usbsid {
 
 namespace {
 
-/** @brief "2:45.446", "0:56", "1:17.5" -> milliseconds. */
+/** @brief Convert "2:45.446", "0:56" or "1:17.5" to milliseconds */
 uint32_t parse_time(const char * p, const char * end)
 {
   uint32_t minutes = 0;
@@ -53,8 +53,7 @@ uint32_t parse_time(const char * p, const char * end)
     p++;
   }
 
-  /* The fraction is optional and may be any number of digits. Read three and
-   * ignore the rest, which is milliseconds and as much as anyone needs. */
+  /* Optional fraction of any length, read three digits (milliseconds) */
   uint32_t millis = 0;
   if (p < end && *p == '.') {
     p++;
@@ -78,14 +77,12 @@ bool readable(const char * path)
   return true;
 }
 
-/** @brief Join a directory, a subpath and a name, if the directory is set. */
+/** @brief Join a directory, a subpath and a name if the directory is set */
 bool join(char * out, size_t out_len, const char * dir, const char * tail)
 {
   if (dir == nullptr || dir[0] == '\0') return false;
   const size_t dlen = strlen(dir);
-  /* HVSC_BASE is commonly exported with a trailing slash, and joining blindly
-   * gives "...C64Music//DOCUMENTS", which happens to work on POSIX and is still
-   * not what to print at someone. */
+  /* HVSC_BASE often has a trailing slash */
   const bool slash = (dlen > 0 && (dir[dlen - 1] == '/' || dir[dlen - 1] == '\\'));
   const int n = snprintf(out, out_len, "%s%s%s", dir, slash ? "" : "/", tail);
   return n > 0 && static_cast<size_t>(n) < out_len;
@@ -115,7 +112,7 @@ SongLengths songlengths_lookup(const char * db, size_t db_len, const char * key)
 
     if (static_cast<size_t>(line_end - p) > klen && p[klen] == '=' &&
         memcmp(p, key, klen) == 0) {
-      /* Found it. The times follow, separated by spaces. */
+      /* Found it, times follow separated by spaces */
       const char * t = p + klen + 1;
       while (t < line_end && out.count < kMaxSongLengths) {
         while (t < line_end && (*t == ' ' || *t == '\t')) t++;
@@ -137,26 +134,21 @@ SongLengths songlengths_lookup(const char * db, size_t db_len, const char * key)
 
 bool songlengths_find_file(const char * wanted, char * out, size_t out_len)
 {
-  /* Asked for explicitly: report it as it was given, and do not quietly fall
-   * through to somewhere else if it is not there. A wrong path named on the
-   * command line is a mistake worth seeing rather than papering over. */
+  /* Explicit path is used as given, no fallback if missing */
   if (wanted != nullptr && wanted[0] != '\0') {
     snprintf(out, out_len, "%s", wanted);
     return readable(out);
   }
 
-  /* Named outright, before anything is guessed. */
+  /* Named outright */
   const char * env_db = getenv("SONGLENGTHS");
   if (readable(env_db)) { snprintf(out, out_len, "%s", env_db); return true; }
 
-  /* The file, under whichever spelling. HVSC ships it capitalised; a copy put
-   * somewhere by hand is as likely to keep that as to be renamed, and the .md
-   * spelling gets typed often enough to be worth trying. */
+  /* HVSC ships the file capitalised, .md is also seen */
   static const char * const names[] = {
     "Songlengths.md5", "songlengths.md5", "Songlengths.md", "songlengths.md"
   };
-  /* Inside an HVSC tree the file is under DOCUMENTS, so each root is tried both
-   * ways: as a tree, and as a directory holding the file directly. */
+  /* Inside an HVSC tree the file is under DOCUMENTS, also try the directory itself */
   static const char * const prefixes[] = { "DOCUMENTS/", "" };
 
   const auto try_dir = [&](const char * dir) -> bool {
@@ -171,27 +163,23 @@ bool songlengths_find_file(const char * wanted, char * out, size_t out_len)
     return false;
   };
 
-  /* An HVSC tree, however this machine says where it is. */
+  /* HVSC tree */
   static const char * const roots[] = { "HVSCROOT", "HVSC_BASE", "HVSC", "HVSC_ROOT" };
   for (const char * var : roots) {
     if (try_dir(getenv(var))) return true;
   }
 
-  /* The user's own directory. HOME on POSIX; Windows sets USERPROFILE, and may
-   * set HOME as well under MSYS2, so both are tried. */
+  /* User directory, HOME on POSIX, USERPROFILE on Windows (MSYS2 may set both) */
   const char * home = getenv("HOME");
   const char * profile = getenv("USERPROFILE");
   if (try_dir(home)) return true;
   if (try_dir(profile)) return true;
 
-  /* Then the places each platform keeps this sort of thing. The player does not
-   * write any of them; they are searched because that is where a person or an
-   * installer is likely to have put the file. */
+  /* Platform specific places, searched only */
   char dir[1024];
 
 #if defined(_WIN32)
-  /* %APPDATA%\HVSC, %LOCALAPPDATA%\HVSC, and the same for the player's own
-   * name, since an installer may use either. */
+  /* %APPDATA%\HVSC, %LOCALAPPDATA%\HVSC and the same for the player name */
   static const char * const win_vars[] = { "APPDATA", "LOCALAPPDATA", "ProgramData" };
   static const char * const win_subs[] = { "HVSC", "USBSID-Player", "usbsid" };
   for (const char * var : win_vars) {
@@ -203,8 +191,7 @@ bool songlengths_find_file(const char * wanted, char * out, size_t out_len)
     if (try_dir(base)) return true;
   }
 #elif defined(__APPLE__)
-  /* ~/Library/Application Support is where a Mac keeps this, and ~/Documents is
-   * where an HVSC download most often lands. */
+  /* ~/Library/Application Support and ~/Documents */
   static const char * const mac_subs[] = {
     "Library/Application Support/HVSC",
     "Library/Application Support/USBSID-Player",
@@ -220,8 +207,7 @@ bool songlengths_find_file(const char * wanted, char * out, size_t out_len)
     return true;
   }
 #else
-  /* XDG first, since that is the answer where it is set, then the two paths it
-   * defaults to, then the usual system wide spots. */
+  /* XDG paths, then the home defaults, then system wide spots */
   const char * xdg_config = getenv("XDG_CONFIG_HOME");
   const char * xdg_data   = getenv("XDG_DATA_HOME");
   static const char * const nix_subs[] = { "hvsc", "HVSC", "usbsid", "usbsid-player" };
@@ -244,8 +230,7 @@ bool songlengths_find_file(const char * wanted, char * out, size_t out_len)
   }
 #endif
 
-  /* Last, because it names the file rather than a place and is the most likely
-   * to be set to something that has moved. */
+  /* Last, names the file and not a place */
   const char * hvscdb = getenv("HVSCDB");
   if (readable(hvscdb)) { snprintf(out, out_len, "%s", hvscdb); return true; }
 

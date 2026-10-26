@@ -1,10 +1,10 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * prgfile.cpp
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -30,8 +30,7 @@ namespace usbsid {
 
 namespace {
 
-/* The PC64 container: "C64File" and a zero, sixteen bytes of name, a zero,
- * and the record length. The program, load address and all, follows. */
+/* PC64 container: "C64File" and a zero, 16 bytes name, a zero, record length. Program follows */
 constexpr size_t kP00HeaderSize = 26;
 constexpr size_t kP00NameOffset = 8;
 constexpr size_t kP00NameLength = 16;
@@ -47,13 +46,9 @@ bool has_p00_signature(const data_t * bytes, size_t len)
 }
 
 /**
- * @brief Find the address a BASIC startup line SYSes to.
+ * @brief Find the address a BASIC startup line SYSes to
  *
- * The line looks like this in memory:
- *   link word, line number, $9e (the token for SYS), the digits, $00
- * and this is what typing RUN on a machine code program actually does. Only
- * the first line is looked at: a program that hides its SYS further in is not
- * something to start by guessing.
+ * Line layout: link word, line number, $9e (SYS token), digits, $00 (first line only)
  */
 bool find_sys_stub(const data_t * data, size_t size, addr_t & sys_out)
 {
@@ -95,7 +90,7 @@ bool prgfile_parse(const data_t * bytes, size_t len, PrgFile & out)
     out.is_p00 = true;
     for (size_t i = 0; i < kP00NameLength; i++) {
       const data_t c = bytes[kP00NameOffset + i];
-      /* the name is PETSCII padded with $a0, and only wanted for display */
+      /* PETSCII name padded with $a0, display only */
       out.name[i] = (c == 0x00 || c == 0xa0) ? '\0' : static_cast<char>(c);
     }
     out.name[kP00NameLength] = '\0';
@@ -108,7 +103,7 @@ bool prgfile_parse(const data_t * bytes, size_t len, PrgFile & out)
   out.data = p + 2;
   out.data_size = n - 2;
 
-  /* A program that would run off the top of memory is not one */
+  /* Would run off the top of memory */
   if (out.load_addr + out.data_size > 0x10000) return false;
 
   out.end_addr = static_cast<addr_t>(out.load_addr + out.data_size - 1);

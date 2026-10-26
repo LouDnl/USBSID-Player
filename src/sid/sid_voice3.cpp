@@ -1,6 +1,6 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * sid_voice3.cpp
  *
@@ -8,7 +8,7 @@
  * Left out are the parts a read of $d41b and $d41c cannot show: the filter, the mixer,
  * the other two voices and the sync and ring modulation inputs of voice three
  * from voice two. Those only change the sound, real chips make that
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD

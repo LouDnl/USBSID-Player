@@ -1,10 +1,10 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * sid_web.cpp
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -34,18 +34,15 @@ void WebSidBackend::write(addr_t reg, data_t value, uint16_t cycles)
 {
   ++writes_;
 
-  /* Chip 5 and up ($80 to kFmOplRange - 1) never reach this board: this
-   * backend only has 4 real sockets over WebUSB ("board or emulated" stay a
-   * hard 4 chip placeholder, see mos6581_8580.h's kMaxSids comment). Dropped
-   * rather than truncated into `entry[0]`, the one byte CYCLED_WRITE register
-   * field: wrapping a chip 8+ register into another chip's byte would corrupt
-   * the stream. UsbSidBackend and EmbeddedSidBackend drop the same range.
+  /* Chip 5 and up ($80 to kFmOplRange - 1) never reach this board, it has 4 real
+   * sockets over WebUSB (see the kMaxSids comment in mos6581_8580.h)
+   * Dropped, a chip 8+ register truncated into entry[0] (the one byte CYCLED_WRITE
+   * register field) would corrupt the stream. UsbSidBackend and EmbeddedSidBackend drop the same range
    *
-   * kFmOplRange and up is the unclaimed FM/OPL park (kFmOplParkBase,
-   * mos6581_8580.cpp): $df40/$df50 with no SID claiming them. The page packs
-   * these as ring regs $80 (index port) and $90 (data port) into ASID 0x60
-   * (asid-midi.js). Real chip registers stay below $80 on the ring, so the
-   * two ranges cannot collide. */
+   * kFmOplRange and up is the unclaimed FM/OPL park (kFmOplParkBase, mos6581_8580.cpp)
+   * $df40/$df50 with no SID claiming them. The page packs these as ring regs
+   * $80 (index port) and $90 (data port) into ASID 0x60 (asid-midi.js)
+   * Real chip registers stay below $80 on the ring, no collision */
   constexpr addr_t kFmOplRange = static_cast<addr_t>(kMaxSids * 0x20);
   if (reg >= kFmOplRange) reg = ((reg & 0x1f) == 0x10) ? 0x90 : 0x80;
   else if (reg >= 0x80) return;
@@ -55,8 +52,7 @@ void WebSidBackend::write(addr_t reg, data_t value, uint16_t cycles)
     return;
   }
 
-  /* The gap goes on the ring as it arrives - access_overhead is already
-   * subtracted upstream, no second subtraction here. */
+  /* The gap goes on the ring as it arrives, access_overhead is already subtracted upstream */
   const uint16_t delay = cycles;
   uint8_t * entry = &ring_[(head_ & (kRingEntries - 1)) * kEntryBytes];
   entry[0] = static_cast<uint8_t>(reg);
@@ -67,16 +63,14 @@ void WebSidBackend::write(addr_t reg, data_t value, uint16_t cycles)
 }
 
 /**
- * @brief A register read.
+ * @brief Read a register, answers open bus and is counted
  *
- * There is nothing to return. A read is a round trip, and the ring only goes
- * one way; making it two way would mean blocking the emulation until the page
- * has been round the event loop, which is the one thing a frame stepped player
- * cannot do. So this answers open bus and is counted.
+ * Nothing to return, a read is a round trip and the ring goes one way
+ * Two way would block the emulation until the page ran the event loop,
+ * a frame stepped player cannot do that
  *
- * It costs nothing in practice: reads only reach a backend when `real_reads`
- * is on, and it is off. `$d41b` and `$d41c`, the registers tunes actually
- * poll, are answered by the emulated voice three instead.
+ * Costs nothing in practice, reads only reach a backend with real_reads
+ * (off), $d41b and $d41c are answered by the emulated voice three
  */
 data_t WebSidBackend::read(addr_t reg, uint16_t cycles)
 {
@@ -87,12 +81,10 @@ data_t WebSidBackend::read(addr_t reg, uint16_t cycles)
 }
 
 /**
- * @brief A gap too long to carry with a write.
+ * @brief Count and drop a gap too long to carry with a write
  *
- * Counted and dropped, the same as the desktop backend does, and for the same
- * reason: the page is what keeps playback in real time, so sitting the gap out
- * here as well would serve it twice and a silent passage would take twice as
- * long as it should.
+ * Same as the desktop backend, the page keeps playback in real time
+ * Sitting the gap out in this backend as well would serve it twice
  */
 void WebSidBackend::wait(uint16_t cycles)
 {
@@ -105,16 +97,15 @@ void WebSidBackend::reset(void)
   reads_ = 0;
   waited_ = 0;
   drops_ = 0;
-  tail_ = head_; /* whatever is queued belongs to the tune that just ended */
+  tail_ = head_; /* queued writes belong to the ended tune */
 }
 
 /**
- * @brief Ask for the chips to be silenced.
+ * @brief Ask for the chips to be silenced
  *
- * The page does the silencing, because only it can talk to the device. What
- * happens here is that anything still queued is thrown away, so a reset is not
- * stuck behind a burst of writes from a tune that has already stopped, and the
- * counter the page watches is advanced.
+ * The page does the silencing, only it can talk to the device
+ * Anything still queued is thrown away, a reset is not stuck behind a burst
+ * of writes from a stopped tune, and the counter the page watches is advanced
  */
 void WebSidBackend::reset_hardware(void)
 {

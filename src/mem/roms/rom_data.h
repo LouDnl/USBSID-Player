@@ -1,13 +1,12 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * rom_data.h
- * The stock C64 ROM images, compiled in so neither the desktop player nor the
- * firmware needs to load a file. Regenerate rom_data.cpp with
- * temp/tools/bin2array.py after changing anything in roms/.
+ * Stock C64 ROM images, compiled in
+ * Regenerate rom_data.cpp with bin2array.py after changing any roms
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD

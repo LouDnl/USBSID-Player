@@ -1,18 +1,13 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback, for embedding on RP2350 (Pico2), and in a browser.
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * profile.h
- * Counters for finding out which chip is costing the time.
+ * Counters showing which chip costs the time
+ * Off unless US_PROFILE is 1 (build with -DPROFILE=1), plain increments on the
+ * per cycle path (read usbsid::profile, results differ a lot per tune)
  *
- * Off unless US_PROFILE is 1, in which case they are plain increments on the
- * per cycle path: where the time goes differs a lot per tune, so a single
- * profiled tune is not representative.
- *
- * Build with -DPROFILE=1 (see CMakeLists.txt) and read them with
- * `usbsid::profile`. Nothing in a shipping build refers to them.
- *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -43,35 +38,27 @@ namespace usbsid {
 #if defined(US_PROFILE) && US_PROFILE
 
 /**
- * @brief Where the per cycle time goes.
+ * @brief Where the per cycle time goes
  *
- * `ticks` is every machine cycle. The `woke_*` counters are how often the bus
- * decided a chip had something to do, so `woke_vic / ticks` is the fraction of
- * cycles the VIC was caught up on. The `cia_*` counters break down why
- * `Mos6526::cycles_to_event()` refused to skip, which is the difference
- * between a chip that is genuinely busy and one that is being woken for
- * nothing.
+ * ticks is every machine cycle, woke_* count how often the bus woke a chip.
+ * cia_* count why Mos6526::cycles_to_event() refused to skip
  */
 struct Profile {
   uint64_t ticks = 0;
   uint64_t woke_vic = 0, woke_cia1 = 0, woke_cia2 = 0;
-  /* why a CIA could not be skipped */
-  uint64_t cia_pipeline = 0;  /* an interrupt or a PB pulse in flight */
+  /* Why a CIA could not be skipped */
+  uint64_t cia_pipeline = 0;  /* interrupt or PB pulse in flight */
   uint64_t cia_cnt = 0;       /* the CNT input moved */
   uint64_t cia_serial = 0;    /* the shift register is busy */
   uint64_t cia_timer_a = 0, cia_timer_b = 0;
-  uint64_t cia_free = 0;      /* it could be skipped */
+  uint64_t cia_free = 0;      /* could be skipped */
 
-  /* Why timer B in particular said "not a moment". It is the single largest
-   * reason a CIA bound tune cannot be skipped, so knowing which of the four
-   * conditions in Timer::quiet_clocks() is the one that fires decides what a
-   * lookahead would have to handle. */
+  /* Why timer B refused (the four conditions in Timer::quiet_clocks()) */
   uint64_t cia_b_transition = 0;  /* mid transition, next(state) != state */
   uint64_t cia_b_stage = 0;       /* a stage that changes something part way */
   uint64_t cia_b_notphi2 = 0;     /* counting something other than phi2 */
   uint64_t cia_b_zero = 0;        /* counter already at zero */
-  /* OR of every bit that differed between state and next(state), so the
-   * unstable bits name themselves instead of being guessed at. */
+  /* OR of the bits that differed between state and next(state) */
   uint64_t cia_b_diffbits = 0;
   uint64_t cia_b_statebits = 0;   /* OR of the states seen while refusing */
 

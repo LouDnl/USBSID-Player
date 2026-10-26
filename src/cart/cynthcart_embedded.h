@@ -1,14 +1,11 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * cynthcart_embedded.h
- * The three entry points the firmware calls to run Cynthcart through the
- * player instead of the standalone emulator (ONBOARD_EMULATOR). Same names
- * and signatures as repo/lib/emulator/emudore_emulator.h on purpose, so
- * usbsid.c and midi.c need only pick which header to include.
- *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * Entry points the firmware calls to run Cynthcart through the player
+  *
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD

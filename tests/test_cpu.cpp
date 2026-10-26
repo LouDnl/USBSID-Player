@@ -1,13 +1,12 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * test_cpu.cpp
- * Step 2.2 gate: the Klaus Dormann 6502 functional test must reach its
- * success trap. The cycle level checks around it are there so a failure says
- * which addressing mode broke instead of only "the test trapped".
+ * Klaus Dormann 6502 functional test must reach its success trap,
+ * cycle level checks around it name the broken addressing mode
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -46,7 +45,7 @@ using namespace usbsid;
 
 namespace {
 
-/* A bare CPU on 64 KB of RAM, which is all the 6502 test suites need */
+/* Bare CPU on 64 KB of RAM */
 struct TestMachine {
   Ram ram;
   CountingMemory mem{ram};
@@ -130,7 +129,7 @@ int test_addressing(void)
   }
 
   {
-    /* page cross: 5 cycles, and the wrong address is read first */
+    /* page cross: 5 cycles, the wrong address is read first */
     TestMachine m;
     m.ram.write(0x2105, 0x22);
     m.code(0x1000, { 0xbd, 0xff, 0x20 });    /* LDA $20ff,X */
@@ -140,7 +139,7 @@ int test_addressing(void)
   }
 
   {
-    /* stores always pay the extra cycle and always do the dummy read */
+    /* stores always take the extra cycle and do the dummy read */
     TestMachine m;
     m.code(0x1000, { 0x9d, 0x00, 0x20 });    /* STA $2000,X */
     m.cpu.a(0x33);
@@ -273,7 +272,7 @@ int test_branches(void)
 {
   {
     TestMachine m;
-    m.code(0x1000, { 0xd0, 0x10 });          /* BNE +$10, Z set so not taken */
+    m.code(0x1000, { 0xd0, 0x10 });          /* BNE +$10, Z set, not taken */
     m.cpu.p(kFlagZ);
     US_CHECK_EQ_U(m.step(), 2u, "branch not taken is 2 cycles");
     US_CHECK_EQ_U(m.cpu.pc(), 0x1002u, "branch not taken pc");
@@ -319,7 +318,7 @@ int test_stack_and_jumps(void)
     US_CHECK_EQ_U(m.step(), 6u, "JSR cycles");
     US_CHECK_EQ_U(m.cpu.pc(), 0x2000u, "JSR jumped");
     US_CHECK_EQ_U(m.cpu.sp(), 0xfdu, "JSR pushed two bytes");
-    /* the pushed address is the last byte of the JSR, not the next opcode */
+    /* pushed address is the last byte of the JSR */
     US_CHECK_EQ_U(m.ram.read(0x01ff), 0x10u, "JSR pushed pch");
     US_CHECK_EQ_U(m.ram.read(0x01fe), 0x02u, "JSR pushed pcl");
 
@@ -334,7 +333,7 @@ int test_stack_and_jumps(void)
     /* JMP (indirect) with the page wrap bug */
     TestMachine m;
     m.ram.write(0x30ff, 0x34);
-    m.ram.write(0x3000, 0x12);               /* the bug reads here, not $3100 */
+    m.ram.write(0x3000, 0x12);               /* wrap bug, high byte from $3000 */
     m.ram.write(0x3100, 0xff);
     m.code(0x1000, { 0x6c, 0xff, 0x30 });    /* JMP ($30ff) */
     US_CHECK_EQ_U(m.step(), 5u, "JMP (ind) cycles");
@@ -373,7 +372,7 @@ int test_stack_and_jumps(void)
     US_CHECK_EQ_U(m.ram.read(0x01fd), (kFlagB | kFlagU), "BRK pushed B set");
     US_CHECK(m.cpu.flag(kFlagI) == true, "BRK sets I");
 
-    /* RTI restores the flags and the address, without the extra bump */
+    /* RTI restores the flags and the address, no extra bump */
     m.code(0x4000, { 0x40 });
     US_CHECK_EQ_U(m.step(), 6u, "RTI cycles");
     US_CHECK_EQ_U(m.cpu.pc(), 0x1002u, "RTI returns to the pushed address");
@@ -394,8 +393,7 @@ int test_arithmetic(void)
     { 0x7f, 0x01, false, false, 0x80, false, true  }, /* signed overflow */
     { 0x80, 0xff, false, false, 0x7f, true,  true  },
     { 0x3f, 0x40, true,  false, 0x80, false, true  },
-    /* decimal. N and V come from the binary intermediate before the +$60
-     * correction, which is why $50+$50 and $58+$46 set V on a real 6502. */
+    /* decimal ~ N and V come from the binary intermediate before the +$60 correction ($50+$50 and $58+$46 set V on a real 6502) */
     { 0x09, 0x01, false, true,  0x10, false, false },
     { 0x99, 0x01, false, true,  0x00, true,  false },
     { 0x50, 0x50, false, true,  0x00, true,  true  },
@@ -471,14 +469,7 @@ int test_ba_stall(void)
   m.code(0x1000, { 0xa9, 0x01, 0xa9, 0x02, 0xa9, 0x03, 0xa9, 0x04,
                    0xa9, 0x05, 0xa9, 0x06 });
 
-  /* BA low: a read cycle waits, and it waits from the first cycle.
-   *
-   * No grace period here. The three cycles a 6510 keeps running after BA drops
-   * are the VIC's doing: it pulls BA low three cycles before it takes the bus,
-   * so by the time the fetches start the CPU has had them. Counting them again
-   * in the CPU steals 40 cycles from it where the hardware steals 43, which is
-   * three cycles a bad line, every bad line. See TODO 33 and
-   * `Mos6510::ba_allows_cycle()`. */
+  /* BA low: a read cycle waits from the first cycle ~ the 3 cycle grace is the VIC BA lead (40 stolen vs 43 on hardware) */
   m.bus.set_ba(false);
   const addr_t pc_stalled = m.cpu.pc();
   m.bus.run(20);
@@ -488,10 +479,7 @@ int test_ba_stall(void)
   m.bus.run(2);
   US_CHECK(m.cpu.pc() != pc_stalled, "cpu resumes when BA returns");
 
-  /* A write goes through: the CPU drives the bus for those, whatever the VIC
-   * wants. BA has to drop once the store's own read cycles are behind it,
-   * because those wait like any other read; it is the write cycle itself that
-   * is allowed through. */
+  /* A write goes through, the CPU drives the bus for those ~ BA drops after the store read cycles, which wait like any read */
   {
     TestMachine w;
     w.ram.write(0x0040, 0x00);
@@ -619,8 +607,7 @@ int test_illegal_opcodes(void)
   }
 
   {
-    /* ARR in binary mode: C is bit 6 of the result, V is bit 6 xor bit 5.
-     * $c0 rotates to $60, where both bits are set, so V ends up clear. */
+    /* ARR in binary mode: C is bit 6 of the result, V is bit 6 xor bit 5. $c0 rotates to $60, both bits set, V clear */
     TestMachine m;
     m.code(0x1000, { 0x6b, 0xff });
     m.cpu.a(0xc0);
@@ -630,7 +617,7 @@ int test_illegal_opcodes(void)
     US_CHECK(m.cpu.flag(kFlagC) == true, "ARR carry from bit 6");
     US_CHECK(m.cpu.flag(kFlagV) == false, "ARR overflow clear when bits 6 and 5 match");
 
-    /* $80 rotates to $40, bit 6 set and bit 5 clear, so V is set */
+    /* $80 rotates to $40, bit 6 set and bit 5 clear, giving V set */
     m.code(0x1001, { 0x6b, 0xff });
     m.cpu.a(0x80);
     m.cpu.p(0);
@@ -687,7 +674,7 @@ int test_illegal_opcodes(void)
   }
 
   {
-    /* the undocumented NOPs still read, so they still cost their cycles */
+    /* the undocumented NOPs read and cost their cycles */
     TestMachine m;
     m.code(0x1000, { 0x04, 0x40 });          /* NOP zp */
     US_CHECK_EQ_U(m.step(), 3u, "NOP zp cycles");
@@ -728,9 +715,7 @@ int test_illegal_opcodes(void)
 
 int test_interrupts(void)
 {
-  /* The three CLI/SEI/RTI cases the Acid800 cpu_clisei test checks. That test
-   * itself needs a CIA to raise the interrupt, so it runs from step 2.5; here
-   * the interrupt line is driven straight from the bus instead. */
+  /* CLI/SEI/RTI cases of the Acid800 cpu_clisei test, interrupt line driven from the bus */
 
   {
     /* CLI: one more instruction executes before the interrupt is taken */
@@ -750,8 +735,7 @@ int test_interrupts(void)
   }
 
   {
-    /* CLI immediately followed by SEI: the interrupt still happens, and the
-     * flags pushed on the stack already have I set */
+    /* CLI immediately followed by SEI: the interrupt still happens, pushed flags have I set */
     TestMachine m;
     m.ram.write(0xfffe, 0x00);
     m.ram.write(0xffff, 0x30);
@@ -771,8 +755,7 @@ int test_interrupts(void)
   }
 
   {
-    /* RTI followed by SEI: the interrupt lands between the two, so the
-     * flags pushed still have I clear */
+    /* RTI followed by SEI: the interrupt lands between the two, pushed flags have I clear */
     TestMachine m;
     m.ram.write(0xfffe, 0x00);
     m.ram.write(0xffff, 0x30);
@@ -797,9 +780,7 @@ int test_interrupts(void)
   }
 
   {
-    /* an interrupt is not taken at all while I is set. The program loops on
-     * itself so it never falls into the $00 bytes, which are BRK and would
-     * reach the vector without any interrupt being involved. */
+    /* no interrupt while I is set ~ loop on the spot, a fall into the $00 bytes would be BRK */
     TestMachine m;
     m.ram.write(0xfffe, 0x00);
     m.ram.write(0xffff, 0x30);
@@ -827,8 +808,7 @@ int test_interrupts(void)
   }
 
   {
-    /* an NMI during a BRK steals the vector, but the pushed flags still
-     * have B set, which is the classic "BRK swallowed by NMI" case */
+    /* NMI during BRK steals the vector, pushed flags keep B set (BRK swallowed by NMI) */
     TestMachine m;
     m.ram.write(0xfffa, 0x00);
     m.ram.write(0xfffb, 0x50);               /* nmi vector $5000 */
@@ -872,17 +852,12 @@ bool load_file(const char * path, std::vector<data_t> & out)
 }
 
 /**
- * @brief Run one Acid800 CPU test.
+ * @brief Run one Acid800 CPU test
  *
- * The harness in assets/tests/Acid800/common.s starts at the BASIC SYS entry
- * $080d, writes $00 to $d7ff on success and $ff on failure, and then loops on
- * itself. On failure the number of the failed check ends up in the screen
- * memory the harness uses, so it can be reported instead of only "failed".
+ * Harness (assets/tests/Acid800/common.s) starts at SYS entry $080d, writes $00 to $d7ff on pass, $ff on fail, then loops.
+ * On failure the check number is in screen memory
  *
- * IO is plain RAM here: the machine is still a bare CPU. Only the tests that
- * do not need a real CIA or VIC are run at this step; cpu_clisei and cpu_bugs
- * need CIA timer interrupts (step 2.5) and cpu_timing needs the raster
- * counter (step 2.6).
+ * IO is plain RAM, machine is a bare CPU. Skipped: cpu_clisei, cpu_bugs (need CIA), cpu_timing (needs raster)
  */
 int run_acid800(const char * name)
 {
@@ -971,7 +946,7 @@ int test_klaus_functional(void)
 {
   /* Assembled with code_segment = $0400, zero_page = $0a, data_segment = $0200,
    * ROM_vectors = 1, load_data_direct = 0, I_flag = 3, disable_decimal = 0.
-   * The image covers $0400..$388a and the success trap is a jmp to itself. */
+   * Image covers $0400..$388a, success trap is a jmp to itself */
   constexpr addr_t kLoadAddress   = 0x0400;
   constexpr addr_t kStartAddress  = 0x0400;
   constexpr addr_t kSuccessTrap   = 0x3463;
@@ -1005,7 +980,7 @@ int test_klaus_functional(void)
     ++cycles;
     if (!cpu.instruction_done()) continue;
     if (cpu.jammed()) break;
-    /* every trap in this test is a jmp to itself */
+    /* every trap is a self jump */
     if (cpu.pc() == cpu.instruction_pc()) {
       trap_pc = cpu.pc();
       trapped = true;

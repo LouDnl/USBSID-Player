@@ -1,12 +1,12 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * test_bus.cpp
- * Step 2.1 gate: the bus ticks every device exactly once per PHI2 cycle, in a
- * fixed order, and carries the IRQ, NMI and BA lines.
+ * Bus ticks every device once per PHI2 cycle in a fixed order,
+ * carries the IRQ, NMI and BA lines
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -36,7 +36,7 @@ using namespace usbsid;
 
 namespace {
 
-/* A device that appends its id to a shared log on every tick */
+/* Device that appends its id to a shared log on every tick */
 class FakeDevice : public ClockedDevice
 {
   public:
@@ -56,7 +56,7 @@ class FakeDevice : public ClockedDevice
     std::string * log_;
 };
 
-/* A CIA-like device that asserts its IRQ source during its own tick */
+/* CIA-like device that asserts its IRQ source during tick */
 class FakeIrqDevice : public FakeDevice
 {
   public:
@@ -83,9 +83,7 @@ class FakeIrqDevice : public FakeDevice
     IrqSource src_;
 };
 
-/* A CPU that records the line levels it sees during each of its own cycles.
- * The real CPU reads the lines the same way, off the bus, which is why the
- * fake does not implement any setters. */
+/* CPU that records the line levels it sees in each cycle, read off the bus like the real CPU. No setters */
 class FakeCpu : public ClockedDevice
 {
   public:
@@ -95,7 +93,7 @@ class FakeCpu : public ClockedDevice
     {
       log_->push_back('C');
       ++ticks;
-      /* stored as '0'/'1' so a failing history prints readably */
+      /* stored as '0'/'1'. A failing history prints readably */
       irq_history.push_back(bus_->irq_asserted() ? '1' : '0');
       nmi_history.push_back(bus_->nmi_asserted() ? '1' : '0');
       ba_history.push_back(bus_->ba() ? '1' : '0');
@@ -209,7 +207,7 @@ int us_test_bus(void)
     bus.set_irq(IrqSource::Vic, false);
     US_CHECK(bus.irq_asserted() == false, "irq released when last source clears");
 
-    /* releasing a source that was never set must not disturb the others */
+    /* releasing a source that was never set leaves the others alone */
     bus.set_irq(IrqSource::Cia2, true);
     bus.set_irq(IrqSource::Expansion, false);
     US_CHECK(bus.irq_asserted() == true, "unrelated release does not clear irq");
@@ -240,9 +238,7 @@ int us_test_bus(void)
     /* cycle:            1    2    3    4    5
      * cia1 action:      -    set  -    clr  -
      * cpu sees irq:     0    1    1    0    0
-     * The CIA ticks before the CPU in the same cycle, so an interrupt raised
-     * in cycle N is visible to the CPU in cycle N. The extra sampling delay
-     * of a real 6510 belongs in the CPU, not here. */
+     * CIA ticks before the CPU, an IRQ raised in cycle N is visible in cycle N. 6510 sampling delay belongs in the CPU */
     US_CHECK_EQ_STR(cpu.irq_history.c_str(), "01100", "irq level per cycle");
   }
 

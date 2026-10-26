@@ -1,17 +1,15 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * test_sid.cpp
- * Step 2.7 gate: the address translation for one to four chips, and the cycle
- * deltas that go out with every write.
+ * Address translation for one to four chips and the cycle deltas that
+ * go out with every write
  *
- * The deltas are checked against a 6502 program whose cycle counts are known
- * exactly, which is a stronger check than a tune trace would be at this point:
- * the SID file loader only arrives at step 2.8, and a trace you cannot predict
- * can only be compared, not verified.
+ * Deltas are checked against a 6502 program with exactly known cycle counts,
+ * a trace you cannot predict can only be compared
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -66,17 +64,15 @@ int test_translation(void)
     US_CHECK_EQ_U(sid.translate(0xd418, chip), 0x18u, "$d418 is the volume register");
     US_CHECK_EQ_U(sid.translate(0xd41f, chip), 0x1fu, "$d41f is the last one");
 
-    /* a single chip machine still answers the spare addresses, because tunes
-     * write to them even when only one chip is fitted */
+    /* a single chip machine still answers the spare addresses, tunes write to them */
     US_CHECK_EQ_U(sid.translate(0xd420, chip), 0x00u, "$d420 folds onto the one chip");
     US_CHECK_EQ_U(sid.translate(0xd5c0, chip), 0x00u, "$d5c0 folds too");
 
-    /* the PLA decodes the whole of $d400-$d7ff to the chip, so the last
-     * mirror is register $1f, which is what the test suites write to */
+    /* the PLA decodes all of $d400-$d7ff to the chip, the last mirror is register $1f (written by the test suites) */
     US_CHECK_EQ_U(sid.translate(0xd7ff, chip), 0x1fu, "$d7ff is register $1f");
     US_CHECK_EQ_U(sid.translate(0xd600, chip), 0x00u, "and $d600 is register 0");
 
-    /* and nothing outside the page does */
+    /* nothing outside the page does */
     US_CHECK_EQ_U(sid.translate(0xd800, chip), kSidNotMapped, "colour RAM is not a SID");
     US_CHECK_EQ_U(sid.translate(0xdc00, chip), kSidNotMapped, "nor is the CIA");
   }
@@ -145,7 +141,7 @@ int test_translation(void)
   }
 
   {
-    /* the mirror keeps the tune's own layout while writes are forced */
+    /* the mirror keeps the tune layout while writes are forced */
     SidConfig & c = sid.config();
     c.count = 1;
     c.base[0] = 0xd400;
@@ -209,17 +205,13 @@ int test_cycle_deltas(void)
   c64.machine.set_sid_backend(trace);
   trace.reset();
 
-  /* blank the screen so no bad line steals a cycle in the middle of it, and
-   * stop the KERNAL interrupt so nothing else runs */
+  /* blank the screen (no bad line steals a cycle in the middle of it) and stop the KERNAL interrupt */
   c64.machine.mmu().write(0xd011, 0x0b);
   c64.machine.mmu().write(0xdc0d, 0x7f);
   (void)c64.machine.mmu().read(0xdc0d);
 
-  /* Blanking only takes effect from the next frame: DEN is sampled on raster
-   * $30, and a frame that has already sampled it goes on having bad lines to
-   * the bottom of the screen. So step over that sampling point with the screen
-   * already off, or a bad line lands in the middle of the loop below and the
-   * gap it measures is the stall rather than the instructions. */
+  /* Blanking takes effect from the following frame, DEN is sampled on raster $30. Step over that point with the screen off,
+   * or a bad line lands in the loop and the measured gap is the stall */
   while (c64.machine.vic().raster() != 0) c64.machine.tick();
   while (c64.machine.vic().raster() < 0x40) c64.machine.tick();
 
@@ -240,10 +232,8 @@ int test_cycle_deltas(void)
   c64.machine.cpu().p(0x04); /* interrupts off */
   c64.machine.cpu().pc(0x0300);
 
-  /* Deltas are measured from the previous access and nothing resets that on a
-   * frame boundary, so without this the first write of the program would carry
-   * the whole KERNAL boot. This is exactly what the player does when a tune
-   * starts. */
+  /* Deltas are measured from the previous access, nothing resets that on a frame boundary.
+   * Without this the first write carries the whole KERNAL boot, as the player does when a tune starts */
   c64.machine.sid().resync();
 
   /* run a few loops */
@@ -251,11 +241,8 @@ int test_cycle_deltas(void)
 
   US_CHECK(trace.count() >= 6, "the trace recorded some writes");
 
-  /* The first delta is measured from whenever the last event was, so start
-   * looking from the second write onwards, and start on a write to register 0:
-   * where in the loop the trace opens depends on where the CPU was when it was
-   * pointed at $0300, and pairing the halves the wrong way round compares the
-   * gaps to each other's expectations. */
+  /* The first delta is measured from the last event ~ start at the second write and on a write to register 0,
+   * the trace opens at a varying place in the loop and the halves would be paired the wrong way round */
   size_t first = 2;
   while (first + 1 < trace.count() &&
          !(trace.at(first).kind == 'w' && trace.at(first).reg == 0x00)) {
@@ -271,8 +258,7 @@ int test_cycle_deltas(void)
     US_CHECK_EQ_U(a.reg, 0x00u, "first write of the loop is register 0");
     US_CHECK_EQ_U(a.value, 0x11u, "and carries the accumulator");
     US_CHECK_EQ_U(b.reg, 0x01u, "second write of the loop is register 1");
-    /* The gaps are eight and seven cycles; one is taken off each because
-     * the access itself costs the hardware a cycle. */
+    /* The gaps are eight and seven cycles, one is taken off each because the access costs the hardware a cycle */
     US_CHECK_EQ_U(b.delta, 7u, "sta, nop, nop, sta is eight cycles, less one");
     US_CHECK_EQ_U(a.delta, 6u, "sta, jmp, sta round the loop is seven, less one");
     ++checked;
@@ -336,11 +322,10 @@ int test_wait_and_flush(void)
 /* ---- holding one voice silent -------------------------------------------- */
 
 /*
- * A mute changes exactly two registers on its way to the hardware: the gate bit
- * of the control register and the sustain nibble of the sustain/release
- * register. Everything checked here is one of the ways that could be subtly
- * wrong, and the last two are the ones that would be silent bugs: a mute that
- * ate the release nibble, or one the emulation could see.
+ * A mute changes two registers on its way to the hardware: the gate bit of the control
+ * register and the sustain nibble of the sustain/release register.
+ * Checked: either could be wrong, the last two would be silent bugs (a mute that ate the
+ * release nibble, one the emulation could see)
  */
 int test_voice_mute(void)
 {
@@ -362,8 +347,7 @@ int test_voice_mute(void)
     sid.io_write(0xd400 + kV2SusRel, 0xc7);   /* sustain 12, release 7 */
     sid.io_write(0xd400 + kV2AttDec, 0x59);
 
-    /* muting pushes both registers, sustain first, so the note stops without
-     * waiting for the tune to write either one again */
+    /* muting pushes both registers, sustain first ~ the note stops without waiting for the tune to write again */
     trace.reset();
     sid.set_voice_mute(1, 2, true);
     US_CHECK_EQ_U(trace.count(), 2u, "muting sends two writes and no more");
@@ -376,7 +360,7 @@ int test_voice_mute(void)
                     "with the gate cleared and the waveform kept");
     }
 
-    /* while muted, the tune's own writes are masked the same way */
+    /* while muted, the tune writes are masked the same way */
     trace.reset();
     sid.io_write(0xd400 + kV2Control, 0x21);  /* sawtooth, gate on */
     sid.io_write(0xd400 + kV2SusRel, 0xfa);   /* sustain 15, release 10 */
@@ -390,8 +374,7 @@ int test_voice_mute(void)
                     "attack and decay are not a mute's business");
     }
 
-    /* and the mirror kept what the tune wrote, which is what unmuting restores.
-     * No separate saved copy exists, so this is the mechanism, not a detail. */
+    /* and the mirror kept what the tune wrote, unmuting restores from it ~ no separate saved copy */
     US_CHECK_EQ_U(sid.peek(kV2Control), 0x21u, "the mirror holds the tune's gate");
     US_CHECK_EQ_U(sid.peek(kV2SusRel), 0xfau, "and the tune's sustain");
 
@@ -415,9 +398,7 @@ int test_voice_mute(void)
   }
 
   {
-    /* the other two voices, and a second chip, are untouched by one voice's
-     * mask. Voice one and voice three share the shape of voice two's registers,
-     * so an off by one in either table would show up here. */
+    /* the other two voices and a second chip are untouched by one voice mask ~ voices one and three share the register shape of voice two, an off by one in either table shows in this check */
     Bus bus;
     std::vector<TraceSidBackend::Event> buffer(64);
     TraceSidBackend trace(buffer.data(), buffer.size());
@@ -446,7 +427,7 @@ int test_voice_mute(void)
   }
 
   {
-    /* all three voices, so neither register table can be off by one */
+    /* all three voices: no register table off by one */
     for (uint8_t voice = 1; voice <= 3; voice++) {
       Bus bus;
       std::vector<TraceSidBackend::Event> buffer(16);
@@ -477,13 +458,8 @@ int test_voice_mute(void)
 
   {
     /*
-     * The emulation must not be able to tell. Voice three answers $d41b, which
-     * tunes read as a timer and as a random source, so a mask that leaked into it
-     * would change what the tune does and not merely what it sounds like.
-     *
-     * Run the identical sequence twice, muted and not, and demand the same
-     * readings. Comparing a muted run against itself would prove nothing, so the
-     * two runs are separate machines given the same writes at the same cycles.
+     * The emulation must not be able to tell ~ voice three answers $d41b, which tunes read as a timer and random source.
+     * Run the same sequence twice, muted and not, on separate machines with the same writes at the same cycles, and compare the readings
      */
     data_t readings[2][4] = { { 0 } };
     data_t mirror[2][2] = { { 0 } };
@@ -495,7 +471,7 @@ int test_voice_mute(void)
       sid.config().count = 1;
       sid.config().base[0] = 0xd400;
 
-      sid.io_write(0xd40e, 0xff);  /* voice three frequency, so it moves */
+      sid.io_write(0xd40e, 0xff);  /* voice three frequency, to make it move */
       sid.io_write(0xd40f, 0x0f);
       sid.io_write(0xd412, 0x11);  /* triangle, gate on */
       sid.io_write(0xd414, 0xc7);  /* sustain 12, release 7 */
@@ -510,13 +486,13 @@ int test_voice_mute(void)
       mirror[pass][1] = sid.peek(0x14);
     }
 
-    /* Without this the comparison is vacuous: four equal zeroes prove nothing. */
+    /* Four equal zeroes prove nothing */
     unsigned moved = 0;
     for (int i = 1; i < 4; i++) {
       if (readings[0][i] != readings[0][i - 1]) moved++;
     }
     US_CHECK(moved > 0,
-             "voice three's oscillator moves, so the comparison means something");
+             "voice three's oscillator moves, making the comparison meaningful");
 
     unsigned same = 0;
     for (int i = 0; i < 4; i++) {
@@ -543,8 +519,7 @@ int test_machine_integration(void)
     return 1;
   }
 
-  /* a SID is fitted, so a write to its page goes to the chip and not to the
-   * RAM underneath, which is what a real machine does */
+  /* a SID is fitted: a write to its page goes to the chip and the RAM underneath is untouched, like a real machine */
   c64.machine.ram().dma_write(0xd400, 0x00);
   c64.machine.mmu().write(0xd400, 0x7e);
   US_CHECK_EQ_U(c64.machine.sid().peek(0x00), 0x7eu, "the write reached the chip");
@@ -554,7 +529,7 @@ int test_machine_integration(void)
   /* reads come back from the register mirror while real reads are off */
   US_CHECK_EQ_U(c64.machine.mmu().read(0xd400), 0x7eu, "and reads back");
 
-  /* the KERNAL cleared the SID at boot, so something did write to it */
+  /* the KERNAL cleared the SID at boot ~ something did write to it */
   US_CHECK(c64.machine.sid().writes() > 0, "the KERNAL wrote to the SID during boot");
 
   return 0;
@@ -564,9 +539,8 @@ int test_machine_integration(void)
 
 int test_trace_dump(void)
 {
-  /* Not a tune yet, that needs the loader from step 2.8. This is the SID
-   * initialisation the KERNAL does at boot, which is a real program writing
-   * real registers, and it shows the trace format. */
+  /* Not a tune, this is the SID initialisation the KERNAL does at boot, a real
+     program writing real registers (shows the trace format) */
   TestC64 c64;
   std::vector<TraceSidBackend::Event> buffer(256);
   TraceSidBackend trace(buffer.data(), buffer.size());
@@ -682,7 +656,7 @@ int test_trace_fm_read(void)
   US_CHECK_EQ_U(rd->value, 0xffu, "with the value the tune saw");
   US_CHECK_EQ_U(rd->delta, 100u, "and the cycles since the previous event");
   US_CHECK_EQ_U(after->delta, 150u - sid.config().access_overhead,
-                "the read does not consume the delta of the next write");
+                "the read does not consume the delta of the following write");
 
   /* Other backends never hear about it */
   {
@@ -698,10 +672,9 @@ int test_trace_fm_read(void)
 
 int test_voice3(void)
 {
-  /* A sawtooth ramps. This is the shape tunes rely on when they wait for the
-   * oscillator to move, and Ring Ring Ring's loop is literally
+  /* A sawtooth ramps, tunes wait on this ~ Ring Ring Ring loops on
    *   ldy $d41b : iny : cpy $d41b : bne -3
-   * which never ends unless $d41b climbs by one at some point. */
+   * which never ends unless $d41b climbs by one */
   {
     SidVoice3 v;
     v.write(kSidRegV3FreqLo, 0x00, 0);
@@ -713,15 +686,12 @@ int test_voice3(void)
     US_CHECK_EQ_U(v.osc3(16), 0x01u, "and has moved one step 16 cycles later");
     US_CHECK_EQ_U(v.osc3(32), 0x02u, "and another");
 
-    /* it wraps at 24 bits, not at 16 */
+    /* it wraps at 24 bits */
     US_CHECK_EQ_U(v.osc3(16 * 255), 0xffu, "it climbs to full scale");
     US_CHECK_EQ_U(v.osc3(16 * 256), 0x00u, "and wraps round");
   }
 
-  /* Reading it often and reading it once have to give the same answer. The
-   * whole design rests on this: voice three is caught up at the moment it is
-   * read rather than clocked every cycle, and that is only allowed if the two
-   * cannot be told apart. */
+  /* Reading it often and reading it once give the same answer ~ voice three is caught up when read instead of clocked every cycle */
   {
     SidVoice3 often, once;
     for (SidVoice3 * v : { &often, &once }) {
@@ -737,10 +707,10 @@ int test_voice3(void)
     US_CHECK_EQ_U(once.osc3(20000), often.osc3(20000),
                   "the oscillator is the same whether it is read once or often");
     US_CHECK_EQ_U(once.env3(20000), often.env3(20000),
-                  "and so is the envelope");
+                  "and the envelope is as well");
   }
 
-  /* Noise moves, and it is not the same value twice in a row for ever */
+  /* Noise moves and does not repeat the same value */
   {
     SidVoice3 v;
     v.write(kSidRegV3FreqLo, 0xff, 0);
@@ -755,7 +725,7 @@ int test_voice3(void)
     US_CHECK(moved, "the noise register produces different values over time");
   }
 
-  /* The test bit holds the oscillator at zero, which is how tunes reset it */
+  /* The test bit holds the oscillator at zero, tunes use it to reset */
   {
     SidVoice3 v;
     v.write(kSidRegV3FreqHi, 0x40, 0);
@@ -773,7 +743,7 @@ int test_voice3(void)
     US_CHECK_EQ_U(v.env3(0), 0x00u, "the envelope starts closed");
 
     v.write(kSidRegV3Ctrl, 0x11, 0);     /* triangle, gate on */
-    /* the fastest attack is 9 cycles a step, so 255 steps is about 2300 */
+    /* the fastest attack is 9 cycles a step. 255 steps is about 2300 */
     US_CHECK(v.env3(1000) > 0, "gating it opens the envelope");
     US_CHECK_EQ_U(v.env3(4000), 0xffu, "a fast attack reaches full scale");
 

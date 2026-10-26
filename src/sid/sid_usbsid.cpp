@@ -1,15 +1,14 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * sid_usbsid.cpp
  *
- * The call sequence follows old player ~ src/emulation.cpp, which is what the
- * firmware and the current player both use: initialise with buffering and
- * cycled writes, reset the chips, then feed cycled writes and flush at the
- * end of every frame.
+ * Call sequence:
+ * initialise with buffering and cycled writes, reset the chips, then feed
+ * cycled writes and flush at the end of every frame
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -37,13 +36,13 @@ namespace usbsid {
 namespace {
 
 /**
- * @brief SIDs a socket holds, parsed from a raw GetSocketConfig() reply.
+ * @brief SIDs a socket holds, parsed from a raw GetSocketConfig() reply
  *
- * Same decoding as USBSID_Class::USBSID_GetSocketNumSIDS().
+ * Same decoding as USBSID_Class::USBSID_GetSocketNumSIDS()
  *
  * @param cfg     SOCKET_BUFFER_SIZE byte socket config reply
  * @param socket  1 or 2
- * @returns 0, 1 or 2
+ * Return 0, 1 or 2
  */
 int socket_num_sids(const uint8_t * cfg, int socket)
 {
@@ -68,11 +67,10 @@ bool UsbSidBackend::open(const std::vector<std::string> & board_order)
 {
   if (open_) return true;
 
-  /* One empty serial opens a single board by the driver's own default
-   * target (index 0), without probing every attached board first. */
+  /* One empty serial opens a single board by the driver default target (index 0) without probing all boards */
   const std::vector<std::string> targets =
     board_order.empty() ? std::vector<std::string>{ std::string() } : board_order;
-  /* threaded, with cycles: the ring buffer and the cycle exact write path */
+  /* Threaded with cycles, ring buffer and cycle exact write path */
   if (!manager_.OpenAll(targets, true, true)) return false;
   open_ = true;
   single_ = (manager_.BoardCount() == 1);
@@ -111,12 +109,10 @@ void UsbSidBackend::close(void)
 }
 
 /**
- * @brief Several boards: point fmopl_sid_ at the first board's FM/OPL.
+ * @brief Several boards, point fmopl_sid_ at the FM/OPL of the first board that has one
  *
- * Logical slots run board by board in open order (the --boards order):
- * the first slot slot_is_fmopl() accepts is on the first board
- * listed that has an FM/OPL configured. A board whose FM/OPL SID number has
- * no slot in the map is skipped.
+ * Logical slots run board by board in open order (--boards order)
+ * A board whose FM/OPL SID number has no slot in the map is skipped
  */
 void UsbSidBackend::find_first_fmopl(void)
 {
@@ -133,23 +129,20 @@ void UsbSidBackend::find_first_fmopl(void)
 void UsbSidBackend::set_clock_rate(uint32_t hz)
 {
   if (!open_) return;
-  /* Hold the SIDs in reset while the clock changes. Each board skips the
-   * device write when its rate is unchanged. */
+  /* Hold the SIDs in reset while the clock changes, a board skips the device write when its rate is unchanged */
   manager_.SetClockRateAll(static_cast<long>(hz), true);
 }
 
 /**
- * @brief See the header. Also where the FM/OPL "unclaimed" park lands.
+ * @brief Map a tune register to a logical SID and board register, see the header
  *
- * `kFmOplParkBase` (mos6581_8580.cpp) sits at chip index kMaxSids, one past
- * the last real chip: its block starts at `kChipLimit`. Without
- * --select-sids it is dropped. With it, fmopl_sid is -1 on the SID side,
- * every FM/OPL write is parked, and the park goes to the slot an `fm` entry
- * named (fm_slot_), already checked by set_sid_select() to be an FM/OPL.
+ * kFmOplParkBase (mos6581_8580.cpp) is chip index kMaxSids, one past the last
+ * real chip, its block starts at kChipLimit. Without --select-sids it is dropped
+ * With it fmopl_sid is -1 on the SID side, every FM/OPL write is parked and
+ * the park goes to the slot named by the fm entry (fm_slot_, checked by set_sid_select())
  *
- * One board: slots map straight onto its four sockets (register < 0x80),
- * whatever its socket config reports. Several boards: slots follow
- * manager_.LogicalMap(), only the SIDs each board has configured.
+ * One board: slots map onto its four sockets (register < 0x80) whatever the socket config says
+ * Several boards: slots follow manager_.LogicalMap(), only the SIDs each board has configured
  */
 bool UsbSidBackend::remap(addr_t reg, int & logical_sid, uint8_t & board_reg) const
 {
@@ -221,14 +214,13 @@ void UsbSidBackend::write(addr_t reg, data_t value, uint16_t cycles)
   int logical_sid;
   uint8_t board_reg;
   if (!remap(reg, logical_sid, board_reg)) return;
-  /* Mos6581_8580::io_write() logs the tune-side line; log the board side */
+  /* Mos6581_8580::io_write() logs the tune line, this logs the board line */
   if (!single_) {
     US_LOG_IF(sid_rw, "  -> board %d sid %d $%02x:%02x\n",
               manager_.LogicalMap()[static_cast<size_t>(logical_sid)].board_index + 1,
               (board_reg >> 5) + 1, board_reg, value);
   }
-  /* Straight through: access_overhead is already subtracted upstream
-   * (cycles_since_last_event()), do not subtract it again here. */
+  /* Straight through, access_overhead is already subtracted upstream (cycles_since_last_event()) */
   manager_.WriteRingCycled(logical_sid, board_reg, value, cycles);
 }
 
@@ -243,21 +235,16 @@ data_t UsbSidBackend::read(addr_t reg, uint16_t cycles)
 }
 
 /**
- * @brief A gap too long to carry with a write.
+ * @brief Count a gap too long to carry with a write
  *
- * Counted and otherwise ignored, on purpose. The driver has
- * `USBSID_WaitForCycle()`, which spins on the clock until the time has passed,
- * and calling it here is wrong twice over: the pacer already holds playback to
- * real time frame by frame, so the wait is served a second time and a silent
- * stretch takes twice as long as it should. A tune that opens with a couple of
- * seconds of unpacking, like Coma Light 13, fell more than a second behind
- * doing exactly that, and then the pacer sprinted to catch up and buried the
- * driver's ring buffer in a burst it had no room for. That was heard as a
- * crackle when the digi started.
+ * Not waited on purpose. USBSID_WaitForCycle() spins on the clock and the
+ * pacer already holds playback to real time frame by frame, the wait would
+ * be served twice and a silent stretch takes twice as long
+ * Coma Light 13 (a couple of seconds of unpacking) fell over a second behind,
+ * then the pacer sprinted and buried the driver ring buffer, heard as a crackle when the digi starts
  *
- * Dropping the gap costs nothing: the device paces itself from the deltas it
- * is given, and with nothing to do it simply waits for the next write, which
- * arrives when the pacer sends it.
+ * Dropping the gap costs nothing, the device paces from the deltas it gets
+ * and waits for the following write
  */
 void UsbSidBackend::wait(uint16_t cycles)
 {
@@ -273,19 +260,13 @@ void UsbSidBackend::flush(void)
 void UsbSidBackend::reset(void)
 {
   if (!open_) return;
-  /* Throw the queue away before resetting, not after.
-   *
-   * The two calls below go out through USBSID_SingleWrite(), which bypasses
-   * the driver's ring, so they overtake whatever is still queued in it. Without
-   * this the board is reset and *then* plays out the backlog that was already
-   * on its way: up to ring_size / 4 writes, which is 2048 at the default size,
-   * each still carrying its own cycle delay. A stop or a subtune change keeps
-   * making noise for as long as that takes to drain, which at ordinary write
-   * rates is tens of seconds.
-   *
-   * Dropping it is right rather than merely convenient: those writes belong to
-   * a tune that is being abandoned, and there is nothing to be gained by
-   * delivering them late. */
+  /* Throw the queue away before resetting
+   * The two calls below go through USBSID_SingleWrite() which bypasses the
+   * driver ring and overtakes the queued writes
+   * Otherwise the board is reset and then plays the backlog, up to
+   * ring_size / 4 writes (2048 at default size) with their cycle delays
+   * A stop or subtune change keeps making noise for tens of seconds
+   * The writes belong to an abandoned tune */
   manager_.ResetRingBufferAll();
   manager_.ResetAllRegistersAll();
   manager_.StartAll();

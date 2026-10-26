@@ -1,13 +1,11 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * flat_memory.h
- * A machine that is nothing but 64 KB of RAM: no ROMs, no banking, no IO.
- * This is what the 6502 test suites want, and it is the smallest thing the
- * CPU can be tested against.
+ * 64 KB of RAM without ROMs, banking or IO
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -44,8 +42,7 @@ class FlatMemory final : public Memory
     data_t read(addr_t addr) override { return ram_.read(addr); }
     void write(addr_t addr, data_t value) override { ram_.write(addr, value); }
 
-    /* Bus cycle counters, handy when a test wants to know that the dummy
-     * accesses really happened */
+    /* Bus cycle counters */
     unsigned reads  = 0;
     unsigned writes = 0;
 
@@ -56,10 +53,7 @@ class FlatMemory final : public Memory
 };
 
 /**
- * @brief Same thing, but counting every access.
- *
- * Kept separate so the plain FlatMemory stays free of bookkeeping in the
- * per cycle path.
+ * @brief FlatMemory that counts every access
  */
 class CountingMemory final : public Memory
 {

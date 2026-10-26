@@ -1,17 +1,16 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * test_keyboard.cpp
- * Step 2.12 gate: a key held in the matrix is found by the KERNAL's own scan,
- * and RUN/STOP breaks a running program.
+ * A key held in the matrix is found by the KERNAL scan, RUN/STOP breaks
+ * a running program
  *
- * Nothing here writes to the keyboard buffer. A key is held down across CIA1's
- * two ports and everything after that is the machine's own doing: the
- * interrupt scan, the debounce, the shift handling, the editor, BASIC. If
- * "print1+1" comes back as 2 on the screen, all of it works.
+ * Nothing writes to the keyboard buffer ~ a key is held across the two
+ * CIA1 ports, the rest is the machine: interrupt scan, debounce, shift
+ * handling, editor, BASIC. "print1+1" coming back as 2 proves it
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -53,8 +52,7 @@ int test_matrix(void)
   Mos6526 cia(bus, CiaLine::Irq);
   cia.reset();
 
-  /* port A drives, port B reads, both open collector: everything is high
-   * until something pulls it low */
+  /* port A drives, port B reads, both open collector, everything is high until pulled low */
   cia.io_write(0x02, 0xff); /* DDRA: all outputs */
   cia.io_write(0x03, 0x00); /* DDRB: all inputs */
   cia.io_write(0x00, 0xff); /* no row driven */
@@ -82,8 +80,7 @@ int test_matrix(void)
   cia.io_write(0x00, 0x00);
   US_CHECK_EQ_U(cia.port_b(), 0xafu, "driving every row finds them too");
 
-  /* the matrix reads the other way round as well: driving a column from port
-   * B pulls the rows of the keys held on it low */
+  /* the matrix reads both ways, driving a column from port B pulls the rows of held keys low */
   cia.io_write(0x02, 0x00); /* DDRA: inputs */
   cia.io_write(0x03, 0xff); /* DDRB: outputs */
   cia.io_write(0x01, 0xbf); /* drive column 6 low */
@@ -148,10 +145,9 @@ int test_queue(void)
            "queueing does not press anything by itself");
 
   kb.tick_frame();
-  US_CHECK(cia.any_key_pressed(), "the first key goes down on the next frame");
+  US_CHECK(cia.any_key_pressed(), "the first key goes down on the following frame");
 
-  /* It stays down for two frames, which is longer than the KERNAL's scan, so
-   * a keystroke cannot fall between two scans and be missed. */
+  /* It stays down for two frames, longer than the KERNAL scan ~ no keystroke falls between two scans */
   kb.tick_frame();
   US_CHECK(cia.any_key_pressed(), "and is still held a frame later");
 
@@ -159,7 +155,7 @@ int test_queue(void)
   US_CHECK(cia.any_key_pressed() == false, "then it comes up");
   US_CHECK_EQ_U(kb.queued(), 1u, "with one left to type");
 
-  /* a gap, so the editor sees a new keystroke rather than a held one */
+  /* a gap, the editor sees a new keystroke */
   kb.tick_frame();
   US_CHECK(cia.any_key_pressed() == false, "there is a gap between keys");
 
@@ -214,7 +210,7 @@ int test_typing_reaches_basic(void)
   run_frames(c64, 100);
 
   US_CHECK(c64.machine.keyboard().busy() == false, "everything was typed");
-  /* the editor echoed it, so the scan, the buffer and the editor all work */
+  /* the editor echoed it ~ the scan, the buffer and the editor all work */
   US_CHECK(screen_has(c64, "print1"), "the line was echoed on the screen");
   /* and BASIC ran it */
   US_CHECK(screen_has(c64, " 2"), "and BASIC answered 2");
@@ -278,9 +274,7 @@ int test_player_control(void)
 
   Player player(c64.machine);
 
-  /* The player's own entry points reach the same matrix. There is no tune
-   * loaded, so nothing runs the frames, but the queue is what is being
-   * checked here. */
+  /* The player entry points reach the same matrix ~ no tune is loaded and nothing runs the frames, the queue is checked */
   US_CHECK(player.type("run\r"), "the player can type");
   US_CHECK(player.typing(), "and says it is typing");
   US_CHECK(player.run_stop(), "and can press RUN/STOP");
@@ -288,8 +282,7 @@ int test_player_control(void)
   c64.machine.keyboard().reset();
   US_CHECK(player.typing() == false, "a reset clears the queue");
 
-  /* A program's next and previous subtune are the plus and minus keys, which
-   * is what the players that come as programs listen for. */
+  /* A program subtune up and down are the plus and minus keys, players that come as programs listen for those */
   const data_t prg[] = {
     0x01, 0x08, 0x0b, 0x08, 0x0a, 0x00, 0x9e, '2', '0', '6', '1', 0x00,
     0x00, 0x00, 0x60
@@ -301,7 +294,7 @@ int test_player_control(void)
   c64.machine.keyboard().reset();
   player.previous_subtune();
   US_CHECK_EQ_U(c64.machine.keyboard().queued(), 1u,
-                "and so does the previous one");
+                "and the previous one does too");
 
   return 0;
 }

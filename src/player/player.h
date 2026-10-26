@@ -1,12 +1,11 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * player.h
- * The playback state machine: load a tune, initialise it, run it, move
- * between subtunes, stop.
+ * Playback state machine: load, init, run, switch subtune, stop
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -44,55 +43,28 @@ class Player
   public:
     explicit Player(Machine & machine) : machine_(machine) {}
 
-    /**
-     * @brief Parse a SID file and install it, without starting it.
-     *
-     * The bytes must outlive the player: nothing is copied.
-     */
+    /** @brief Parse a SID file and install it without starting (bytes must outlive the player) */
     bool load_sid(const data_t * bytes, size_t len, uint16_t song = 0);
 
-    /**
-     * @brief Parse a PRG or a P00, without starting it.
-     *
-     * The bytes must outlive the player, the same as for a SID file.
-     */
+    /** @brief Parse a PRG or P00 without starting (bytes must outlive the player) */
     bool load_prg(const data_t * bytes, size_t len);
 
-    /**
-     * @brief Boot a machine, load the program into it and start it.
-     *
-     * Started the way a person would: the program goes where its first two
-     * bytes say, BASIC is told how far it reaches, and then RUN or SYS is
-     * typed at the prompt. No shortcut into the entry point, because a
-     * program that a shortcut can start is a program that does not need this
-     * code path.
-     */
+    /** @brief Boot a machine, load the program and start it by typing RUN or SYS at the prompt */
     bool init_prg(void);
 
-    /**
-     * @brief Whether the loaded file can only start with real ROMs.
-     *
-     * True for a BASIC program (or BASIC RSID) without a SYS line: RUN needs
-     * the BASIC interpreter. Everything else also starts on the stub KERNAL.
-     */
+    /** @brief True if the loaded file only starts with real ROMs (BASIC program without SYS line) */
     bool needs_roms(void) const
     {
       return loaded_ && is_prg_ && prg_.is_basic() && !prg_.has_sys_stub;
     }
 
-    /**
-     * @brief Whether a running program stopped for lack of ROMs.
-     *
-     * True when the ROM set is incomplete and the CPU has jammed, the usual
-     * end of a program that jumps into BASIC (e.g. a decruncher exiting
-     * through RUN) while no BASIC ROM is mapped.
-     */
+    /** @brief True if a running program stopped for lack of ROMs (CPU jammed, ROM set incomplete) */
     bool stuck_without_roms(void) const
     {
       return playing_ && !machine_.mmu().roms.complete() && machine_.cpu().jammed();
     }
 
-    /** @brief Start the installed tune, or restart it on another subtune. */
+    /** @brief Start the installed tune or restart it on another subtune */
     bool init_tune(uint16_t song);
 
     void start(void);
@@ -101,52 +73,40 @@ class Player
     bool playing(void) const { return playing_; }
     bool paused(void) const { return paused_; }
 
-    /* ---- the keyboard -------------------------------------------------- *
-     * These go through the matrix, so the KERNAL's own scan finds them. That
-     * is what makes RUN/STOP work on a program: nothing here reaches into the
-     * keyboard buffer. */
+    /* ---- the keyboard ---- */
+    /* Keys go through the matrix */
 
-    /** @brief Type a line. It is queued: a key takes a few frames. */
+    /** @brief Type a line, queued over a few frames */
     bool type(const char * text);
-    /** @brief Hold a key down and let it up again, over a few frames. */
+    /** @brief Press and release a key over a few frames */
     bool tap_key(KeyPos key);
-    /** @brief RUN/STOP, which is how a running program is interrupted. */
+    /** @brief Press RUN/STOP */
     bool run_stop(void);
-    /** @brief Whether anything typed is still on its way in. */
+    /** @brief True while typed keys are still queued */
     bool typing(void) const { return machine_.keyboard().busy(); }
 
-    /**
-     * @brief The driver's "load another song" entry. **Nothing uses this.**
-     *
-     * Kept for reference (it's cheaper than a re-initialise) and left unused
-     * because it jams the CPU on some tunes. `next_subtune()`,
-     * `previous_subtune()` and `restart_song()` all re-initialise instead.
-     */
+    /** @brief Driver "load another song" entry, unused (jams the CPU on some tunes) */
     void select_subtune(uint16_t song);
 
-    /** @brief The next or previous song, from its beginning, wrapping. */
+    /** @brief Switch to the following or previous song from its beginning, wrapping */
     void next_subtune(void);
     void previous_subtune(void);
 
     /**
-     * @brief Change song and start it from its beginning, via a full re-init.
+     * @brief Change song and restart it via a full re-init
      *
-     * @param song  1 to songs(). **Not** wrapped: out of range returns false.
-     *              Relative movement belongs to next_subtune() and
-     *              previous_subtune(), which wrap and need no number, because
-     *              the player is the only thing that knows which song it is
-     *              on and how many there are.
+     * @param song 1 to songs(), out of range returns false
      */
     bool restart_song(uint16_t song);
 
-    /** @brief Run one frame's worth of cycles. */
+    /** @brief Run one frame of cycles */
     void run_frame(void);
-    /** @brief Run n frames. */
+    /** @brief Run n frames */
     void run_frames(uint32_t frames);
 
     const SidFile & tune(void) const { return tune_; }
     const PrgFile & prg(void) const { return prg_; }
-    /** @brief Whether what is loaded is a program rather than a tune. */
+    /** @brief True if the loaded file is a program, false for a tune */
     bool is_prg(void) const { return is_prg_; }
     uint16_t song(void) const { return song_; }
     uint16_t songs(void) const { return tune_.songs; }
@@ -158,7 +118,7 @@ class Player
     bool init_prg_without_roms(void);
     void apply_boot_image(void);
     void setup_for_driver(bool is_pal);
-    /** @brief Tell BASIC where the program it just "loaded" ends. */
+    /** @brief Set the BASIC end of program pointers */
     void set_basic_pointers(addr_t end_addr);
 
     Machine & machine_;

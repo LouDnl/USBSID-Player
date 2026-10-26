@@ -1,11 +1,11 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
- * host/session_audio.cpp
+ * session_audio.cpp
  * See session_audio.h.
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -36,14 +36,14 @@ namespace usbsid {
 
 namespace {
 
-/** @brief Percent volume to a gain, negative clamped to 0. */
+/** @brief Percent volume to a gain, negative is 0 */
 float gain(int percent)
 {
   return static_cast<float>((percent < 0) ? 0 : percent) / 100.0f;
 }
 
 /**
- * @brief Replay the register file of every chip into a backend.
+ * @brief Replay the register file of every chip into a backend
  *
  * @param machine  source of the register file
  * @param out      backend to write to
@@ -88,8 +88,7 @@ bool AudioSessionSink::attach(Machine & machine)
 
 bool AudioSessionSink::prepare(Machine & machine, const SidFile * tune)
 {
-  /* The file's own model and chip count; a program says nothing, so two
-   * chips, the same guess the command line player makes. */
+  /* Model and chip count from the file, a program gets two chips (as the command line) */
   const SoftSidModel model = (tune != nullptr && tune->sid_model == SidModel::Mos8580)
                            ? SoftSidModel::Csg8580 : SoftSidModel::Mos6581;
   const uint8_t chips = static_cast<uint8_t>((tune != nullptr) ? tune->sid_count : 2);
@@ -122,9 +121,9 @@ bool AudioSessionSink::frame_done(const std::atomic<bool> & stopping)
       const size_t put = audio_.push(buf_.data() + at, n - at);
       at += put;
       if (put == 0) {
-        /* Ring full: the device is the clock, wait for it to drain */
+        /* Ring full, device is the clock */
         if (stopping) return true;
-        /* A stalled device never drains: drop the rest, wall_clock() paces */
+        /* Stalled device, drop the rest and pace on wall_clock() */
         if (audio_.stalled()) break;
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
       }

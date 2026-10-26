@@ -1,11 +1,11 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
- * host/session.cpp
- * See session.h.
+ * session.cpp
+ * See header
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -38,17 +38,17 @@ namespace usbsid {
 
 namespace {
 
-/* How long an idle engine (paused, ended) sleeps between command checks */
+/* Idle engine (paused, ended) sleep between command checks */
 constexpr auto kIdleWait = std::chrono::milliseconds(20);
 
-/** @brief Writes from a seek go nowhere. */
+/** @brief Writes from a seek go nowhere */
 NullSidBackend & seek_backend(void)
 {
   static NullSidBackend backend;
   return backend;
 }
 
-/** @brief True for a PSID or RSID header. */
+/** @brief True for a PSID or RSID header */
 bool is_sid_file(const data_t * bytes, size_t len)
 {
   return len >= 4 && (bytes[0] == 'P' || bytes[0] == 'R') &&
@@ -176,7 +176,7 @@ void Session::pause(bool paused)
 {
   run_or_queue([this, paused](void) {
     if (!player_.playing() || paused == paused_ || ended_ || failed_) return;
-    shown_frames(); /* freeze at what is shown now */
+    shown_frames(); /* Freeze the shown time */
     paused_ = paused;
     player_.pause(paused);
     if (paused) {
@@ -258,7 +258,7 @@ SessionStatus Session::status(void) const
 {
   std::lock_guard<std::mutex> lk(lock_);
   SessionStatus s = status_;
-  /* The engine can sit in a blocking frame_done(): keep the shown time moving */
+  /* Engine can block in frame_done(), keep the shown time moving */
   if (s.playing && !s.paused && sink_ && sink_->lags_audio() && s.frame_rate > 0.0) {
     s.elapsed_ms = static_cast<uint32_t>(1000.0 * static_cast<double>(shown_frames()) /
                                          s.frame_rate);
@@ -298,8 +298,7 @@ void Session::engine(void)
       const double rate = pacer_.frame_rate();
       const bool advance = options_.auto_advance && !player_.is_prg() &&
                            player_.song() < player_.songs();
-      /* Without a next song, a sink that lags the audio ends on the shown
-       * time, which lets its queued tail play out; emulation continues until then. */
+      /* Last song on a lagging sink ends on the shown time, queued tail plays out */
       const bool shown_end = !advance && sink_->lags_audio();
       const uint64_t played = shown_end ? shown_frames() : frame_ - song_frame0_;
       if (length > 0 && rate > 0.0 &&
@@ -346,11 +345,7 @@ void Session::run_or_queue(std::function<void(void)> command)
   }
 }
 
-/**
- * @brief Set up the machine, output and tune for play(). Lock held.
- *
- * @return false with error_ set when anything refused
- */
+/** @brief Set up machine, output and tune for play(), false with error_ set on refusal (lock held) */
 bool Session::begin(void)
 {
   ended_ = failed_ = false;
@@ -388,7 +383,7 @@ bool Session::begin(void)
   return true;
 }
 
-/** @brief A song (re)started: clock from zero, mutes back on. Lock held. */
+/** @brief Song (re)started, clock from zero, mutes back on (lock held) */
 void Session::after_song_start(void)
 {
   song_frame0_ = frame_;
@@ -406,7 +401,7 @@ void Session::after_song_start(void)
   pacer_.rebase(frame_);
 }
 
-/** @brief Put the kept mutes back after an init powered the machine on. */
+/** @brief Restore the kept mutes after an init */
 void Session::apply_mutes(void)
 {
   for (uint8_t c = 0; c < kMaxSids; c++) {
@@ -420,7 +415,7 @@ void Session::apply_mutes(void)
   }
 }
 
-/** @brief A seek reached its frame: writes go out again. Lock held. */
+/** @brief Seek reached its frame, writes go out again (lock held) */
 void Session::finish_seek(void)
 {
   seek_to_ = 0;
@@ -430,7 +425,7 @@ void Session::finish_seek(void)
   anchor_shown(frame_ - song_frame0_);
 }
 
-/** @brief Length of the current song in ms, 0 for no limit. Lock held. */
+/** @brief Length of the current song in ms, 0 for no limit (lock held) */
 uint32_t Session::song_length_ms(void) const
 {
   if (!options_.use_song_lengths || player_.is_prg()) return 0;
@@ -449,12 +444,12 @@ void Session::fail(const char * message)
 }
 
 /**
- * @brief Song frames to show as elapsed time. Lock held.
+ * @brief Song frames to show as elapsed time (lock held)
  *
- * An output that lags the emulation (a server queue) gets a wall clock since
- * the last anchor, clamped to the emulated frames and never going back. It
- * stands still while paused and follows the emulation during a seek and after
- * the end. Other outputs show the emulated frames.
+ * Lagging outputs (server queue) show the wall clock since the last anchor,
+ * clamped to the emulated frames and never going back, paused it stands still
+ * and during a seek and after the end it follows the emulation.
+ * Other outputs show the emulated frames
  */
 uint64_t Session::shown_frames(void) const
 {
@@ -472,7 +467,7 @@ uint64_t Session::shown_frames(void) const
   return v;
 }
 
-/** @brief Restart the shown clock from a song frame count. Lock held. */
+/** @brief Restart the shown clock from a song frame count (lock held) */
 void Session::anchor_shown(uint64_t shown)
 {
   shown_base_ = shown;
@@ -480,7 +475,7 @@ void Session::anchor_shown(uint64_t shown)
   shown_t0_ = std::chrono::steady_clock::now();
 }
 
-/** @brief Copy the state into status_. Lock held. */
+/** @brief Copy the state into status_ (lock held) */
 void Session::update_status(void)
 {
   SessionStatus & s = status_;

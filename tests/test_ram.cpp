@@ -1,11 +1,11 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * test_ram.cpp
- * Step 2.1 gate: RAM storage, power on pattern, colour RAM width and bulk load.
+ * RAM storage, power on pattern, colour RAM width and bulk load
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -52,8 +52,8 @@ int us_test_ram(void)
   ram.dma_write(0x1001, 0xa5);
   US_CHECK_EQ_U(ram.read(0x1001), 0xa5u, "dma_write sees the same byte");
 
-  /* no aliasing between neighbours. $0fff is the last byte of block 63, which
-   * is an odd block, so the power on pattern leaves it at $ff. */
+  /* no aliasing between neighbours. $0fff is the last byte of block 63, an odd block,
+     the power on pattern leaves it at $ff */
   US_CHECK_EQ_U(ram.read(0x0fff), 0xffu, "byte below untouched");
   US_CHECK_EQ_U(ram.read(0x1002), 0x00u, "byte above untouched");
 
@@ -82,7 +82,7 @@ int us_test_ram(void)
   US_CHECK_EQ_U(ram.read(0x2000), 0x01u, "loaded first byte");
   US_CHECK_EQ_U(ram.read(0x2003), 0x04u, "loaded last byte");
 
-  /* clamped at the top of memory instead of running off the end */
+  /* clamped at the top of memory */
   US_CHECK_EQ_U(ram.load(0xfffe, blob, 4), 2u, "load clamps at $ffff");
   US_CHECK_EQ_U(ram.read(0xfffe), 0x01u, "clamped load wrote the first byte");
   US_CHECK_EQ_U(ram.read(0xffff), 0x02u, "clamped load wrote the last byte");

@@ -1,10 +1,10 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * player.cpp
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -31,28 +31,10 @@
 namespace usbsid {
 
 /**
- * @brief Put the machine in the state the KERNAL boot leaves it in, cheaply.
+ * @brief Write back the recorded KERNAL boot state
  *
- * Writes back a recorded answer instead of computing it again. What the boot
- * produces depends only on the ROMs, so `src/player/boot_image.h` holds it:
- * the 1557 RAM bytes that end up differing from the power on pattern, and the
- * point in the frame the boot finishes at.
- *
- * Both halves are needed. RAM matters because tunes read the vectors, the
- * zero page and what RAMTAS leaves under the ROMs, and a machine without them
- * plays something else: of 160 tunes, only 88 play the same notes if this is
- * skipped entirely. The phase matters because a tune entered at a different
- * raster position syncs to a different one; restoring RAM alone gets 93 of
- * 160, restoring both gets 147, and the remaining thirteen are tunes that a
- * single frame of difference would have changed anyway.
- *
- * The phase is restored by running the machine, which lets the KERNAL scribble
- * on its way, so RAM is written afterwards and not before.
- *
- * It is used for every tune and not only after the first, which is the point:
- * a machine set up this way is the same machine every time, and one that boots
- * once and then remembers is not. Two tunes played in one session would
- * otherwise get different machines depending on their order.
+ * boot_image.h holds 1557 RAM bytes that differ from the power on pattern
+ * and the frame phase the boot ends at. Phase is restored by running the machine, RAM is written after
  */
 void Player::apply_boot_image(void)
 {
@@ -64,20 +46,9 @@ void Player::apply_boot_image(void)
 }
 
 /**
- * @brief Run the KERNAL far enough that its vectors and IO are set up.
+ * @brief Run the KERNAL until the BASIC prompt shows in screen memory
  *
- * Detected by watching for the BASIC prompt in screen memory rather than by
- * counting cycles, so it stays right whatever the video model is.
- *
- * This is expensive: 2 240 002 cycles, which on the device is 1.7 seconds of
- * silence before a tune starts. It is not skippable and it is not cheaply
- * cacheable, and both halves of that have been measured rather than assumed.
- * In short: tunes read the vectors, the zero page and what RAMTAS left
- * under the ROMs, so a machine that has not booted plays something different;
- * and replaying the 1557 bytes of RAM the boot changes is not enough either,
- * because the raster phase it finishes on matters too, and a machine restored
- * that way is still not the machine a boot produces. Doing it properly means
- * saving and restoring the whole machine.
+ * Costs 2 240 002 cycles (1.7 seconds of silence on the device)
  */
 void Player::boot_kernal(void)
 {
@@ -98,14 +69,12 @@ void Player::boot_kernal(void)
   }
 }
 
-/**
- * @brief The register state the psid driver is entered with.
- */
+/** @brief Set the register state the psid driver is entered with */
 void Player::setup_for_driver(bool is_pal)
 {
   Mmu & mmu = machine_.mmu();
 
-  /* the CIA1 timer A values the SID file format documents for each standard */
+  /* CIA1 timer A values per video standard from the SID file format */
   const data_t timer_lo = is_pal ? 0x25 : 0x95;
   const data_t timer_hi = is_pal ? 0x40 : 0x42;
 
@@ -133,13 +102,7 @@ void Player::setup_for_driver(bool is_pal)
 
   mmu.write(0x0001, 0x37);  /* BASIC, IO and KERNAL all in */
 
-  /* Cursor blink off. The KERNAL's interrupt inverts the character under the
-   * cursor straight into screen memory, and a tune that leaves the KERNAL
-   * interrupt chained in has it running for as long as it plays, corrupting
-   * a driver relocated into the screen page byte by byte over time. A real
-   * machine is in this state too whenever a program is running (the cursor
-   * only blinks while the editor waits for a line); booting to READY leaves
-   * it at zero, so it has to be put back. */
+  /* Cursor blink off, the KERNAL IRQ would corrupt a driver relocated into the screen page */
   mmu.write(0x00cc, 0x01);
 }
 
@@ -152,18 +115,10 @@ bool Player::load_sid(const data_t * bytes, size_t len, uint16_t song)
 
   if (!sidfile_parse(bytes, len, tune_)) return false;
 
-  /* A tune that says which video standard it wants gets it. Anything else
-   * keeps whatever the machine is set to. */
+  /* Use the video standard the tune asks for */
   if (tune_.video_known) machine_.set_video_model(tune_.video_model);
 
-  /* Tell the SID layer where the tune's chips are. The emulation core
-   * (SidConfig::base, mos6581_8580.h) now goes up to kMaxSids (15), the most
-   * a v5 tune's own multiSidConfig can ask for, so every address the file
-   * gives is wired up. What actually plays them is a separate question: the
-   * software audio backend (sid_residfp.h) synthesises up to kMaxSoftSids
-   * (also 15), but a real board - UsbSidBackend, EmbeddedSidBackend,
-   * WebSidBackend - only ever has 4 physical sockets and drops the rest, by
-   * design, not by anything clamped here. */
+  /* Wire up the tune's SID addresses (up to kMaxSids). Boards only have 4 sockets and drop the rest */
   SidConfig & sid = machine_.sid().config();
   sid.count = (tune_.sid_count > kMaxSids) ? kMaxSids : tune_.sid_count;
   for (uint8_t i = 0; i < kMaxSids; i++) {
@@ -173,12 +128,7 @@ bool Player::load_sid(const data_t * bytes, size_t len, uint16_t song)
   song_ = (song == 0) ? tune_.start_song : song;
   if (song_ < 1 || song_ > tune_.songs) song_ = tune_.start_song;
 
-  /* An RSID that is a C64 BASIC program is not a tune with an init routine, it
-   * is a program, and the machine is meant to start it the way a person would:
-   * boot, then RUN. There is nothing to call and no driver to install; treating
-   * it as an ordinary tune installs a driver and jumps into the middle of a
-   * tokenised BASIC line, since a zero initAddress defaults to the load
-   * address. The program path already knows how to do this, so hand it over. */
+  /* RSID BASIC program is started with RUN, no driver */
   if (tune_.is_basic) {
     prg_ = PrgFile{};
     prg_.valid = true;
@@ -186,9 +136,7 @@ bool Player::load_sid(const data_t * bytes, size_t len, uint16_t song)
     prg_.end_addr = tune_.load_last_addr;
     prg_.data = tune_.data;
     prg_.data_size = tune_.data_size;
-    /* Whether it SYSes somewhere is the program parser's question, and for the
-     * BASIC case the answer does not change what happens: RUN starts it either
-     * way. */
+    /* RUN starts it either way */
     prg_.has_sys_stub = false;
     is_prg_ = true;
     loaded_ = true;
@@ -213,13 +161,7 @@ bool Player::load_prg(const data_t * bytes, size_t len)
   return true;
 }
 
-/**
- * @brief Tell BASIC how far the program reaches.
- *
- * A real LOAD leaves the end of the program in $ae/$af and moves the three
- * pointers that say where variables start. RUN on a program whose pointers
- * still say "empty" clears it before it has a chance.
- */
+/** @brief Tell BASIC where the program ends, $ae/$af plus the variable pointers */
 void Player::set_basic_pointers(addr_t end_addr)
 {
   Ram & ram = machine_.ram();
@@ -235,13 +177,9 @@ void Player::set_basic_pointers(addr_t end_addr)
 }
 
 /**
- * @brief Start a program on the stub KERNAL, without BASIC.
+ * @brief Start a program on the stub KERNAL without BASIC, return false if BASIC is needed
  *
- * No prompt to type at: the machine gets the boot image and the KERNAL's
- * interrupt setup, then the CPU jumps to the SYS address (or the load
- * address). An RTS from the program lands in the stub's idle loop.
- *
- * @return false when the program needs BASIC to start
+ * RTS from the program lands in the stub idle loop
  */
 bool Player::init_prg_without_roms(void)
 {
@@ -262,7 +200,7 @@ bool Player::init_prg_without_roms(void)
   set_basic_pointers(prg_.end_addr);
   machine_.keyboard().reset();
 
-  /* CIA1 timer A at the KERNAL's own rate, which is what the PSID values are */
+  /* CIA1 timer A at the KERNAL rate */
   setup_for_driver(is_pal);
 
   while (!machine_.cpu().instruction_done()) machine_.tick();
@@ -291,8 +229,7 @@ bool Player::init_prg(void)
   machine_.power_on();
   machine_.sid().reset();
 
-  /* The program is started from the BASIC prompt, so the machine has to get
-   * there first. */
+  /* Boot to the BASIC prompt first */
   boot_kernal();
 
   Ram & ram = machine_.ram();
@@ -305,18 +242,15 @@ bool Player::init_prg(void)
   keys.reset();
 
   if (prg_.is_basic()) {
-    /* Loaded where BASIC programs live: RUN starts it, whether it is BASIC
-     * or a machine code program behind a SYS line. */
+    /* Loaded at the BASIC area, RUN starts it */
     keys.type("run\n");
   } else {
-    /* Anywhere else there is nothing for RUN to run. The SYS line of a
-     * program that has one says where it starts; without one, its load
-     * address is the only sensible guess, and it is usually right. */
+    /* Use the SYS address if there is one, else the load address */
     const addr_t entry = prg_.has_sys_stub ? prg_.sys_addr : prg_.load_addr;
     char line[16];
     int n = 0;
     line[n++] = 's'; line[n++] = 'y'; line[n++] = 's';
-    /* the address, without a printf: this runs on the device too */
+    /* Convert the address without printf, this runs on the device too */
     char digits[6];
     int d = 0;
     uint32_t value = entry;
@@ -328,12 +262,7 @@ bool Player::init_prg(void)
     keys.type(line);
   }
 
-  /* Hold the keys down one at a time and let the machine find them, then give
-   * BASIC a moment to act on the line. The keys go through CIA1's matrix, so
-   * this is the KERNAL's own scan doing the reading: the same path a person
-   * pressing RUN would take, and the same one RUN/STOP uses to interrupt what
-   * this starts. The limit is only there so a machine that never gets to the
-   * prompt still returns. */
+  /* Feed the keys through the CIA1 matrix for the KERNAL scan, frame limit stops a stuck boot */
   for (unsigned frame = 0; frame < 300; frame++) {
     keys.tick_frame();
     const uint64_t target = machine_.vic().frames() + 1;
@@ -364,58 +293,26 @@ bool Player::init_tune(uint16_t song)
   const bool is_pal = (machine_.video_model() == VideoModel::Pal6569 ||
                        machine_.video_model() == VideoModel::PalN6572);
 
-  /* A fresh machine every time, so a tune that scribbled over the KERNAL
-   * cannot poison the next subtune. */
+  /* Fresh machine every time */
   machine_.power_on();
   machine_.sid().reset();
 
-  /* The machine has to be in the state the KERNAL leaves it in. Tunes read
-   * the vectors, the zero page and the values RAMTAS puts under the ROMs, and
-   * a machine that has not booted plays something different: measured, all 160
-   * tunes still play without it, but a third of them play something else.
-   *
-   * It does not have to be reached by running the KERNAL, though, and that is
-   * where the 1.7 seconds before every tune went. */
+  /* Apply the boot image (tunes read vectors, zero page and RAMTAS values) */
   apply_boot_image();
 
   if (!psiddrv_install(machine_.ram(), tune_, song_, is_pal, reloc_addr_)) {
     return false;
   }
 
-  /* Put the machine into the state the driver expects before entering it.
-   * This is the sequence old player ~ src/vsidpsid.cpp performs before its
-   * CPU reset: raster interrupt off, CIA1 stopped and then set to the tune's
-   * frame rate with its timer A interrupt armed, CIA2 silent, and the usual
-   * bank configuration. Without it the KERNAL's own interrupt keeps running,
-   * and the screen editor's cursor blink writes straight through the driver
-   * when it is relocated into screen memory. */
+  /* Put the machine in the state the driver expects (raster IRQ off, CIA1 timer A at the tune frame rate, CIA2 silent, bank config) */
   setup_for_driver(is_pal);
 
-  /* Enter the driver the way a real machine would: through a reset.
-   *
-   * The install put a cartridge signature at $8000 pointing at the driver's
-   * entry, so the KERNAL's reset routine finds it before it initialises
-   * anything and jumps straight there. That is what the signature is for, and
-   * it is how old player enters the driver too.
-   *
-   * Jumping to the entry point directly instead looks equivalent and is not:
-   * a reset arrives with interrupts disabled, and the driver relies on that.
-   * It does not raise the I flag itself, it lowers it with a `cli` once the
-   * tune's init has returned. Entering with interrupts already enabled lets
-   * the CIA timer this player just armed fire in the middle of init, and for
-   * a tune living under the KERNAL that means an interrupt vector fetched
-   * from the tune's own data. Krakout, Miami Vice and Bubble Bobble all died
-   * that way.
-   *
-   * The reset routine finds the cartridge at $fd02, before it gets as far as
-   * IOINIT, so this reaches the driver in a few hundred cycles rather than the
-   * couple of million a boot to the BASIC prompt takes. */
+  /* Enter the driver through a reset, the KERNAL finds the cartridge signature at $8000 and jumps to the driver.
+   * Interrupts must be disabled on entry (Krakout, Miami Vice and Bubble Bobble crash otherwise) */
   while (!machine_.cpu().instruction_done()) machine_.tick();
   machine_.cpu().reset();
 
-  /* Time starts here. Without this the first register write of the tune would
-   * carry the whole KERNAL boot as its delay, a couple of million cycles that
-   * the hardware would dutifully wait out in maximum length chunks. */
+  /* Time starts at this point */
   machine_.sid().resync();
 
   frames_ = 0;
@@ -438,11 +335,7 @@ void Player::stop(void)
 
 void Player::pause(bool paused)
 {
-  /* A tune is paused by holding the emulation still. A program cannot be:
-   * stopping the machine under it would stop the interrupt it is playing
-   * from, and there is nothing to resume into. RUN/STOP is what a person
-   * would press, so that is what is sent, and it is a stop rather than a
-   * pause. The existing player does the same. */
+  /* A program is paused with RUN/STOP, a tune by holding the emulation */
   if (is_prg_) {
     if (paused) run_stop();
     return;
@@ -451,16 +344,9 @@ void Player::pause(bool paused)
 }
 
 /**
- * @brief Switch subtune the way the existing player does it.
+ * @brief Switch subtune through the driver "load another song" entry
  *
- * The driver has no keyboard handling, so a subtune change is made by writing
- * the new song number into its parameter block and jumping to the driver's
- * "load another song" entry. That keeps the machine and the tune's own data
- * in place, which reinitialising from scratch would throw away.
- *
- * Taken from old player ~ src/vsidpsid.cpp next_prev_tune(). It does not work
- * for every tune, and that is a property of the driver rather than of this
- * code.
+ * Fails on some tunes
  */
 void Player::select_subtune(uint16_t song)
 {
@@ -471,7 +357,7 @@ void Player::select_subtune(uint16_t song)
   Ram & ram = machine_.ram();
   ram.dma_write(static_cast<addr_t>(reloc_addr_ + kPsidDrvParamOffset),
                 static_cast<data_t>(song_));
-  /* BASIC tunes read the song number out of the KERNAL's A/X/Y store */
+  /* BASIC tunes read the song number from the A/X/Y store */
   ram.dma_write(780, static_cast<data_t>(song_ - 1));
   ram.dma_write(781, static_cast<data_t>(song_ - 1));
   ram.dma_write(782, static_cast<data_t>(song_ - 1));
@@ -479,42 +365,27 @@ void Player::select_subtune(uint16_t song)
   while (!machine_.cpu().instruction_done()) machine_.tick();
   machine_.cpu().pc(
     static_cast<addr_t>(reloc_addr_ + kPsidDrvNextSongOffset));
-  /* The jump above is made from wherever the tune happened to be, usually
-   * inside its own interrupt; hot_reset() clears the inherited stack and
-   * interrupt-disable so the new song starts rather than continuing from the
-   * middle of the old one. */
+  /* hot_reset clears stack and interrupt disable inherited from the old song */
   machine_.cpu().hot_reset();
 }
 
 void Player::next_subtune(void)
 {
-  /* A program has no subtunes to switch between, but the players that come
-   * as programs almost all move on with the plus key, which is what the
-   * existing player sends them too. */
+  /* Programs move on with the plus key */
   if (is_prg_) { tap_key(kKeyPlus); return; }
   if (!tune_.valid) return;
-  /* A single song tune has nowhere to go, and jumping into the driver's
-   * "load another song" entry to arrive back at the same song is not a no-op:
-   * it restarts the tune's init from inside a running interrupt, and plenty
-   * of tunes stop playing when that happens. */
+  /* Single song tune, a driver jump would restart init inside the interrupt */
   if (tune_.songs <= 1) return;
   uint16_t next = static_cast<uint16_t>(song_ + 1);
   if (next > tune_.songs) next = 1;
-  /* Re-initialise, always, rather than select_subtune()'s cheaper driver
-   * jump (see select_subtune()'s comment for why). Doing the wrap here
-   * rather than taking a song number from the caller matters because the
-   * player is the only thing that knows which song it is on and how many
-   * there are; the firmware has neither. */
+  /* Re-initialise, select_subtune() jumps break some tunes */
   init_tune(next);
 }
 
 bool Player::restart_song(uint16_t song)
 {
   if (is_prg_ || !tune_.valid) return false;
-  /* Strict, deliberately not wrapped: a caller naming an absolute song either
-   * knows the number or has a bug, and should hear about it. Relative
-   * movement, with the wrap, is what next_subtune()/previous_subtune() are
-   * for. */
+  /* Absolute song numbers are not wrapped */
   if (song < 1 || song > tune_.songs) return false;
   return init_tune(song);
 }
@@ -525,7 +396,7 @@ void Player::previous_subtune(void)
   if (!tune_.valid) return;
   if (tune_.songs <= 1) return;
   uint16_t prev = (song_ <= 1) ? tune_.songs : static_cast<uint16_t>(song_ - 1);
-  init_tune(prev);   /* see next_subtune() for why this is not select_subtune() */
+  init_tune(prev);
 }
 
 bool Player::type(const char * text)
@@ -547,14 +418,10 @@ void Player::run_frame(void)
 {
   if (!playing_ || paused_) return;
 
-  /* Keys are held across frames, so the queue moves on once a frame, before
-   * the frame the KERNAL will scan them in. */
+  /* Queue moves on once a frame, before the KERNAL scan */
   machine_.keyboard().tick_frame();
 
-  /* Ask the VIC how far the frame has left to run and run exactly that.
-   * Polling its frame counter every cycle would work too, and would catch the
-   * chip up every cycle, which is the whole point of not clocking it thrown
-   * away: it made a tune cost three times what it should. */
+  /* Run exactly the cycles left in the frame */
   machine_.run(machine_.vic().cycles_to_frame_end());
   ++frames_;
 }

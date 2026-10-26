@@ -1,27 +1,16 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * sidfile.h
- * PSID and RSID file parsing, versions 1 to 5.
+ * PSID and RSID file parsing, versions 1 to 5
+ * Header layout follows the HVSC SID file format documentation
  *
- * Header layout per the HVSC SID file format documentation, and matching
- * old player ~ src/psid so both players read the same tunes the same way.
- *
- * Version 5 adds: variable length metadata strings (with a fallback to the
- * fixed 32 byte layout when the variable one does not parse), a multi-SID
- * address configuration that can describe up to 15 chips, a stereo panning
- * hint per chip, an embedded song length table, and an FM/OPL flag. This
- * player's emulation and every backend (mos6581_8580.h's SidConfig, the
- * network SID device client) are hard capped at 4 chips, so a v5 tune asking
- * for more plays its first 4 addresses, in the order the file's own address
- * configuration generates them, and the rest are exposed here for display
- * only. Panning is likewise exposed as data rather than rendered: the audio
- * path is deliberately one channel (see sid_residfp.cpp), and the spec
- * itself allows a player to ignore the hint and fall back to its native
- * output.
- *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * v5 adds variable length metadata strings (fixed 32 byte fallback), multi SID
+ * config for up to 15 chips, panning hints, embedded song lengths and an FM/OPL flag.
+ * Emulation and backends are capped at 4 chips, a v5 tune with more plays its
+ * first 4 addresses (the rest is display only), panning is data only
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -52,34 +41,29 @@ namespace usbsid {
 
 enum class SidModel : uint8_t { Unknown = 0, Mos6581, Mos8580, Any };
 
-/** @brief The most SID addresses a v5 header's multiSidConfig can describe. */
+/** @brief Most SID addresses a v5 header multiSidConfig can describe */
 inline constexpr uint8_t kMaxSids = 15;
 
-/** @brief v5 SID Panning Layout, flags bits 6-7. */
+/** @brief v5 SID panning layout, flags bits 6-7 */
 enum class SidPanLayout : uint8_t { Standard = 0, LCR = 1, CenterFirst = 2, FullyCentered = 3 };
 
-/** @brief v5 SID Panning Mode, flags bits 8-9. */
+/** @brief v5 SID panning mode, flags bits 8-9 */
 enum class SidPanMode : uint8_t { Direct = 0, Reverse = 1, Group = 2, Spread = 3 };
 
-/** @brief Where one chip's output is hinted to go. */
+/** @brief Where one chip output is hinted to go */
 enum class SidPan : uint8_t { Left, Center, Right };
 
 /**
- * @brief Fill out[0..n-1] with the v5 panning tables' positions.
+ * @brief Fill out[0..n-1] with the v5 panning table positions
  *
- * @param layout  v5 panning layout
- * @param mode    v5 panning mode
- * @param n       chip count, 1 to kMaxSids; one chip is always Center
- * @param out     receives n positions
+ * @param layout v5 panning layout
+ * @param mode v5 panning mode
+ * @param n Chip count, 1 to kMaxSids (one chip is always Center)
+ * @param out Receives n positions
  */
 void compute_panning(SidPanLayout layout, SidPanMode mode, uint8_t n, SidPan * out);
 
-/**
- * @brief A parsed SID file.
- *
- * The payload is not copied: the caller owns the bytes and this points into
- * them, which keeps the embedded build free of a second 64 KB buffer.
- */
+/** @brief A parsed SID file, data points into the caller's bytes */
 struct SidFile {
   bool valid = false;
   bool is_rsid = false;
@@ -95,10 +79,7 @@ struct SidFile {
   uint16_t start_song = 1;
   uint32_t speed = 0;       /* one bit per song: 0 = raster, 1 = CIA */
 
-  /* Versions 1 to 4 fill at most 32 characters here. Version 5 allows a
-   * variable length string that, in the extreme, uses almost the whole 96
-   * byte metadata area for one field, so the buffer is sized for that
-   * worst case rather than the historical 32+1. */
+  /* v1 to v4 use at most 32 characters, v5 allows a variable length string up to almost the 96 byte metadata area */
   static constexpr size_t kMetaFieldSize = 96;
   char name[kMetaFieldSize] = { 0 };
   char author[kMetaFieldSize] = { 0 };
@@ -107,29 +88,16 @@ struct SidFile {
   uint16_t flags = 0;
 
   /**
-   * @brief An RSID that is a C64 BASIC program, started by typing RUN.
+   * @brief RSID that is a C64 BASIC program, started by typing RUN
    *
-   * Flags bit 1 means two different things depending on the file. In a PSID it
-   * marks a tune that uses PlaySID's own extensions; in an **RSID** it says the
-   * tune is BASIC, and then `initAddress` must be zero and the machine is meant
-   * to run it the way a person would: boot, and RUN.
-   *
-   * There is no init routine to call and no driver to install. A player that
-   * treats it as an ordinary tune calls the load address as if it were code,
-   * which for a BASIC program is a jump into a tokenised line.
+   * Flags bit 1 in an RSID means BASIC (initAddress must be zero)
    */
   bool is_basic = false;
 
   /**
-   * @brief Flags bit 0: the payload is Compute!'s Sidplayer MUS data, not a
-   * built-in music player (v2-5 only; always false for v1, which has no
-   * flags field).
+   * @brief Flags bit 0, payload is Compute!'s Sidplayer MUS data (v2-5 only)
    *
-   * This player has no MUS decoder. A tune with this set has no init/play
-   * routine of its own - `init_addr` still defaults to `load_addr` below,
-   * which for MUS data is not code, so nothing here should call it. Callers
-   * should check this and refuse to play rather than run the MUS data as
-   * 6502.
+   * There is no MUS decoder, callers must refuse to play it
    */
   bool is_mus_player = false;
 
@@ -147,11 +115,8 @@ struct SidFile {
   addr_t sid_addr[kMaxSids] = { 0xd400 };
   uint8_t sid_count = 1;
 
-  /* v5 specific: flags bits 6-9 (SID panning), 10 (embedded song lengths) and
-   * 11 (FM OPL). Panning is computed for every version, not just v5: a tune
-   * with no opinion is Standard/Direct, which for one chip is Center and for
-   * several alternates L/R, and that default is worth having uniformly
-   * rather than leaving callers to special case "no panning data". */
+  /* v5 specific: flags bits 6-9 (SID panning), 10 (embedded song lengths) and 11 (FM OPL).
+   * Panning is computed for every version, default is Standard/Direct */
   SidPanLayout pan_layout = SidPanLayout::Standard;
   SidPanMode pan_mode = SidPanMode::Direct;
   SidPan sid_pan[kMaxSids] = { SidPan::Center };
@@ -159,13 +124,11 @@ struct SidFile {
   bool has_fm_opl = false;
   bool has_embedded_song_lengths = false;
 
-  /* Set only when has_embedded_song_lengths and the trailer was actually
-   * found at the end of the file. Points into the caller's bytes, same as
-   * `data` above: nothing here is copied. */
+  /* Set when has_embedded_song_lengths and the trailer was found at the end of the file */
   const data_t * song_length_table = nullptr;
   uint16_t song_length_table_count = 0;
 
-  /** @brief True when this song is driven by a CIA timer rather than the raster */
+  /** @brief True if this song is driven by a CIA timer (else raster) */
   bool song_uses_cia(uint16_t song) const
   {
     if (song < 1) song = 1;
@@ -173,33 +136,29 @@ struct SidFile {
     if (song <= 32) {
       bit = song;
     } else if (version == 1 || (flags & 0x0002) != 0) {
-      /* v1, or v2-5 with the PlaySID-specific flag (bit 1) set: the 32 bit
-       * pattern repeats past tune 32 (spec: "tune 33 uses bit 0, tune 34
-       * uses bit 1, and so on"). */
+      /* v1, or v2-5 with the PlaySID flag (bit 1) set, the 32 bit pattern repeats past tune 32 */
       bit = static_cast<uint16_t>(((song - 1) % 32) + 1);
     } else {
-      /* v2-5 with the flag clear: tune 32 and everything past it takes bit 31. */
+      /* v2-5 with the flag clear, tune 32 and up take bit 31 */
       bit = 32;
     }
     return (speed & (1u << (bit - 1))) != 0;
   }
 
   /**
-   * @brief One song's length from the file's own embedded table, in
-   * milliseconds, or 0 when there is none (has_embedded_song_lengths is
-   * false, the trailer did not fit, or `song` is out of range).
+   * @brief Song length in milliseconds from the embedded table, 0 if none
    *
-   * @param song  1 based, as everywhere else in this struct
+   * @param song 1 based
    */
   uint32_t embedded_song_length_ms(uint16_t song) const;
 };
 
 /**
- * @brief Parse a SID file.
+ * @brief Parse a SID file
  *
- * @param bytes  the whole file
- * @param len    its length
- * @param out    filled in on success, out.valid tells you which
+ * @param bytes Whole file
+ * @param len Length of the file
+ * @param out Filled in on success, out.valid tells
  */
 bool sidfile_parse(const data_t * bytes, size_t len, SidFile & out);
 
@@ -207,15 +166,11 @@ bool sidfile_parse(const data_t * bytes, size_t len, SidFile & out);
 constexpr size_t kUtf8FieldSize = 3 * (SidFile::kMetaFieldSize - 1) + 1;
 
 /**
- * @brief Convert a header string (name, author, released) to UTF-8.
+ * @brief Convert a header string (name, author, released) from Windows-1252 to UTF-8 for display
  *
- * SidFile keeps the strings as the file stores them, Windows-1252. Convert
- * only for display. Truncates at a whole character to fit.
- *
- * @param src  NUL terminated Windows-1252 text
- * @param dst  destination, NUL terminated when cap > 0
- * @param cap  size of dst, kUtf8FieldSize fits any SidFile string
- * @return dst
+ * @param src NUL terminated Windows-1252 text
+ * @param dst Destination, NUL terminated when cap > 0
+ * @param cap Size of dst, kUtf8FieldSize fits any SidFile string
  */
 const char * win1252_to_utf8(const char * src, char * dst, size_t cap);
 

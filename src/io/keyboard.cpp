@@ -1,14 +1,13 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * keyboard.cpp
  *
- * The matrix layout is the C64's, row by row, as printed in every reference:
- * row 0 holds the delete key and the function keys, row 7 holds RUN/STOP, the
- * space bar and the Commodore key.
+ * C64 matrix layout, row 0 has delete and the function keys, row 7
+ * has RUN/STOP, space and Commodore
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -41,10 +40,7 @@ struct CharKey {
   bool shift;
 };
 
-/* The unshifted keys, in matrix order. Letters are given in lower case
- * because that is what a caller writes; on the machine they are the same key
- * either way, and unshifted is what the editor prints as an upper case
- * character in its default character set. */
+/* Unshifted keys in matrix order, letters in lower case (same key on the machine) */
 const CharKey kCharKeys[] = {
   /* row 0 */                    { '\r', 0, 1, false },
   /* row 1 */
@@ -74,12 +70,12 @@ const CharKey kCharKeys[] = {
   { '1', 7, 0, false }, { '2', 7, 3, false }, { ' ', 7, 4, false },
   { 'q', 7, 6, false },
 
-  /* the shifted ones worth having: what a typed line actually needs */
-  { '!', 7, 0, true }, { '"', 7, 3, true }, { '#', 1, 0, true },
-  { '$', 1, 3, true }, { '%', 2, 0, true }, { '&', 2, 3, true },
-  { '\'', 3, 0, true }, { '(', 3, 3, true }, { ')', 4, 0, true },
-  { '<', 5, 7, true }, { '>', 5, 4, true }, { '?', 6, 7, true },
-  { '[', 5, 5, true }, { ']', 6, 2, true },
+  /* Shifted keys needed for typed lines */
+  { '!', 7, 0, true },  { '"', 7, 3, true },  { '#', 1, 0, true },
+  { '$', 1, 3, true },  { '%', 2, 0, true },  { '&', 2, 3, true },
+  { '\'', 3, 0, true }, { '(', 3, 3, true },  { ')', 4, 0, true },
+  { '<', 5, 7, true },  { '>', 5, 4, true },  { '?', 6, 7, true },
+  { '[', 5, 5, true },  { ']', 6, 2, true },
 };
 
 } /* namespace */
@@ -131,7 +127,7 @@ bool Keyboard::type(const char * text)
 
   for (const char * p = text; *p != '\0'; p++) {
     KeyPos key;
-    if (!key_for_char(*p, key)) continue; /* nothing on this machine types it */
+    if (!key_for_char(*p, key)) continue; /* no key for it */
     if (!tap(key)) return false;
   }
   return true;

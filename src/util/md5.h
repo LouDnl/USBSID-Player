@@ -1,25 +1,15 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
- * util/md5.h
- * MD5, RFC 1321, for one purpose: the key into HVSC's Songlengths database.
+ * md5.h
+ * MD5 (RFC 1321), used as the key into the HVSC Songlengths database
  *
- * That key is the MD5 of the **whole .sid file**, bytes as they are on disk,
- * which was verified against HVSC's own `DOCUMENTS/Songlengths.md5` rather than
- * assumed: eight entries picked at random out of 60572 all matched `md5sum` of
- * the file exactly.
+ * Key is the MD5 of the whole .sid file as on disk (checked against
+ * DOCUMENTS/Songlengths.md5), older players use the PSID MD5
+ * Not used for security
  *
- * Worth writing down because the obvious guess is wrong. Older players key this
- * on the **PSID MD5**, a hash over selected header fields and the C64 data
- * rather than the file, and libsidplayfp carries two variants of it. Any of
- * those would miss every entry in this database, silently, since a miss and a
- * tune with no known length look the same.
- *
- * MD5 is not used here for anything to do with security, and would be the wrong
- * choice if it were.
- *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -49,11 +39,11 @@
 namespace usbsid {
 
 /**
- * @brief MD5 of a block of bytes, as 32 lowercase hex characters.
+ * @brief MD5 of a block of bytes as 32 lowercase hex characters
  *
- * @param data  the bytes
- * @param len   how many
- * @param out   at least 33 bytes; written with the hex and a terminator
+ * @param data Bytes to hash
+ * @param len Number of bytes
+ * @param out At least 33 bytes, written with the hex and a terminator
  */
 inline void md5_hex(const uint8_t * data, size_t len, char * out)
 {
@@ -88,7 +78,7 @@ inline void md5_hex(const uint8_t * data, size_t len, char * out)
     return static_cast<uint32_t>((v << c) | (v >> (32 - c)));
   };
 
-  /* One 64 byte block, with the message words read little endian. */
+  /* One 64 byte block, message words read little endian */
   const auto block = [&](const uint8_t * p) {
     uint32_t m[16];
     for (int i = 0; i < 16; i++) {
@@ -117,8 +107,7 @@ inline void md5_hex(const uint8_t * data, size_t len, char * out)
   size_t at = 0;
   for (; at + 64 <= len; at += 64) block(data + at);
 
-  /* The tail, the 0x80 terminator, and the bit count. Two blocks when the
-   * remainder leaves no room for the eight length bytes. */
+  /* Tail, 0x80 terminator and bit count, two blocks if the remainder leaves no room for the 8 length bytes */
   uint8_t tail[128];
   const size_t rem = len - at;
   for (size_t i = 0; i < rem; i++) tail[i] = data[at + i];

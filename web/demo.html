@@ -1,4 +1,12 @@
 <!doctype html>
+<!--
+  USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+  command line playback, websites and for embedding on RP2040/RP2350.
+
+  This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
+  File author: LouD
+  Copyright (c) 2026 LouD, GPL-2.0-or-later. See usplayer-web.js for the full notice.
+-->
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -84,18 +92,12 @@ import { USBSIDPlayerWorker } from './usplayer-worker-client.js';
 import { createTransport, unsupportedMessage, availableTransport, transportLabel } from './usbsid-transport.js';
 import { ASIDMIDITransport } from './asid-midi.js';
 
-/* Where the build put the wasm. The repo builds into temp/, which keeps every
- * artefact inside the project directory; a deployment can put the two files
- * wherever it likes as long as these two paths agree. */
-/* The WEB build copies usbsid.js, .mjs and .wasm in here, so the
- * directory is self contained. See CMakeLists.txt. */
+/* Location of the wasm, the repo builds into temp/ */
+/* The WEB build copies usbsid.js, .mjs and .wasm in, see CMakeLists.txt */
 const WASM_DIR = './';
 
-/* Software audio: reSIDfp inside the wasm, played through an AudioWorklet, so a
- * tune can be heard with no board at all. The transport stays a NullTransport
- * because usp_audio_configure() swaps the emulation's backend over to the
- * software SID: nothing reaches the write ring any more, so there is nothing for
- * a transport to carry. */
+/* Software audio, reSIDfp in the wasm played through an AudioWorklet, no board needed
+ * The transport stays a NullTransport, usp_audio_configure() switches to the software SID and the write ring stays empty */
 let audioOut = null;
 
 const $ = (id) => document.getElementById(id);
@@ -112,15 +114,9 @@ let connected = false, inWorker = false;
   log('WASM ready. Pick a transport, connect a device, choose a file.');
 })();
 
-/* The direct transport is WebUSB in Chromium and Web Serial in Firefox, and the
- * option has to say which rather than always claiming WebUSB. It is not cosmetic:
- * the two take different USB interfaces, and Web Serial takes the one the command
- * line player wants, so which is in use decides whether the CLI can hold the
- * board at the same time.
- *
- * The option's *value* stays 'webusb' because it names the mode, direct to the
- * board rather than out over MIDI, and every check below tests for 'asid'. Only
- * the text the user reads changes. */
+/* Direct transport is WebUSB in Chromium and Web Serial in Firefox, the option text names it
+ * Web Serial takes the interface the command line player wants
+ * The option value stays 'webusb' (direct to the board), checks below test for 'asid' */
 (() => {
   const kind = availableTransport();
   const opt = $('ttype').querySelector('option[value="webusb"]');
@@ -138,12 +134,9 @@ let connected = false, inWorker = false;
 
 $('ttype').onchange = () => {
   $('midiRow').style.display = ($('ttype').value === 'asid') ? 'flex' : 'none';
-  /* Only software audio mixes its own SID/FM balance - a board or ASID has
-   * no such thing to turn. */
+  /* Only software audio mixes the SID/FM balance */
   $('volRow').style.display = ($('ttype').value === 'audio') ? 'flex' : 'none';
-  /* Software audio needs no device, so it needs no connect either. Enabling play
-   * the moment it is chosen, rather than making the user press a button that
-   * does nothing, which is what LouD hit. */
+  /* Software audio needs no device and no connect, enable play when chosen */
   if ($('ttype').value === 'audio') {
     if (!transport) { transport = new NullTransport(); player.transport = transport; }
     $('connect').disabled = true;
@@ -153,12 +146,8 @@ $('ttype').onchange = () => {
   maybeEnable();
 };
 
-/* Independent SID/FM gain, inside the wasm mix rather than a post-mix page
- * volume control - see UsPlayerAudio.setSidVolume()/setFmVolume(). Applied
- * straight to audioOut when it exists (play() creates it before either
- * slider can have been touched for a given load, but a value changed while
- * already playing should take effect immediately, hence live on 'input'
- * rather than only read back at play() time). */
+/* Independent SID/FM gain in the wasm mix, see UsPlayerAudio.setSidVolume()/setFmVolume()
+ * Applied to audioOut when it exists, live on 'input' */
 $('sidvol').oninput = () => {
   $('sidvolval').textContent = $('sidvol').value + '%';
   if (audioOut) audioOut.setSidVolume($('sidvol').value);
@@ -171,9 +160,7 @@ $('fmvol').oninput = () => {
 $('connect').onclick = async () => {
   try {
     if ($('ttype').value === 'audio') {
-      /* Nothing to connect to. The AudioContext is opened on play instead,
-       * because it needs the tune's clock and chip count, and because a context
-       * created outside a user gesture stays suspended on iOS. */
+      /* Nothing to connect to, the AudioContext opens on play (needs the tune clock and chip count, suspended on iOS without a gesture) */
       transport = new NullTransport();
       player.transport = transport;
       log('software audio: no device needed, press play');
@@ -191,9 +178,7 @@ $('connect').onclick = async () => {
       }
       $('midiRow').style.display = 'flex';
     } else if ($('worker').checked && USBSIDPlayerWorker.available()) {
-      /* The emulation and the USB writes both move off this thread. Nothing
-       * in the playback path is left on a thread the browser throttles when
-       * the tab goes to the back, which is what made switching tabs audible. */
+      /* Emulation and USB writes run in the worker, no throttling in a background tab */
       player = new USBSIDPlayerWorker({ wasmUrl: WASM_DIR + 'usbsid.mjs' });
       await player.connect();
       inWorker = true;
@@ -202,8 +187,7 @@ $('connect').onclick = async () => {
     } else {
       transport = createTransport();
       if (!transport) { $('dev').textContent = unsupportedMessage(); return; }
-      /* Web Serial can refuse a port that did not answer, and saying so beats
-       * looking connected and playing into nothing. */
+      /* Web Serial can refuse a port that did not answer */
       const ok = await transport.connect();
       if (!ok) {
         $('dev').textContent = transport.lastError || 'could not open the board';
@@ -213,14 +197,12 @@ $('connect').onclick = async () => {
     }
     if (!inWorker) {
       player.transport = transport;
-      /* Web Serial exposes ids at best and often nothing, so name the
-       * transport rather than showing a bare 'device'. */
+      /* Web Serial exposes few ids, name the transport */
       $('dev').textContent = (transport.productName || 'USBSID-Pico') +
                              ' over ' + transportLabel();
     }
     connected = true;
-    /* What the board is carrying, which is what makes $df40/$df50 reach a
-     * chip. The command line player does this at connect; so does this now. */
+    /* Board config, makes $df40/$df50 reach a chip, the command line player does this at connect */
     let board = null;
     try { board = await player.applyBoardConfig(); } catch (_) {}
     const boardText = board
@@ -248,12 +230,7 @@ $('file').onchange = async (ev) => {
   maybeEnable();
 };
 
-/* Software audio has nothing to connect to, so `connected` never becomes true
- * for it and gating play on that flag alone leaves the button dead for ever.
- * One predicate, called from every place that changes either half, rather than
- * a second path that sets `disabled` directly: two paths is how the button
- * ended up being enabled on transport change and disabled again on file
- * choice. */
+/* Software audio never sets connected, one predicate for the play button, called wherever either half changes */
 function readyToPlay() {
   return ($('ttype').value === 'audio') ? true : connected;
 }
@@ -265,10 +242,7 @@ function maybeEnable() {
 function showStatus(prefix) {
   const i = player.info();
   const who = i.name ? `${i.name}${i.author ? ' - ' + i.author : ''}` : '(no title)';
-  /* Software audio adds a line, because "it sounds wrong" has two very
-   * different causes and they are told apart by numbers, not by listening:
-   * starve climbing is the machine not keeping up (heard as crackle), starve
-   * flat is something else entirely. */
+  /* Software audio adds a line, starve climbing = machine too slow (crackle), starve flat = other cause */
   let audio = '';
   if (audioOut && audioOut.running) {
     const s = audioOut.stats();
@@ -296,37 +270,23 @@ $('play').onclick = async () => {
   }
   if (!ok) { log('that file is neither a SID nor a program'); return; }
 
-  /* ASID only emits the chips it is told about, and it defaults to one, so a
-   * two or three SID tune played over ASID was sending its first chip only.
-   * The header says how many there are. Set on the transport rather than at
-   * construction because the transport is connected before a file is chosen.
-   *
-   * Only ASID needs this: the board transports carry whatever address the
-   * emulation writes to, and ASID never goes through the worker (Web MIDI has
-   * no worker API), so the transport is always reachable from here. */
+  /* ASID emits only the chips it is told about (default one), the header has the count
+   * Set on the transport, it is connected before a file is chosen
+   * Board transports carry any address, ASID never uses the worker and the transport is reachable */
   if (transport && 'nosids' in transport) {
     const n = isPrg ? 1 : countSids(fileBytes);
     transport.nosids = n;
     if (n > 1) log(`${n} SID chips, telling ASID about all of them`);
   }
 
-  /* Software audio starts here rather than at connect: the synthesis has to be
-   * configured for this tune's clock and chip count, and an AudioContext made
-   * outside a user gesture stays suspended (iOS especially). This handler is
-   * that gesture. */
+  /* Software audio starts on play, synthesis needs the clock and chip count and the AudioContext needs this gesture (iOS) */
   if ($('ttype').value === 'audio') {
     if (!audioOut) audioOut = new UsPlayerAudio(player);
-    /* The sliders may already be off their defaults (a previous tune, or the
-     * user moved them before pressing play) - apply() rather than trust
-     * usp_audio_configure()'s own defaults, which start()/_configure() below
-     * does not touch either way (see setSidVolume()/setFmVolume()'s own
-     * comments on why this is not reset by a reconfigure). */
+    /* Sliders may be off their defaults, apply() them, a reconfigure does not reset the volumes */
     audioOut.setSidVolume($('sidvol').value);
     audioOut.setFmVolume($('fmvol').value);
     const n = isPrg ? 1 : countSids(fileBytes);
-    /* The chip the tune asks for, not always a 6581: the model decides which
-     * filter is emulated and is plainly audible. A program says nothing, so it
-     * gets the default. */
+    /* Chip model of the tune decides the emulated filter, a program gets the default */
     const model = isPrg ? 0 : sidModel(fileBytes);
     const ok = await audioOut.start({ chips: n, quality: 1, model });
     if (!ok) { log('reSIDfp would not take this rate; is the wasm built with it?'); return; }
@@ -337,11 +297,7 @@ $('play').onclick = async () => {
   const clk = parseInt($('clock').value, 10);
   if (clk >= 0) await player.setClock(clk);
 
-  /* Software audio clocks itself off the ring rather than off the wall clock,
-   * so the player's own pump is not started at all: see UsPlayerAudio.run().
-   * Two clocks would fight, and the wall clock one drops frames when it falls
-   * behind, which on a multi SID tune is a hole in the audio rather than a
-   * frame played late. */
+  /* Software audio is clocked by the ring, the player pump is not started, see UsPlayerAudio.run() */
   if ($('ttype').value === 'audio') {
     await player.start({ externalClock: true });
     audioOut.run(player);

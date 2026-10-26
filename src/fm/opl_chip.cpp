@@ -1,11 +1,10 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback, for embedding on RP2350 (Pico2), and in a browser.
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
- * src/fm/opl_chip.cpp
- * See opl_chip.h for what this is and why it exists.
+ * opl_chip.cpp
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -31,33 +30,24 @@
 namespace usbsid {
 
 namespace {
-/* Samples rendered per call into the scratch buffer. Nuked has no limit of its
- * own here, unlike the browser engine's 512; this is only to keep one frame's
- * worth of stereo pairs on the stack of the vector rather than growing it to
- * whatever the longest mix happens to be. */
+/* Samples rendered per call into the scratch buffer */
 constexpr size_t kBlock = 1024;
 
 #if defined(US_FM_YMFM) && US_FM_YMFM
-/* The clock an OPL2 sits on in a C64 cartridge is the NTSC colour burst
- * crystal, which gives the familiar 49716 Hz native output rate. */
+/* OPL2 clock on a C64 cartridge is the NTSC color burst crystal (49716 Hz native rate) */
 constexpr uint32_t kOplClock = 3579545;
 #endif
 
-/* FM-YAM digi mode - see the class comment in opl_chip.h. */
+/* FM-YAM digi mode, see opl_chip.h */
 constexpr uint8_t kFmTestReg   = 0x01; /**< arms/disarms digi mode */
 constexpr uint8_t kDigiArmValue = 0x04; /**< the value that arms it */
 constexpr uint8_t kFmDigiAddrA = 0xa0;  /**< channel A's PCM port (normally F-Num-lo) */
 constexpr uint8_t kFmDigiAddrB = 0xa1;  /**< channel B's PCM port */
-/* Centers the incoming byte on 128 (standard unsigned 8-bit PCM) and scales
- * it to sit alongside a normal SID/FM peak, rather than SIDKick-pico's own
- * reference implementation, which sums the raw unsigned byte straight in and
- * relies on a later stage to remove the resulting DC bias - this mix has no
- * such stage, so centering happens here instead. */
+/* Centers the byte on 128 (unsigned 8-bit PCM) and scales it to sit with a SID/FM peak */
 constexpr int32_t kDigiScale = 32;
 
 #if !(defined(US_FM_YMFM) && US_FM_YMFM)
-/* Nuked's native rate and the fixed point fraction of its rate ratio, as
- * OPL3_Reset() derives `rateratio` (opl3.c RSM_FRAC). */
+/* Nuked native rate and the fixed point fraction of its rate ratio (opl3.c RSM_FRAC) */
 constexpr int32_t kNukedNativeRate = 49716;
 constexpr int kNukedRsmFrac = 10;
 #endif
@@ -89,8 +79,7 @@ void OplChip::chip_write_(uint8_t reg, uint8_t value)
 #if defined(US_FM_YMFM) && US_FM_YMFM
 int32_t OplChip::chip_sample_(void)
 {
-  /* Linear interpolation between the two native samples the output position
-   * falls between, pulling native samples in as the position passes them. */
+  /* Linear interpolation between the two native samples around the output position */
   native_pos_ += native_step_;
   while (native_pos_ >= 1.0) {
     native_pos_ -= 1.0;
@@ -114,8 +103,7 @@ void OplChip::configure(unsigned sample_rate)
   clipped_ = 0;
   digi_armed_ = false;
   digi_value_[0] = digi_value_[1] = 0;
-  /* Stereo pairs: Nuked writes two shorts per sample and they are summed to
-   * mono in mix_into(). */
+  /* Nuked writes stereo pairs, summed to mono in mix_into() */
   scratch_.assign(kBlock * 2, 0);
   ready_ = true;
 }
@@ -158,11 +146,8 @@ void OplChip::mix_into(int16_t * out, size_t count)
   if (!ready_ || out == nullptr || count == 0) return;
 
   if (digi_armed_) {
-    /* Held flat between real writes (sample-and-hold, same as the real DAC
-     * between register writes - this tune's stream runs at roughly 2.5kHz,
-     * well under the audio rate). Synthesis is skipped entirely while armed:
-     * SIDKick-pico's own reference implementation discards the OPL's
-     * synthesized output the same way once this mode is active. */
+    /* Hold flat between writes (sample and hold, the stream runs at about 2.5kHz).
+     * Synthesis is skipped while armed, SIDKick-pico does the same */
     const int32_t sample = static_cast<int32_t>(digi_value_[0]) +
                             static_cast<int32_t>(digi_value_[1]);
     const int32_t scaled = static_cast<int32_t>(std::lround(sample * gain_));
@@ -189,8 +174,7 @@ void OplChip::mix_into(int16_t * out, size_t count)
 #else
     OPL3_GenerateStream(&chip_, scratch_.data(), static_cast<uint32_t>(n));
     for (size_t i = 0; i < n; i++) {
-      /* Mono by summing the pair and halving it, which is the same mixdown the
-       * SID side does, and then gain_ on top. */
+      /* Mono by summing the pair and halving, then gain_ */
       const int32_t mono = (static_cast<int32_t>(scratch_[i * 2]) +
                             static_cast<int32_t>(scratch_[i * 2 + 1])) / 2;
       const int32_t scaled = static_cast<int32_t>(std::lround(mono * gain_));
@@ -207,9 +191,7 @@ void OplChip::mix_into(int16_t * out, size_t count)
 void OplChip::reset(void)
 {
   if (!ready_) return;
-  /* A full re-reset rather than keying everything off by hand: it is the same
-   * few hundred microseconds of table setup and it cannot leave a register
-   * behind, which silencing by hand can. */
+  /* Full re-reset, leaves no register behind */
   chip_reset_();
   address_ = 0;
   writes_ = 0;

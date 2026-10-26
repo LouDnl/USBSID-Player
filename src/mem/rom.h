@@ -1,13 +1,12 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * rom.h
- * Where the machine gets its ROM images from. Defaults to the compiled in
- * stock images, or with US_EMBED_ROMS=0 to the stub KERNAL alone; the
- * pointers let a caller substitute its own set without the MMU knowing.
+ * ROM image source, compiled in stock images or the stub KERNAL
+ * with US_EMBED_ROMS=0
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -34,9 +33,8 @@
 #include "constants.h"
 #include "types.h"
 
-/* 1: compile the stock Commodore ROM images in (CLI, web, firmware).
- * 0: ship no Commodore code; the machine starts on the stub KERNAL with no
- *    BASIC and no character generator until real images are supplied. */
+/* 1: compile the stock Commodore ROM images in (CLI, web, firmware)
+ * 0: no Commodore code, stub KERNAL without BASIC and character generator until images are supplied */
 #ifndef US_EMBED_ROMS
 #define US_EMBED_ROMS 1
 #endif
@@ -47,28 +45,24 @@
 
 namespace usbsid {
 
-/* Idle loop of the stub KERNAL (`jmp $fcf5`), where an RTS from a program
- * started without ROMs ends up */
+/* Idle loop of the stub KERNAL (jmp $fcf5), end of an RTS from a program started without ROMs */
 constexpr addr_t kStubIdleLoop = 0xfcf5;
 
 #if !EMBEDDED || !US_EMBED_ROMS
 /**
- * @brief The stub KERNAL, kRomSizeKernal bytes for $e000-$ffff.
+ * @brief Stub KERNAL for $e000-$ffff (kRomSizeKernal bytes), returns the image built on first call
  *
- * Reset, cartridge check, IRQ/NMI entry and exit with the stock instruction
- * sequences (same cycle counts), RTS on the jump table, NOP elsewhere.
- *
- * @return pointer to the image, built on first call
+ * Reset, cartridge check, IRQ/NMI entry and exit use stock sequences (same cycle counts)
+ * RTS on the jump table, NOP elsewhere
  */
 const data_t * stub_kernal(void);
 #endif
 
 /**
- * @brief ROM images the MMU maps in.
+ * @brief ROM images the MMU maps in
  *
- * `basic` and `chargen` may be null: the area then reads the RAM underneath.
- * `kernal` is never null; `real_kernal` says whether it is a stock image or
- * the stub.
+ * basic and chargen may be null (area reads the RAM underneath)
+ * kernal is never null, real_kernal tells stock image or stub
  */
 struct Roms {
 #if US_EMBED_ROMS
@@ -83,22 +77,21 @@ struct Roms {
   bool real_kernal       = false;
 #endif
 
-  /** @brief True when BASIC and a real KERNAL are both present. */
+  /** @brief True when BASIC and a real KERNAL are present */
   bool complete(void) const { return real_kernal && basic != nullptr; }
 };
 
 #if !EMBEDDED || !US_EMBED_ROMS
 /**
- * @brief Owned copies of ROM images supplied at runtime.
+ * @brief Copies of ROM images supplied at runtime
  *
- * Holds the bytes so the caller's buffers can go away; roms() is the view
- * the MMU takes. A missing KERNAL means the stub.
+ * roms() is the view for the MMU, a missing KERNAL gives the stub
  */
 class RomStore
 {
   public:
     /**
-     * @brief Copy the given images, nullptr for an absent one.
+     * @brief Copy the given images, nullptr for an absent one
      *
      * @param basic    kRomSizeBasic bytes or nullptr
      * @param kernal   kRomSizeKernal bytes or nullptr (stub)
@@ -114,7 +107,7 @@ class RomStore
       for (size_t i = 0; has_chargen_ && i < kRomSizeChargen; i++) chargen_[i] = chargen[i];
     }
 
-    /** @brief The MMU view of the stored images. */
+    /** @brief MMU view of the stored images */
     Roms roms(void) const
     {
       Roms r;

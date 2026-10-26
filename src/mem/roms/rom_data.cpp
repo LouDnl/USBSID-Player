@@ -1,6 +1,6 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * rom_data.cpp
  * GENERATED from the images in roms by temp/tools/bin2array.py. Do not edit by hand.
@@ -11,7 +11,7 @@
  *   kernal.901227-03.bin         39065497630802346bce17963f13c092
  *   characters.901225-01.bin     12a4202f5331d45af846af6c58fba946
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD

@@ -1,35 +1,22 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback, for embedding on RP2350 (Pico2), and in a browser.
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
- * src/fm/opl_chip.h
- * The FM/OPL half of a SID+FM tune, for a player with no board.
+ * opl_chip.h
+ * FM/OPL half of a SID+FM tune for playing without a board
  *
- * A few tunes drive a YM3526 or YM3812 alongside the SID, through the SFX Sound
- * Expander and FM-YAM cartridges, by writing `$df40` to select a register and
- * `$df50` to write it. USBSID-Pico forwards those to a real chip when a board
- * has one; a player synthesising its own audio has to voice them itself, and
- * reSIDfp has no FM at all.
+ * Tunes drive a YM3526 or YM3812 alongside the SID (SFX Sound Expander, FM-YAM)
+ * by writing $df40 to select a register and $df50 to write it.
+ * USBSID-Pico forwards those to a real chip when the board has one.
  *
- * This wraps Nuked-OPL3-fast (lib/nukedopl), a bit-exact perf fork of
- * Nuke.YKT's Nuked OPL3, which emulates a YMF262. That is an OPL3, and the two
- * chips above are the OPL1 and OPL2 it is register compatible with: an OPL3
- * left in its default mode *is* an OPL2, which is what every AdLib emulator
- * relies on.
+ * Wraps Nuked-OPL3-fast (lib/nukedopl), a perf fork of Nuked OPL3 (YMF262).
+ * An OPL3 in default mode is register compatible with OPL1 and OPL2.
+ * Renders at the SID synthesis rate and is summed in ResidFpSidBackend::advance().
  *
- * It renders at the same rate as the SID synthesis and is summed with it in
- * ResidFpSidBackend::advance(), so everything that takes samples from that
- * backend gets FM without knowing this file exists: --output=audio,
- * --output=wav and the browser alike.
+ * A CLI build with FM_YMFM=1 (./build.sh cli-ymfm) uses ymfm YM3812 (lib/ymfm) instead
+ * Not built for the embedded target (FM writes go to the board there)
  *
- * A command line build configured with FM_YMFM=1 (`./build.sh cli-ymfm`)
- * swaps the engine for ymfm's YM3812 (lib/ymfm), resampled to the output rate
- * here. Both engines sit behind this same class, nothing above it changes.
- *
- * Not built for the embedded target. The RP2350 has no reSIDfp and no software
- * audio: there, an FM write goes to a chip on the board.
- *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -66,19 +53,13 @@ extern "C" {
 
 namespace usbsid {
 
-/** @brief The two bus addresses the SID backend hands FM writes over as. */
+/** @brief The two bus addresses the SID backend passes FM writes on as */
 enum : uint8_t {
-  kFmAddressReg = 0x80,   /**< $df40: choose an OPL register */
-  kFmDataReg    = 0x90,   /**< $df50: write the chosen register */
+  kFmAddressReg = 0x80,   /**< $df40: select an OPL register */
+  kFmDataReg    = 0x90,   /**< $df50: write the selected register */
 };
 
-/**
- * @brief One OPL, fed from a tune's `$df40`/`$df50` writes.
- *
- * Built only when a tune actually writes one: most do not, and an OPL nobody
- * asked for is a few hundred kilobytes of tables and a per sample cost for
- * silence.
- */
+/** @brief One OPL fed from a tune's $df40/$df50 writes, built when a tune writes one */
 class OplChip
 {
   public:
@@ -88,79 +69,62 @@ class OplChip
     OplChip & operator=(const OplChip &) = delete;
 
     /**
-     * @brief Build the chip for an output rate.
+     * @brief Build the chip for an output rate (Nuked resamples from 49716 Hz)
      *
-     * Nuked runs at 49716 Hz internally and resamples to whatever it is given,
-     * so this is the rate samples come out at and no second resampler is
-     * needed.
-     *
-     * @param sample_rate the rate the SID synthesis is configured for
+     * @param sample_rate Rate the SID synthesis is configured for
      */
     void configure(unsigned sample_rate);
 
     /**
-     * @brief Change the output rate without resetting the chip.
+     * @brief Change the output rate without resetting the chip
      *
-     * For playing faster or slower: registers, voices and pending writes are
-     * kept, only the resampling ratio changes. Before configure(), only
-     * remembered for it.
+     * Registers, voices and pending writes are kept (before configure() the rate is remembered)
      *
-     * @param sample_rate the new output rate, ignored when 0
+     * @param sample_rate New output rate, ignored when 0
      */
     void set_rate(unsigned sample_rate);
 
-    /** @brief Is there a chip to write to? */
+    /** @brief True if there is a chip to write to */
     bool ready(void) const { return ready_; }
 
     /**
-     * @brief One write exactly as the tune made it.
+     * @brief One write as the tune made it
      *
-     * `$df40` latches the register and `$df50` writes it, which is how the
-     * cartridge is addressed and how the write pair arrives from the emulation.
-     * Anything else is ignored.
+     * $df40 latches the register, $df50 writes it, anything else is ignored.
+     * Buffered, a real chip takes a couple of samples to apply a write
      *
-     * Buffered rather than immediate, which is Nuked's model of a real chip:
-     * a write takes a couple of samples to land, and applying it instantly puts
-     * it very slightly early.
-     *
-     * @param reg  kFmAddressReg or kFmDataReg
-     * @param value
+     * @param reg kFmAddressReg or kFmDataReg
+     * @param value Value to write
      */
     void bus_write(uint8_t reg, uint8_t value);
 
     /**
-     * @brief Add `count` mono samples of OPL onto what is already in `out`.
+     * @brief Add count mono OPL samples onto the SID samples in out
      *
-     * In place, into the buffer the SID mix has just filled - both chips are
-     * summed on a machine that has both, with no second buffer to keep in
-     * step. Scaled by gain() before summing (0.5 by default: the OPL is the
-     * louder of the two in practice), which is deterministic attenuation
-     * rather than a level-dependent limiter, same reasoning as the multi-SID
-     * mix dividing by chip count.
+     * Scaled by gain() (0.5 default) before summing
      *
-     * @param out    where the SID samples already are
-     * @param count  how many to add
+     * @param out Buffer holding the SID samples
+     * @param count Number of samples to add
      */
     void mix_into(int16_t * out, size_t count);
 
     /**
-     * @brief How much the OPL is turned down before it is summed.
+     * @brief Set the multiplier the OPL is scaled by before summing
      *
-     * A plain multiplier, not a level-dependent limiter: 1.0 is unity, 0.5
-     * (the default) halves it, 0.0 silences it. Negative is clamped to 0.
+     * 1.0 is unity, 0.5 (default) halves, 0.0 silences, negative is clamped to 0
      *
-     * @param gain the new multiplier
+     * @param gain New multiplier
      */
     void set_gain(float gain) { gain_ = (gain < 0.0f) ? 0.0f : gain; }
-    /** @brief The multiplier mix_into() scales the OPL signal by. */
+    /** @brief The multiplier mix_into() scales the OPL signal by */
     float gain(void) const { return gain_; }
 
-    /** @brief Writes the chip has taken. */
+    /** @brief Writes the chip has taken */
     uint64_t writes(void) const { return writes_; }
-    /** @brief Sums that had to be clamped. Should be rare, see mix_into(). */
+    /** @brief Sums that were clamped, should be rare */
     uint64_t clipped(void) const { return clipped_; }
 
-    /** @brief Silence it between tunes, without rebuilding it. */
+    /** @brief Silence the chip between tunes */
     void reset(void);
 
   private:
@@ -169,51 +133,36 @@ class OplChip
     ymfm::ym3812 chip_{intf_};
     double native_step_ = 1.0;   /**< native samples consumed per output sample */
     double native_pos_ = 0.0;    /**< position between prev_ and next_, 0..1 */
-    int32_t prev_ = 0;           /**< native sample the position is after */
-    int32_t next_ = 0;           /**< native sample the position is before */
+    int32_t prev_ = 0;           /**< native sample before the position */
+    int32_t next_ = 0;           /**< native sample after the position */
 #else
     opl3_chip chip_ = {};
 #endif
     bool ready_ = false;
     unsigned sample_rate_ = 0;
-    uint8_t address_ = 0;      /**< the register $df40 last selected */
+    uint8_t address_ = 0;      /**< register last selected by $df40 */
     uint64_t writes_ = 0;
     uint64_t clipped_ = 0;
 
-    /**
-     * @brief FM-YAM's "digi" mode: raw 8-bit PCM through the F-Number ports.
-     *
-     * Real, documented FM-YAM/SFX-Sound-Expander-compatible cartridge
-     * behavior (not part of the OPL2 spec, and not something Nuked knows
-     * about): Mr.Mouse's Digi Organizer arms it by writing $04 to OPL
-     * register 0x01, then streams 8-bit PCM through what is normally the
-     * F-Number-low port ($a0, or $a1 for a second channel) instead of ever
-     * touching pitch. Confirmed against a real tune built with it and
-     * against SIDKick-pico's own fmopl.c, which special-cases the identical
-     * register-0x01-equals-4 trigger for the same reason. Left unhandled,
-     * every PCM byte lands on Nuked as a literal frequency update instead,
-     * producing a rapidly warbling, aliased high-pitched tone rather than
-     * the sample that was meant to play. */
+    /* FM-YAM digi mode, raw 8-bit PCM through the F-Number ports.
+     * Mr.Mouse's Digi Organizer arms it by writing $04 to OPL register 0x01 then streams
+     * PCM through F-Number low ($a0, or $a1 for a second channel). SIDKick-pico fmopl.c
+     * does the same. Otherwise every PCM byte becomes a frequency update */
     bool digi_armed_ = false;
-    /** Held between writes (sample-and-hold, same as the real DAC between
-     * register writes); index 0 is $a0, index 1 is $a1. Already centered and
-     * scaled - see bus_write(). */
+    /* Sample and hold value between register writes, index 0 is $a0 and 1 is $a1, already centered and scaled */
     int16_t digi_value_[2] = { 0, 0 };
-    /** See set_gain(). Not reset by configure()/reset(): a host sets this
-     * once and it should survive a tune change same as the SID mix's own
-     * gain does. */
+    /* See set_gain(), survives configure() and reset() */
     float gain_ = 0.5f;
-    /** Reset the engine for sample_rate_. */
+    /* Reset the engine for sample_rate_ */
     void chip_reset_(void);
-    /** Write one register on the engine. */
+    /* Write one register on the engine */
     void chip_write_(uint8_t reg, uint8_t value);
 #if defined(US_FM_YMFM) && US_FM_YMFM
-    /** Render one output-rate mono sample, resampled from the native rate. */
+    /* Render one mono sample at the output rate */
     int32_t chip_sample_(void);
 #endif
 
-    /** Nuked renders stereo pairs; this is where they land before the mix.
-     * Unused by the ymfm engine, which renders mono. */
+    /* Nuked renders stereo pairs, they land in this buffer before the mix (unused by ymfm) */
     std::vector<int16_t> scratch_;
 };
 

@@ -1,22 +1,18 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * test_web.cpp
- * The browser backend, tested without a browser.
+ * Browser backend, tested without a browser
  *
- * The web build is the same emulation as every other build with one thing
- * swapped: register writes go into a ring in the WASM heap instead of down a
- * USB cable, and a page drains it. The ring is plain C++, so all of it can be
- * checked here, natively, at the speed of the rest of the suite: the entry
- * layout the page reads, what happens when the page stops draining, and, the
- * one that matters, that a tune drained frame by frame comes out as the same
- * stream of registers and gaps a traced run produces.
+ * Web build: register writes go into a ring in the WASM heap and a page
+ * drains it ~ the ring is plain C++, checked natively: entry layout, a page
+ * that stops draining, and a tune drained frame by frame giving the same
+ * registers and gaps as a traced run
  *
- * What cannot be checked here is the JavaScript and the WASM link, which need
- * emscripten and node. That is temp/tools/web_smoke.mjs.
+ * JavaScript and the WASM link need emscripten and node, see temp/tools/web_smoke.mjs
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -72,24 +68,19 @@ bool read_file(const char * path, std::vector<data_t> & out)
   return got == out.size();
 }
 
-/* ---- what the page sees ------------------------------------------------- *
- *
- * The drain loop, written the way usplayer-web.js writes it: take everything
- * between tail and head, then put the new tail back. Reading the entries out
- * of the byte array rather than through a helper is deliberate, because the
- * byte layout is the contract with the JavaScript.
- */
+/* ---- what the page sees ------------------------------------------------- */
+/* Drain loop as usplayer-web.js writes it: take everything between tail and head,
+ * then put the new tail back.
+ * Entries are read out of the byte array directly, the byte layout is the contract
+ * with the JavaScript */
 
 struct DrainedWrite { data_t reg; data_t value; uint16_t cycles; };
 
 /**
- * @brief FNV-1a over a drained stream.
+ * @brief FNV-1a over a drained stream
  *
- * The same hash the node smoke test computes over the same tune, so the
- * WebAssembly build can be checked against this one with a single number. If
- * they differ, the emulation compiled to wasm is not the emulation that runs
- * here, which is the one thing about the web build that cannot be checked
- * natively.
+ * Same hash the node smoke test computes over the same tune ~ a differing number
+ * means the emulation compiled to wasm differs from the one run in this test
  */
 uint32_t stream_hash(const std::vector<DrainedWrite> & writes)
 {
@@ -119,7 +110,7 @@ uint32_t drain(WebSidBackend & backend, std::vector<DrainedWrite> & out)
   return head - tail;
 }
 
-/* ---- the ring on its own ------------------------------------------------ */
+/* ---- the ring alone ----------------------------------------------------- */
 
 int test_ring_shape(void)
 {
@@ -128,10 +119,8 @@ int test_ring_shape(void)
   US_CHECK_EQ_U(backend.head(), 0u, "a fresh ring is empty");
   US_CHECK_EQ_U(backend.pending(), 0u, "and nothing is pending");
 
-  /* The gap sent is one short of the gap measured: performing the access
-   * costs the board a cycle of its own. Zero and one both send zero, because
-   * this is unsigned and wrapping would ask for a sixty five millisecond
-   * pause in the middle of a tune. */
+  /* The gap sent is one short of the gap measured, the access costs the board a
+     cycle, zero and one both send zero, unsigned wrapping would ask for a 65 ms pause mid tune */
   backend.write(0x18, 0x0f, 100);
   backend.write(0x01, 0x22, 1);
   backend.write(0x00, 0x33, 0);
@@ -152,26 +141,24 @@ int test_ring_shape(void)
   US_CHECK_EQ_U(got[3].reg, 0x24u, "the second chip keeps its register");
   US_CHECK_EQ_U(got[3].cycles, 0xffffu, "the widest gap survives");
 
-  /* A frame boundary is a flush, and that is all it is: it moves no writes. */
+  /* A frame boundary is a flush, it moves no writes */
   const uint32_t head_before = backend.head();
   backend.flush();
   US_CHECK_EQ_U(backend.flushes(), 1u, "the flush was counted");
   US_CHECK_EQ_U(backend.head(), head_before, "and queued nothing");
 
-  /* Silencing drops what is queued, so the reset the page sends is not stuck
-   * behind a burst from a tune that has already stopped. */
+  /* Silencing drops what is queued ~ the reset the page sends is not stuck behind a burst of a stopped tune */
   backend.write(0x04, 0x21, 10);
   backend.reset_hardware();
   US_CHECK_EQ_U(backend.pending(), 0u, "silencing dropped the backlog");
   US_CHECK_EQ_U(backend.resets(), 1u, "and asked the page to reset");
 
-  /* Gaps too wide to carry with a write are counted and dropped, the same as
-   * the desktop backend does: the page is what keeps real time. */
+  /* Gaps too wide to carry with a write are counted and dropped like the desktop backend does, the page keeps real time */
   backend.wait(50000);
   US_CHECK_EQ_U(backend.cycles_waited(), 50000u, "the wait was counted");
   US_CHECK_EQ_U(backend.pending(), 0u, "and queued nothing");
 
-  /* Reads cannot be answered: the ring only goes one way. */
+  /* Reads cannot be answered, the ring only goes one way */
   US_CHECK_EQ_U(backend.read(0x1b, 10), 0xffu, "a read answers open bus");
   US_CHECK_EQ_U(backend.reads(), 1u, "and is counted");
 
@@ -191,9 +178,8 @@ int test_ring_overflow(void)
   US_CHECK_EQ_U(backend.drops(), 100u, "and counted every write it lost");
   US_CHECK_EQ_U(backend.writes(), cap + 100, "all of them were seen");
 
-  /* What survived is the *oldest* run, unbroken. Dropping the newest is what
-   * keeps the stream in order: overwriting the oldest would leave the page
-   * draining entries from two different parts of the tune. */
+  /* What survived is the oldest run, unbroken ~ dropping the newest keeps the stream in order,
+     overwriting the oldest would leave the page draining entries from two parts of the tune */
   std::vector<DrainedWrite> got;
   drain(backend, got);
   US_CHECK_EQ_U(got.size(), cap, "the page took the whole ring");
@@ -243,14 +229,12 @@ int test_ring_wraps(void)
 /* ---- a real tune, drained frame by frame -------------------------------- */
 
 /**
- * @brief The web path against the reference path, event for event.
+ * @brief The web path against the reference path, event for event
  *
- * Two identically built machines play the same tune, one recording into a
- * trace and one filling the ring, which the test drains once a frame the way
- * the page does. Anything the ring loses, reorders or mistimes shows up as a
- * mismatch. This is the test that would catch the ring being drained wrongly,
- * an entry being packed in the wrong byte order, or the access cycle being
- * subtracted twice.
+ * Two identically built machines play the same tune, one recording into a trace
+ * and one filling the ring, drained once a frame like the page does.
+ * Catches a wrongly drained ring, a wrong byte order in an entry or the access
+ * cycle subtracted twice
  */
 int test_tune_through_the_ring(void)
 {
@@ -311,8 +295,8 @@ int test_tune_through_the_ring(void)
   for (size_t i = 0; i < trace.count() && n < got.size(); i++) {
     const TraceSidBackend::Event & e = trace.at(i);
     if (e.kind != 'w') continue;
-    /* Straight through: the access cycle came off upstream, in
-     * cycles_since_last_event(), so the ring carries what the trace saw */
+    /* Straight through, the access cycle came off upstream in cycles_since_last_event(),
+       the ring carries what the trace saw */
     const uint16_t want = e.delta;
     if (got[n].reg != e.reg || got[n].value != e.value ||
         got[n].cycles != want) {
@@ -379,12 +363,12 @@ int test_fmopl_park(void)
 /* ---- what the page asks the C API for ------------------------------------ */
 
 /**
- * @brief The queries the wall clock pump is paced by.
+ * @brief The queries the wall clock pump is paced by
  *
- * The page steps whole frames against real time, so it needs the tune's frame
- * rate, and it sets the device's SID clock from the tune's region. Both are
- * wrong in a way that is easy to miss: PAL is 50.125 frames a second, not 50,
- * and a page that rounds it drifts a whole frame every eight seconds.
+ * The page steps whole frames against real time and needs the tune frame rate
+ * and region (for the device SID clock).
+ * PAL is 50.125 frames a second, a page that rounds to 50 drifts a whole frame
+ * every eight seconds
  */
 int test_api_queries(void)
 {
@@ -414,8 +398,8 @@ int test_api_queries(void)
     US_CHECK(hz > 59.7 && hz < 60.0, "NTSC is 59.83 frames a second, not 60");
   }
 
-  /* Rubbish does not leave a stale tune looking loaded, which is what the
-   * page's "not a SID, try it as a program" fallback depends on. */
+  /* Rubbish does not leave a stale tune looking loaded, the page fallback
+     "not a SID, try it as a program" depends on it */
   std::vector<data_t> junk(400, 0x5a);
   load_sidtune(junk.data(), static_cast<int>(junk.size()), 0);
   US_CHECK(usplayer_loaded() == false, "a file that is not a SID is refused");

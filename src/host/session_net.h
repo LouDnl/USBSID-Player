@@ -1,12 +1,12 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
- * host/session_net.h
- * Session output to a Network SID Device server (a USBSID-Pico with
- * ENABLE_NET=1, or any NSD v4/v5 server). Paced by the server's backpressure.
+ * session_net.h
+ * Session output to a Network SID Device server (USBSID-Pico with
+ * ENABLE_NET=1 or any NSD v4/v5 server), paced by server backpressure
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -37,14 +37,14 @@
 
 namespace usbsid {
 
-/** @brief A Network SID Device server over TCP. */
+/** @brief A Network SID Device server over TCP */
 class NetSessionSink final : public SessionSink
 {
   public:
     /**
      * @param host  server name or address
      * @param port  TCP port, 6581 by default
-     * @param sids  SIDs to announce, 0 for the tune's own count
+     * @param sids  SIDs to announce, 0 for the tune count
      */
     NetSessionSink(std::string host, uint16_t port = 6581, uint8_t sids = 0);
     ~NetSessionSink(void) override;

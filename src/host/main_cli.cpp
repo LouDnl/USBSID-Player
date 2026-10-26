@@ -1,11 +1,11 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * main_cli.cpp
  * The desktop front end.
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -54,7 +54,7 @@
 #include "wav_write.h"
 #include "songlengths.h"
 
-/* Set by CMakeLists.txt from .version; a compile outside CMake still builds */
+/* Set by CMakeLists.txt from .version */
 #ifndef US_PLAYER_VERSION
 #define US_PLAYER_VERSION "unknown"
 #endif
@@ -67,30 +67,20 @@ namespace {
 volatile sig_atomic_t g_stop = 0;
 void on_signal(int)
 {
-  /* Put the terminal back before anything else. A handler cannot run a
-   * destructor, so RawConsole's cannot help here, and a player killed with
-   * ctrl-c must not leave a shell with no echo. */
+  /* Restore the terminal first, destructors do not run in a handler */
   console_restore();
   g_stop = 1;
 }
 
 /**
- * @brief Read a `--mute`/`--solo` list into a bit per voice per chip.
+ * @brief Read a --mute/--solo list into a bit per voice per chip, return true if all parsed
  *
- * `1:3,2` is voice three of the first chip and all of the second. A chip on its
- * own means its three voices, which is the common case and saves writing them
- * out. Chips and voices count from one, the way the sockets and the datasheet
- * do, because the alternative is a flag that means something different from
- * every other place these are named. Chip numbers go up to kMaxSids (15),
- * same ceiling as --select-sids: Mos6581_8580::set_voice_mute() already
- * accepts any chip up to kMaxSids regardless of output, so capping the parser
- * at 4 here would silence --output=audio/nsd or multi-board runs incorrectly
- * for chip 5 and up.
+ * 1:3,2 is voice three of the first chip and all of the second.
+ * A chip on its own means its three voices.
+ * Chips and voices count from one, chips up to kMaxSids (15).
  *
  * @param spec  the argument as given
  * @param mask  out, kMaxSids bytes, bits 0 to 2 per chip
- * @returns true if the whole string parsed, false on the first thing that did
- *          not, with mask left as far as it got
  */
 bool parse_voice_spec(const char * spec, uint8_t mask[kMaxSids])
 {
@@ -118,7 +108,7 @@ bool parse_voice_spec(const char * spec, uint8_t mask[kMaxSids])
   return true;
 }
 
-/** @brief Print what was silenced, so a WAV file's provenance is on screen. */
+/** @brief Print what was silenced */
 void print_voice_mask(const char * label, const uint8_t mask[kMaxSids])
 {
   printf("  %-9s: ", label);
@@ -134,27 +124,16 @@ void print_voice_mask(const char * label, const uint8_t mask[kMaxSids])
 }
 
 /**
- * @brief Read a `--select-sids` list into a slot indexed array of tune SID
- * numbers, 0 marking a slot nobody claimed.
+ * @brief Read a --select-sids list into a slot indexed array of tune SID numbers, return true if all parsed
  *
- * Comma separated entries, each `SID` or `SID:SLOT`, counting from 1 like
- * --mute/--solo. `3,4,5` packs into consecutive slots one, two, three - see
- * UsbSidBackend::set_sid_select(), which already treats a 0 entry as "empty,
- * skip it". `3:1,5:4` instead puts tune SID 3 in slot one and tune SID 5 in
- * slot four, leaving two and three empty. A bare entry claims the lowest
- * numbered slot not already claimed by an explicit one, regardless of where
- * in the spec that explicit entry appears - so `1,3:1` and `3:1,1` both put
- * tune SID 1 in slot two.
- *
- * `fm` in place of a SID number (`fm` or `fm:SLOT`, at most once) is the
- * tune's FM/OPL, stored as kSelectFmOpl; UsbSidBackend::set_sid_select()
- * only honours it on a slot that is its board's FM/OPL.
+ * Entries are SID or SID:SLOT, counting from 1.
+ * 3,4,5 fills slots one, two, three. 3:1,5:4 puts SID 3 in slot one and SID 5 in slot four.
+ * A bare entry takes the lowest slot not claimed by an explicit one.
+ * fm or fm:SLOT (at most once) is the tune's FM/OPL, stored as kSelectFmOpl.
  *
  * @param spec   the argument as given
  * @param out    out, kMaxSids entries, slot indexed, 0 for unused
  * @param count  out, one past the highest slot any entry claimed
- * @returns true if the whole string parsed, false on the first thing that did
- *          not, with out/count left as far as it got
  */
 bool parse_sid_select(const char * spec, uint8_t out[kMaxSids], uint8_t & count)
 {
@@ -206,8 +185,7 @@ bool parse_sid_select(const char * spec, uint8_t out[kMaxSids], uint8_t & count)
   }
   if (n_tok == 0) return false;
 
-  /* Explicit slots are placed first, so a bare entry can never displace one
-   * named later in the spec than itself. */
+  /* Explicit slots first, bare entries fill the rest */
   for (uint8_t i = 0; i < n_tok; i++) {
     if (slot_tok[i] < 0) continue;
     out[slot_tok[i]] = sid_tok[i];
@@ -228,19 +206,13 @@ bool parse_sid_select(const char * spec, uint8_t out[kMaxSids], uint8_t & count)
 }
 
 /**
- * @brief Read a `--boards` list into serial numbers, in the order given.
+ * @brief Read a --boards list into serial numbers, return true if all parsed
  *
- * Comma separated. A board is named by its own serial number, not a
- * position, since which board USB happens to enumerate first is not
- * something worth relying on - see --list-boards for what a board's serial
- * actually is. Passed straight through to USBSID_Manager::OpenAll(),
- * which opens exactly these boards, in this order, and skips one that
- * turns out not to be attached.
+ * Comma separated, a board is named by its serial number (see --list-boards).
+ * Passed to USBSID_Manager::OpenAll(), a board that is not attached is skipped.
  *
  * @param spec  the argument as given
- * @param out   out, one entry per comma separated serial
- * @returns true if the whole string parsed, false on a stray empty entry
- *          (e.g. a leading, trailing, or doubled comma)
+ * @param out   out, one entry per serial
  */
 bool parse_board_order(const char * spec, std::vector<std::string> & out)
 {
@@ -322,7 +294,7 @@ void usage(const char * argv0)
     "  -T,  --trace FILE write every SID register event to FILE, laid out like\n"
     "                    -srw (chip, C64 address, register:value, [C] cycle\n"
     "                    delta) plus the running cycle total and the play\n"
-    "                    time MM:SS.mmm. Records what is played, so it works\n"
+    "                    time MM:SS.mmm. Records what is played, also works\n"
     "                    with a board and with --wav; add -n for a silent\n"
     "                    run that only records\n"
     "  -m,  --mute SPEC  silence voices (gate/sustain forced off; everything\n"
@@ -331,10 +303,10 @@ void usage(const char * argv0)
     "                    all three, chips and voices counting from 1, for\n"
     "                    example 1:3 or 2 or 1:1,1:2\n"
     "  -S,  --solo SPEC  the other way round, and harder: only SPEC's writes\n"
-    "                    reach the backend at all, everything else is dropped\n"
-    "                    before it gets there (and before -srw sees it), not\n"
-    "                    just silenced. --solo 1:2 --wav v2.wav records voice\n"
-    "                    two on its own with no other chip/voice traffic\n"
+    "                    reach the backend, everything else is dropped before\n"
+    "                    it gets there (and before -srw sees it), not just\n"
+    "                    silenced. --solo 1:2 --wav v2.wav records voice two\n"
+    "                    on its own with no other chip/voice traffic\n"
     "  -ms, --mute-solo SPEC\n"
     "                    the old --solo: silence everything except SPEC\n"
     "                    the soft way, same as --mute. Kept under its own name\n"
@@ -393,10 +365,7 @@ void usage(const char * argv0)
 
 bool read_file(const char * path, std::vector<data_t> & out)
 {
-  /* fopen(path, "rb") happily opens a directory on Linux, and ftell() on that
-   * stream returns whatever bogus/huge value the filesystem reports as its
-   * "size" rather than failing - resize() on that then throws std::bad_alloc
-   * instead of the ordinary "cannot read" error every other bad path gets. */
+  /* fopen opens a directory on Linux, reject it before ftell gives a bogus size */
   struct stat st;
   if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) return false;
 
@@ -413,10 +382,9 @@ bool read_file(const char * path, std::vector<data_t> & out)
 }
 
 /**
- * @brief Frames as mm:ss.t, for the status line.
+ * @brief Frames as mm:ss.t for the status line
  *
- * Returned in a static buffer, which is fine for one caller a frame and would
- * not be if there were two.
+ * Returns a static buffer, one caller per frame
  */
 const char * play_time(uint64_t frames, double rate)
 {
@@ -443,13 +411,8 @@ void print_tune(const SidFile & t, bool stereo)
          t.video_known ? vic_timing(t.video_model).name : "unspecified");
   printf("  sids     : %u", t.sid_count);
   for (uint8_t i = 0; i < t.sid_count; i++) printf(" $%04x", t.sid_addr[i]);
-  /* --output=usbsid/webusb plays a real board, which only ever has 4
-   * physical sockets (UsbSidBackend, EmbeddedSidBackend, WebSidBackend all
-   * stay a hard 4 chip placeholder by design - see mos6581_8580.h's own
-   * kMaxSids comment); --output=audio/nsd synthesises or forwards up
-   * to kMaxSids (15), so this caveat does not apply to them. Which one this
-   * run ends up using is not decided yet at this point in main(), so the
-   * warning names both rather than guessing. */
+  /* Output is not decided yet, warn for both
+   * Boards (usbsid/webusb) have 4 sockets, audio/nsd go up to kMaxSids (15) */
   if (t.sid_count > 4) {
     printf(" (a real board plays the first 4; --output=audio or "
            "--output=nsd plays all %u)", t.sid_count);
@@ -472,19 +435,11 @@ void print_tune(const SidFile & t, bool stereo)
         case SidPanMode::Spread:  mode = "spread";  break;
         default: break;
       }
-      /* Whether this is actually honoured, not just parsed, depends on
-       * --stereo (ResidFpSidBackend::set_pan(), main()) and on ending up at
-       * --output=audio/wav: a real board is untouched by --stereo and still
-       * plays one channel per chip regardless. Which output this run lands
-       * on is not decided yet at this point in main(), same reasoning as the
-       * sid_count > 4 warning above, so this only reports whether --stereo
-       * was asked for, not whether a board ignored it. */
+      /* Only honoured with --stereo on audio/wav, a board ignores it */
       printf("  panning  : %s/%s, %s:", layout, mode,
              stereo ? "honoured on --output=audio/wav (--stereo)"
                     : "hint only, this player mixes to one channel");
-      /* t.sid_pan[] is sized kMaxSids (sidfile.h), the same ceiling
-       * t.sid_count is already held to by the parser, so every chip shown
-       * above has a panning entry here too - no separate cap needed. */
+      /* t.sid_pan[] is kMaxSids sized, same as t.sid_count */
       for (uint8_t i = 0; i < t.sid_count; i++) {
         printf(" %c", t.sid_pan[i] == SidPan::Left ? 'L' : t.sid_pan[i] == SidPan::Right ? 'R' : 'C');
       }
@@ -497,9 +452,7 @@ void print_tune(const SidFile & t, bool stereo)
     }
   }
 
-  /* The chip the tune was written for. Worth showing because it decides how the
-   * filter sounds, and a tune that says nothing is a tune whose author did not
-   * mind. */
+  /* Chip model the tune was written for, decides the filter sound */
   const char * model = "unspecified";
   switch (t.sid_model) {
     case SidModel::Mos6581: model = "6581"; break;
@@ -509,9 +462,7 @@ void print_tune(const SidFile & t, bool stereo)
   }
   printf("  model    : %s\n", model);
 
-  /* Raster or CIA, per song. This is the single most useful line when playback
-   * is wrong: a CIA driven song that is being called once a frame plays at the
-   * wrong speed, and the speed word is where that is declared. */
+  /* Raster or CIA per song, a CIA song called once a frame plays at the wrong speed */
   printf("  speed    : ");
   if (t.songs == 1) {
     printf("%s\n", t.song_uses_cia(1) ? "CIA timer" : "raster");
@@ -531,13 +482,11 @@ void print_tune(const SidFile & t, bool stereo)
     }
   }
 
-  /* Where the file says the driver may go. TODO 1b and TODO 1 were both about
-   * this landing somewhere it should not, so it is worth being able to see it
-   * without a debugger. */
+  /* Where the file says the driver may go */
   if (t.start_page == 0) {
     printf("  freepages: none declared, the player picks\n");
   } else if (t.start_page == 0xff) {
-    printf("  freepages: none at all, the file says so\n");
+    printf("  freepages: none at all, the file declares it\n");
   } else {
     printf("  freepages: $%02x00-$%02x%s, %u page%s\n", t.start_page,
            static_cast<uint8_t>(t.start_page + t.max_pages - 1), "ff",
@@ -553,32 +502,20 @@ void print_tune(const SidFile & t, bool stereo)
 }
 
 /**
- * @brief Where the sound comes out.
+ * @brief Where the sound comes out
  *
- * `USBSID` is the default and is always tried first. With no board it becomes
- * `Audio` rather than playing silently: a machine with no hardware still wants
- * to hear the tune, and silence that needs explaining is worse than a fallback
- * that says what it did. `NetDevice` gets the same treatment: a server that
- * cannot be reached falls back to `Audio` rather than playing silently.
+ * USBSID is tried first, falls back to Audio with no board.
+ * NetDevice falls back to Audio when the server cannot be reached.
  */
 enum class OutputMode { USBSID, Audio, Wav, NetDevice, ASID };
 
 } /* namespace */
 
-/* Default song length when the database has no entry: 5 minutes (matches
- * the browser player). Without a cap, an unattended playlist run stalls
- * forever on the first unknown tune. 0 (--no-songlengths) means play until
- * stopped. */
+/* Default song length when the database has no entry: 5 minutes, 0 (--no-songlengths) plays until stopped */
 constexpr uint32_t kDefaultSongMs = 5u * 60u * 1000u;
 
-/*
- * The external Songlengths.md5 database is checked first: it is the curated,
- * widely used source and covers tunes that have no embedded table at all. A
- * v5 tune's own embedded lengths (bit 10 of flags, see sidfile.h) are the
- * fallback, used when the database has nothing for this exact file. Either
- * way, no length known at all still means "play for five minutes" rather
- * than "play until stopped", per kDefaultSongMs above.
- */
+/* Songlengths.md5 database first, then the v5 embedded table (bit 10 of flags)
+ * Neither known: kDefaultSongMs */
 static uint32_t song_length_ms(const usbsid::SongLengths & lengths, const SidFile & tune,
                                uint16_t song, bool use_songlengths)
 {
@@ -611,27 +548,19 @@ int main(int argc, char ** argv)
   bool use_songlengths = true;
   VideoModel forced_model = VideoModel::Count; /* means "not forced" */
 
-  /* Where the sound comes out. `usbsid` is the default and always tried first;
-   * with no board it falls back to `audio` rather than playing silently, which
-   * is what a machine with no hardware wants. See --output in the usage. */
+  /* Output mode, usbsid is tried first and falls back to audio with no board */
   OutputMode output = OutputMode::USBSID;
   const char * wav_path = nullptr;
   unsigned soft_rate = 44100;
   SoftSidQuality soft_quality = SoftSidQuality::Good;
-  /* Opt in: every existing --output=audio/wav consumer assumed one channel,
-   * so this stays off unless asked for. See ResidFpSidBackend::configure()'s
-   * own comment on why it is a configure()-time choice and not a toggle. */
+  /* Opt in, off unless asked for */
   bool soft_stereo = false;
-  /* Percent, 0-300; 100/50 are the defaults ResidFpSidBackend/OplChip starts
-   * at, the cli player starts with 100/100 - see soft.set_sid_gain()/
-   * set_fm_gain() below. */
+  /* Percent 0-300, ResidFpSidBackend/OplChip start at 100/50, the cli at 100/100 */
   int soft_sid_volume = 100;
   int soft_fm_volume = 100;
 
 #if US_HAVE_NETDEVICE
-  /* --output=nsd: a Network SID Device server to send writes to
-   * instead of local hardware. Defaults match the protocol's own stated
-   * defaults (network_sid_device_v4.html), the same ones sid-device uses. */
+  /* --output=nsd server, defaults match network_sid_device_v4.html and sid-device */
   const char * net_host = "127.0.0.1";
   int net_port = 6581;
   int net_sids = 0; /* 0 means "use the tune's own SID count" */
@@ -675,8 +604,7 @@ int main(int argc, char ** argv)
     else if ((!strcmp(a, "-oh") || !strcmp(a, "--overhead")) && i + 1 < argc)
     { overhead = atoi(argv[++i]); overhead_given = true; }
     else if (!strcmp(a, "-o") || !strncmp(a, "--output", 8)) {
-      /* Both spellings, because both get typed: --output=wav and --output wav;
-       * -o only ever takes the space separated form. */
+      /* Both --output=wav and --output wav, -o takes the space form only */
       const char * v = nullptr;
       if (!strcmp(a, "-o")) { if (i + 1 < argc) v = argv[++i]; }
       else if (a[8] == '=') v = a + 9;
@@ -689,8 +617,7 @@ int main(int argc, char ** argv)
 #if US_HAVE_RTMIDI
         output = OutputMode::ASID;
 #else
-        /* Build without the RtMidi backend. See US_HAVE_RTMIDI in
-         * CMakeLists.txt. */
+        /* Build without RtMidi, see US_HAVE_RTMIDI */
         printf("--output=asid: not available in this build\n");
         return 2;
 #endif
@@ -699,8 +626,7 @@ int main(int argc, char ** argv)
 #if US_HAVE_NETDEVICE
         output = OutputMode::NetDevice;
 #else
-        /* Build without the network backend. See US_HAVE_NETDEVICE in
-         * CMakeLists.txt. */
+        /* Build without network backend, see US_HAVE_NETDEVICE */
         printf("--output=nsd: not available in this build\n");
         return 2;
 #endif
@@ -809,9 +735,7 @@ int main(int argc, char ** argv)
     return 1;
   }
 
-  /* What kind of file it is comes from the file, not from its name: a PSID
-   * says so in its first four bytes, and anything else that parses as a
-   * program is one. */
+  /* File type comes from the content, a PSID declares it in the first four bytes */
   SidFile info;
   PrgFile program;
   const bool is_sid = sidfile_parse(bytes.data(), bytes.size(), info);
@@ -844,9 +768,7 @@ int main(int argc, char ** argv)
   }
   if (info_only) return 0;
   if (is_sid && info.is_mus_player) {
-    /* print_tune() already said why; refuse rather than call MUS data as
-     * 6502 code, which is what init_addr defaulting to load_addr means for
-     * a file like this (SidFile::is_mus_player's own comment). */
+    /* Refuse MUS data, it is not 6502 code */
     return 1;
   }
 
@@ -858,8 +780,7 @@ int main(int argc, char ** argv)
     printf("  roms     : none, stub KERNAL\n");
   }
 
-  /* The trace backend records, the USBSID backend plays. Only one of them
-   * can be the machine's backend, so tracing implies no hardware. */
+  /* Only one can be the machine's backend, tracing implies no hardware */
   std::vector<TraceSidBackend::Event> trace_buffer;
   TraceSidBackend * trace = nullptr;
   UsbSidBackend usb;
@@ -870,29 +791,24 @@ int main(int argc, char ** argv)
   NetworkSidBackend net;
 #endif
 
-  /* Where the writes go while fast forwarding: nowhere. See the 'f' key. */
+  /* Writes go nowhere while fast forwarding, see the 'f' key */
   NullSidBackend ff_null;
-  /* Whatever the real backend turns out to be, so fast forward can put it back
-   * rather than guessing which of the three it was. */
+  /* The real backend, put back after fast forward */
   SidBackend * active_backend = nullptr;
 
-  /* The software SID and its two ways out. Declared here so they outlive the
-   * play loop; configured only if the output mode turns out to need them, since
-   * building four reSIDfp chips costs a resampler table each. */
+  /* Software SID, outlives the play loop, configured only when the output needs it */
   ResidFpSidBackend soft;
   AudioOut audio;
   WavWriter wav;
   std::vector<int16_t> soft_buf;
   bool soft_active = false;
-  /* Kept so the synthesis can be reconfigured once the tune's own video
-   * standard is known. See the reconfigure after the load. */
+  /* Kept to reconfigure for the tune's video standard after load */
   unsigned soft_out_rate = 0;
   uint8_t soft_chips = 0;
   SoftSidModel soft_model = SoftSidModel::Mos6581;
   uint32_t soft_clock = 0;
 
-  /* Built here, chained in below once its downstream backend is known, so
-   * `-T` can trace a run that is also actually audible on a device. */
+  /* Chained in below once the downstream backend is known */
   if (trace_path != nullptr) {
     trace_buffer.resize(4u * 1000u * 1000u);
     trace = new TraceSidBackend(trace_buffer.data(), trace_buffer.size());
@@ -928,8 +844,7 @@ int main(int argc, char ** argv)
       machine.set_sid_backend(usb);
       active_backend = &usb;
     } else {
-      /* The fallback, and it says so. Playing silently was the old behaviour and
-       * is indistinguishable from a broken tune. */
+      /* Fallback is announced, silence looks like a broken tune */
       printf("  device   : none found, synthesising instead (--output=audio)\n");
       output = OutputMode::Audio;
     }
@@ -948,8 +863,7 @@ int main(int argc, char ** argv)
       machine.set_sid_backend(asid);
       active_backend = &asid;
     } else {
-      /* The fallback, and it says so. Playing silently was the old behaviour and
-       * is indistinguishable from a broken tune. */
+      /* Fallback is announced, silence looks like a broken tune */
       printf("  device   : none found, synthesising instead (--output=audio)\n");
       output = OutputMode::Audio;
     }
@@ -959,19 +873,16 @@ int main(int argc, char ** argv)
 #if US_HAVE_NETDEVICE
   if (output == OutputMode::NetDevice) {
     if (net.connect(net_host, static_cast<uint16_t>(net_port))) {
-      /* A SID file says how many chips it wants; a program says nothing, so
-       * two are assumed, same reasoning and the same fallback the software
-       * backend below uses for its own chip count. --net-sids overrides
-       * both when the server's own idea of chip count needs to differ. */
+      /* A SID file wants a chip count, a program says nothing, assume two
+       * --net-sids overrides */
       const uint8_t chips = static_cast<uint8_t>(
         (net_sids > 0) ? net_sids : (is_sid ? info.sid_count : 2));
       net.set_sid_count(chips); /* clamped to kMaxSids (15) internally */
       printf("  device   : Network SID Device at %s:%d, protocol v%d, %u SID%s\n",
              net_host, net_port, net.protocol_version(), net.sid_count(),
              net.sid_count() == 1 ? "" : "s");
-      /* A software server (not USBSID-Pico) is its own clock and takes no
-       * bus access cost: no overhead unless --overhead asked for one, and
-       * idle frames are sent as time too (SidConfig::render_idle). */
+      /* A software server is its own clock, no bus overhead unless --overhead
+       * Idle frames are sent as time (SidConfig::render_idle) */
       if (net.is_software()) {
         if (!overhead_given) overhead = 0;
         machine.sid().config().render_idle = true;
@@ -979,8 +890,7 @@ int main(int argc, char ** argv)
       machine.set_sid_backend(net);
       active_backend = &net;
     } else {
-      /* Same reasoning as the usbsid fallback above: playing silently is
-       * indistinguishable from a broken tune. */
+      /* Fallback as above */
       printf("  device   : cannot reach %s:%d, synthesising instead (--output=audio)\n",
              net_host, net_port);
       output = OutputMode::Audio;
@@ -989,9 +899,7 @@ int main(int argc, char ** argv)
 #endif
 
   if (output == OutputMode::Audio || output == OutputMode::Wav) {
-    /* The device gets to decide the rate. Asking a device fixed at 48000 for
-     * 44100 gets a resampler for free whether or not that was wanted, so the
-     * synthesis is configured for what the device actually runs at. */
+    /* The device decides the rate, synthesis is configured for what it runs at */
     unsigned rate = soft_rate;
     if (output == OutputMode::Audio) {
       if (!audio.open(soft_rate, soft_stereo ? 2 : 1)) {
@@ -1002,19 +910,10 @@ int main(int argc, char ** argv)
     }
 
     const uint32_t clock_hz = machine.vic().timing().clock_hz;
-    /* The tune's own chip model and chip count, both of which sidfile.cpp has
-     * already worked out from the flags and the reserved word. Using its answers
-     * rather than re-decoding the header here means there is one place that can
-     * be wrong about it. The model is the difference between the two filters and
-     * is audible; Unknown and Any both fall to 6581, which is what a player
-     * without an opinion should do. */
+    /* Model and chip count from sidfile.cpp, Unknown and Any fall to 6581 */
     const SoftSidModel model = (is_sid && info.sid_model == SidModel::Mos8580)
                              ? SoftSidModel::Csg8580 : SoftSidModel::Mos6581;
-    /* A SID file says how many chips it wants and that is the answer. A program
-     * says nothing, so two are made: a real C64 has one, but a program that
-     * drives a second chip at $d420 is exactly the case where guessing one is
-     * unrecoverable, and the spare instance costs a few hundred kilobytes of
-     * host memory and is silent until something writes to it. */
+    /* A SID file gives the chip count, a program gets two (spare is silent until written to) */
     const uint8_t chips = static_cast<uint8_t>(is_sid ? info.sid_count : 2);
 
     if (!soft.configure(chips, static_cast<double>(clock_hz), rate,
@@ -1023,32 +922,21 @@ int main(int argc, char ** argv)
              rate, clock_hz);
       return 1;
     }
-    /* configure() clamps internally to kMaxSoftSids (15); a tune whose own
-     * header count somehow exceeds even that (kMaxSids itself is the file
-     * format's own ceiling, so this should not happen) still gets whatever
-     * actually got built via soft.chips(), not the raw request above. */
+    /* configure() clamps to kMaxSoftSids (15), soft.chips() has the built count */
     const uint8_t real_chips = soft.chips();
-    /* Neither of these is touched by configure() - see their own comments -
-     * so setting them once here, rather than after every configure() call
-     * (soft.chips()/soft.set_pan() need that, these don't), is enough for
-     * the whole run including the PAL/NTSC reconfigure below. */
+    /* Not touched by configure(), set once for the whole run */
     soft.set_sid_gain(static_cast<float>(
       (soft_sid_volume < 0) ? 0 : soft_sid_volume) / 100.0f);
     soft.set_fm_gain(static_cast<float>(
       (soft_fm_volume < 0) ? 0 : soft_fm_volume) / 100.0f);
-    /* The v5 file's own panning hint (sidfile.cpp's compute_panning(), run
-     * at parse time - see is_sid's own info.sid_pan[]), one call per chip
-     * actually built. No effect at all unless soft_stereo/--stereo, and a
-     * program (not is_sid) has no header to take one from, so it stays the
-     * implicit all-Center configure() already reset to. */
+    /* Panning hint from the v5 file, one call per chip built
+     * No effect without --stereo, a program has no header */
     if (soft_stereo && is_sid) {
       for (uint8_t c = 0; c < real_chips; c++) {
         soft.set_pan(static_cast<uint8_t>(c + 1), info.sid_pan[c]);
       }
     }
-    /* attach() is what sets access_overhead to 0, which a software SID needs and
-     * a board does not. Doing it here rather than asking the caller to remember
-     * is the point of it being on the backend. */
+    /* attach() sets access_overhead to 0, a software SID needs that */
     soft.attach(machine);
     active_backend = &soft;
     soft_active = true;
@@ -1057,7 +945,7 @@ int main(int argc, char ** argv)
     soft_model = model;
     soft_clock = clock_hz;
     soft_buf.resize(65536);
-    overhead = 0;   /* so the header below reports what is actually in force */
+    overhead = 0;   /* for the header below to report what is actually in force */
 
     if (output == OutputMode::Wav) {
       const char * out = (wav_path != nullptr) ? wav_path : "usbsid.wav";
@@ -1075,20 +963,12 @@ int main(int argc, char ** argv)
              real_chips, real_chips == 1 ? "" : "s",
              soft_quality == SoftSidQuality::Good ? "sinc" : "linear");
     }
-    /* Also stops the pacer, which is deliberate and not a side effect.
-     *
-     * With an audio device the **ring is the clock**: it drains at exactly the
-     * device rate, and pushing into a full ring is what holds the emulation
-     * back. Pacing against the wall clock as well would be two clocks
-     * disagreeing by a fraction of a percent, which is an underrun or a growing
-     * latency depending on which way it goes. A WAV has no clock at all and
-     * should render as fast as the machine can. */
+    /* Stops the pacer too
+     * Audio ring is the clock (drains at the device rate), a WAV renders as fast as it can */
     no_device = true;
   }
 
-  /* Chain the trace in front of whatever ended up playing. `attach()` above
-   * made the software SID the machine's backend, so this has to come after it;
-   * what attach() did to the access overhead stays done. */
+  /* Chain the trace in front of the playing backend, after attach() */
   if (trace != nullptr) {
     trace->set_next(active_backend);
     machine.set_sid_backend(*trace);
@@ -1108,17 +988,15 @@ int main(int argc, char ** argv)
   sid_config.sids_socket_one = usb.sids_socket_one();
   sid_config.sids_socket_two = usb.sids_socket_two();
   sid_config.fmopl_sid = usb.fmopl_sid();
-  /* Several boards without -f/-fa/--select-sids: the backend already picked
-   * the first FM/OPL in --boards order. -f/-fa move chips by slot and could
-   * put a SID on top of it: they turn that pick off. --select-sids always
-   * turns it off, on one board too: the FM/OPL is then parked (fmopl_sid -1)
-   * and only reaches a board through an `fm` entry, see below. */
+  /* Several boards without -f/-fa/--select-sids: backend picks the first FM/OPL in --boards order
+   * -f/-fa and --select-sids turn that off, FM/OPL is parked (fmopl_sid -1)
+   * and only reached through an fm entry */
   const bool multi_board = usb.is_open() && usb.num_boards() > 1;
   const bool force_remap = force_socket_two || force_address;
   if ((multi_board && force_remap) || select_sids_spec != nullptr) {
     sid_config.fmopl_sid = -1;
   }
-  /* ASID carries FM/OPL in its own 0x60 message: leave $df40/$df50 parked. */
+  /* ASID carries FM/OPL in message 0x60, leave $df40/$df50 parked */
   if (output == OutputMode::ASID) {
     sid_config.fmopl_sid = -1;
   }
@@ -1133,13 +1011,8 @@ int main(int argc, char ** argv)
     }
   }
 
-  /* --select-sids picks which of the tune's SIDs land on which board socket
-   * (or, with several --boards open, logical slot), in place of the default
-   * first-N-to-first-N mapping. Set on the backend itself rather than in
-   * SidConfig, because it is purely an output concern: the emulation still
-   * sees, mutes and traces every one of the tune's SIDs exactly as it always
-   * did, only what actually reaches the hardware changes. Harmless, and
-   * silently unused, on any other --output. */
+  /* --select-sids maps tune SIDs to board sockets (or logical slots with several --boards)
+   * Output only, emulation still sees every SID. Unused on other outputs */
   if (select_sids_spec != nullptr) {
     uint8_t sids[kMaxSids];
     uint8_t count = 0;
@@ -1190,17 +1063,9 @@ int main(int argc, char ** argv)
     }
   }
 
-  /* --solo, set before Player/init_tune() so even the very first power-on
-   * writes are dropped for anything not in SPEC - unlike --mute/--mute-solo
-   * below, set_voice_solo() pushes nothing to the backend itself (it only
-   * flips state io_write() consults), so there is no "set before load"
-   * hazard the way there would be for an active push like set_voice_mute's.
-   * Unlike --mute-solo it also needs no tune sid_count to clamp against:
-   * it isn't inverted, SPEC names exactly what to keep. Only the chip/voice
-   * combos named in SPEC ever reach the backend at all; everything else is
-   * dropped in Mos6581_8580::io_write() before the backend write and before
-   * -srw logs it, not merely silenced - so a soloed board sees only the
-   * soloed traffic and -srw reflects exactly that, from the first write. */
+  /* --solo, set before Player/init_tune(), the first power-on writes are dropped too
+   * Only chip/voice combos in SPEC reach the backend
+   * Dropped in Mos6581_8580::io_write() before the backend and before -srw logs it */
   if (solo_spec != nullptr) {
     uint8_t mask[kMaxSids] = { 0 };
     if (!parse_voice_spec(solo_spec, mask)) {
@@ -1225,10 +1090,7 @@ int main(int argc, char ** argv)
       printf("cannot load the tune\n");
       return 1;
     }
-    /* The header has been read, so the video standard is settled and the board
-     * can be put on the right clock before the tune's init writes go out.
-     * Setting it afterwards ran the whole init at whatever rate the previous
-     * tune left behind. */
+    /* Header read, set the board clock before the init writes go out */
     if (usb.is_open()) usb.set_clock_rate(machine.vic().timing().clock_hz);
 #if US_HAVE_RTMIDI
     if (output == OutputMode::ASID) {
@@ -1241,9 +1103,7 @@ int main(int argc, char ** argv)
       net.configure_tune(machine.vic().timing().clock_hz > 1000000, info.sid_model);
     }
 #endif
-    /* A BASIC RSID has been turned into a program by load_sid, because that is
-     * what it is: there is nothing to initialise, it is started by RUN. Ask the
-     * player which it decided on rather than assuming from the file's name. */
+    /* A BASIC RSID is a program after load_sid, started by RUN. Ask the player */
     if (player.is_prg()) {
       printf("  start    : RUN, this is an RSID holding a BASIC program\n");
       if (!player.init_prg()) {
@@ -1265,7 +1125,7 @@ int main(int argc, char ** argv)
       net.configure_tune(machine.vic().timing().clock_hz > 1000000, SidModel::Unknown);
     }
 #endif
-    /* This boots a machine and types RUN at the prompt, so it takes a moment */
+    /* Boots a machine and types RUN, takes a moment */
     if (!player.init_prg()) {
       printf("cannot start the program\n");
       return 1;
@@ -1274,16 +1134,9 @@ int main(int argc, char ** argv)
 
   const VicTiming & timing = machine.vic().timing();
 
-  /* The synthesis was configured before the file was read, because that is
-   * where the audio device has to be opened, and at that point the machine was
-   * still on whatever standard it powers on with. An NTSC tune moves it after
-   * the header is parsed, and reSIDfp derives its resampler from the clock, so
-   * leaving it configured for the old one renders the whole tune at the wrong
-   * rate: PAL against NTSC is 985248 against 1022727, so 3.8% long and 3.8%
-   * flat, and a thirty second render finished three seconds late.
-   *
-   * Nothing has been played yet, the tune's init writes go out on the first
-   * frame, so reconfiguring here costs one resampler table and no state. */
+  /* Synthesis was configured before the file was read, an NTSC tune moves the clock after parsing
+   * reSIDfp derives its resampler from the clock, PAL 985248 vs NTSC 1022727 is 3.8% off
+   * Nothing played yet, costs one resampler table */
   if (soft_active && timing.clock_hz != soft_clock) {
     if (!soft.configure(soft_chips, static_cast<double>(timing.clock_hz),
                         soft_out_rate, soft_quality, soft_model, soft_stereo)) {
@@ -1291,9 +1144,7 @@ int main(int argc, char ** argv)
              soft_out_rate, timing.clock_hz);
       return 1;
     }
-    /* configure() rebuilds every chip from scratch and resets pan_[] to
-     * Center - see its own comment - so the tune's panning hint has to go
-     * back on too, the same as the first configure() above. */
+    /* configure() resets pan_[] to Center, set the tune's panning hint again */
     if (soft_stereo && is_sid) {
       for (uint8_t c = 0; c < soft.chips(); c++) {
         soft.set_pan(static_cast<uint8_t>(c + 1), info.sid_pan[c]);
@@ -1301,18 +1152,12 @@ int main(int argc, char ** argv)
     }
     soft.attach(machine);
     soft_clock = timing.clock_hz;
-    /* attach() takes the machine's backend, so the trace has to go back in
-     * front of it. */
+    /* attach() takes the backend, put the trace back in front */
     if (trace != nullptr) machine.set_sid_backend(*trace);
   }
 
-  /* Muting, after the load, because `init_tune()` powers the machine on again
-   * and a mute set before it would be forgotten.
-   *
-   * The mute lives in the SID layer, on the way out to whatever is playing, so
-   * this works the same for a board, for the speakers and for a WAV: recording
-   * three files with `--mute-solo 1:1`, `1:2` and `1:3` gives the three
-   * voices separately from the same run of the same emulation. */
+  /* Mute after load, init_tune() powers the machine on again
+   * The mute sits in the SID layer, same for board, speakers and WAV */
   if (mute_spec != nullptr || mute_solo_spec != nullptr) {
     uint8_t mask[kMaxSids] = { 0 };
     const char * spec = (mute_solo_spec != nullptr) ? mute_solo_spec : mute_spec;
@@ -1323,9 +1168,7 @@ int main(int argc, char ** argv)
       return 2;
     }
     if (mute_solo_spec != nullptr) {
-      /* Only as far as the tune has chips: inverting all of them would report
-       * a one chip tune's other fourteen as silenced, which reads as a fault.
-       * Capped at kMaxSids same as player.cpp's own sid.count clamp. */
+      /* Only as many chips as the tune has, capped at kMaxSids */
       const int chips_here = is_sid
         ? ((player.tune().sid_count > kMaxSids) ? kMaxSids : player.tune().sid_count)
         : 2;
@@ -1357,18 +1200,12 @@ int main(int argc, char ** argv)
   }
 
 
-  /* How long the songs are, if a database can be found. The key is the MD5 of
-   * the whole file, so it is computed from the bytes that were read rather than
-   * from anything the parser worked out. */
+  /* Song lengths from the database, key is the MD5 of the whole file */
   SongLengths lengths;
   char db_path[1024] = { 0 };
-  /* A v5 tune can carry its own song length table right in the file (see
-   * print_tune()'s "lengths : embedded in the file"). When it does, that is
-   * an authoritative playtime for this song, and song_length_ms() below
-   * already prefers it over kDefaultSongMs the same way it prefers the
-   * external database. So a database miss is not actually a fallback to the
-   * 5 minute timer in that case, and saying so here would be wrong: the
-   * warning is for when nothing at all knows how long the song runs. */
+  /* A v5 tune can embed its length table (see print_tune())
+   * song_length_ms() prefers it, same as the external database
+   * Warn only when nothing knows the length */
   const uint32_t embedded_ms = (is_sid && player.tune().has_embedded_song_lengths)
     ? player.tune().embedded_song_length_ms(player.song()) : 0;
   if (is_sid && use_songlengths &&
@@ -1404,8 +1241,7 @@ int main(int argc, char ** argv)
       printf("  length   : %u:%02u for this song, from the file's own v5 song length table\n",
              embedded_ms / 60000u, (embedded_ms / 1000u) % 60u);
     } else if (songlengths_path != nullptr) {
-      /* A path given on the command line that is not there is a mistake, and
-       * saying "none found" about it would hide which of the two happened. */
+      /* A path given on the command line that is not there is a mistake */
       printf("  length   : cannot read %s\n", songlengths_path);
     } else {
       printf("  length   : no Songlengths database found. Point --songlengths at "
@@ -1420,13 +1256,10 @@ int main(int argc, char ** argv)
     ? static_cast<uint64_t>(static_cast<double>(seconds) * pacer.frame_rate())
     : 0;
 
-  /* Raw mode for as long as the loop runs, and put back by the destructor on
-   * every ordinary exit and by on_signal on the others. Does nothing when stdin
-   * is not a terminal, which is what keeps the player usable from a script. */
+  /* Raw console while the loop runs, restored by the destructor or on_signal, no-op when stdin is not a terminal */
   RawConsole console;
   const bool keys = RawConsole::interactive();
-  /* The status line and the two log lines cannot share a terminal: one redraws
-   * itself with a carriage return and the others scroll. The logs win. */
+  /* Status line and log lines cannot share a terminal, logs win */
   const bool status_line = keys && !us_log.timers && !us_log.memstate;
 
   if (keys) {
@@ -1437,15 +1270,12 @@ int main(int argc, char ** argv)
     printf("  press ctrl-c to stop\n");
   }
 
-  /* Pause has to silence the chip. Holding the emulation still means no more
-   * writes go out, and a board plays whatever was last latched, which is a note
-   * held for as long as the pause. The register file is kept so resuming puts
-   * back exactly what was sounding. */
+  /* Pause silences the chip, a board plays the last latched note otherwise
+   * The register file is kept to restore */
   const auto silence = [&]() {
 #if US_HAVE_NETDEVICE
     if (output == OutputMode::NetDevice) {
-      /* The server keeps playing what it was sent, and holds the last latched
-       * state after that: volume to zero on every chip, sent at once. */
+      /* Server holds the last latched state, send volume zero on every chip */
       for (uint8_t c = 0; c < net.sid_count(); c++)
         net.write(static_cast<addr_t>(c * 0x20 + 0x18), 0x00, 4);
       net.send_pending();
@@ -1453,10 +1283,7 @@ int main(int argc, char ** argv)
     }
 #endif
     if (no_device) return;
-    /* Two halves, and both are wanted. The board's own MUTE stops it making a
-     * sound at all, which is the immediate thing; zeroing the registers is what
-     * makes the silence survive it, since a mute that is lifted with a gate
-     * still set would restart the note the pause was meant to end. */
+    /* Board MUTE for the immediate silence, zeroed registers keep it silent after unmute */
     /* physical_reg(): follow -f/-fa to the socket the tune plays on */
     for (data_t r = 0; r <= 0x18; r++) usb.write(machine.sid().physical_reg(r), 0x00, 4);
     usb.flush();
@@ -1473,17 +1300,14 @@ int main(int argc, char ** argv)
     }
 #endif
     if (no_device) return;
-    /* Unmute first, then put the registers back, so the board is listening by
-     * the time the values that make the sound arrive. */
+    /* Unmute first, then restore the registers */
     usb.mute(false);
     for (data_t r = 0; r <= 0x18; r++)
       usb.write(machine.sid().physical_reg(r), machine.sid().peek(r), 4);
     usb.flush();
   };
 
-  /* Once per frame. A Network SID Device server is its own clock: the run
-   * ahead is held back by net.wait_for_room(), the pacer only keeps the time
-   * display. Everything else sleeps to the frame schedule. */
+  /* Once per frame, a Network SID Device server is its own clock (net.wait_for_room()), the pacer only keeps the time display */
   const auto pace = [&](uint64_t f) {
 #if US_HAVE_NETDEVICE
     if (output == OutputMode::NetDevice) { net.wait_for_room(g_stop); return; }
@@ -1501,14 +1325,12 @@ int main(int argc, char ** argv)
   uint64_t status_at = 0;
   uint8_t mute_chip = 1;       /* which SID the digit keys address */
 
-  /* Clock shown to the user. A Network SID Device server throttles the
-   * emulation, which runs ahead in bursts, so the emulated frame count both
-   * jerks and leads what is audible. For that output the clock is wall time
-   * since the last anchor, clamped to the emulated time and never going back.
-   * Every other output shows the emulated frame count unchanged. */
+  /* Clock shown to the user
+   * A Network SID Device runs ahead in bursts, show wall time since the last anchor
+   * clamped to the emulated time, never going back */
   using disp_clock = std::chrono::steady_clock;
   disp_clock::time_point disp_t0 = disp_clock::now();
-  disp_clock::time_point disp_status_next = disp_t0; /* next status print */
+  disp_clock::time_point disp_status_next = disp_t0; /* following status print */
   uint64_t disp_base = 0;      /* frames shown at the anchor */
   uint64_t disp_last = 0;      /* last frames shown, frozen while paused */
   const auto disp_anchor = [&](uint64_t shown) {
@@ -1531,14 +1353,8 @@ int main(int argc, char ** argv)
     return v;
   };
 
-  /* A new song was initialised (n, p or r). The clock, display anchor
-   * and pacer restart from this frame. A pause is lifted too: init_tune()
-   * already clears the player's own pause flag, and player.pause(false) is
-   * repeated only to keep the CLI state and the player's agreeing. silence()
-   * muted the board when the pause began and nothing else unmutes it, so the
-   * registers are restored (a freshly reset chip, then the tune's init writes
-   * its own values). Not while seeking: the fast-forward exit restores the
-   * chip itself, and a restore here would unmute the board mid-seek. */
+  /* New song (n, p or r): clock, display anchor and pacer restart, pause is lifted
+   * Not while seeking, the fast-forward exit restores the chip */
   const auto song_started = [&]() {
     song_frame0 = frame;
     disp_anchor(0);
@@ -1550,8 +1366,7 @@ int main(int argc, char ** argv)
     }
   };
 
-  /* Status line cadence: wall time for a Network SID Device (the emulated
-   * frame count bursts there), every 5 emulated frames for everything else. */
+  /* Status cadence: wall time for a Network SID Device, every 5 emulated frames otherwise */
   const auto status_due = [&]() -> bool {
     if (output == OutputMode::NetDevice) return disp_clock::now() >= disp_status_next;
     return (frame - status_at) >= 5;
@@ -1559,17 +1374,14 @@ int main(int argc, char ** argv)
   const auto print_status = [&]() {
     status_at = frame;
     disp_status_next = disp_clock::now() + std::chrono::milliseconds(100);
-    /* The song's own length beside the clock when the database knows it, so
-     * "how far in" is answerable at a glance rather than by arithmetic. */
+    /* Song length beside the clock when the database knows it */
     const uint32_t song_ms = song_length_ms(lengths, player.tune(), player.song(), use_songlengths);
     char total[24] = { 0 };
     if (song_ms > 0) {
       snprintf(total, sizeof(total), " / %u:%02u.%u",
                song_ms / 60000u, (song_ms / 1000u) % 60u, (song_ms / 100u) % 10u);
     }
-    /* Which voices are sounding, as three characters: the voice number when
-     * it is on and a dash when it is muted. Only shown once something has been
-     * muted, so the ordinary line stays short. */
+    /* Voice number when on, dash when muted, only shown once something is muted */
     const uint8_t mask = machine.sid().voice_mute(mute_chip);
     char voices[24] = { 0 };
     const uint8_t sids = (sid_config.count == 0) ? 1 : sid_config.count;
@@ -1586,9 +1398,7 @@ int main(int argc, char ** argv)
     fflush(stdout);
   };
 
-  /* -t counts absolute frames. A Network SID Device queues audio behind the
-   * emulation, so there the limit is reached when the shown time gets to it,
-   * which lets the queued tail play out. Emulation keeps running meanwhile. */
+  /* -t counts absolute frames, a Network SID Device queues audio, there the limit is the shown time to let the tail play out */
   const auto limit_reached = [&]() -> bool {
     if (frame_limit == 0) return false;
     if (output == OutputMode::NetDevice) return song_frame0 + disp_frames() >= frame_limit;
@@ -1603,18 +1413,13 @@ int main(int argc, char ** argv)
       const int k = console_key();
       switch (k) {
         case ' ':
-          disp_frames(); /* freeze or resume from what is shown now */
+          disp_frames(); /* freeze or resume from what is shown at the moment */
           paused = !paused;
           if (!paused) disp_anchor(disp_last);
           player.pause(paused);
           if (paused) silence(); else restore_registers();
           break;
-        /* The player wraps and re-initialises on its own, so there is no song
-         * number to compute here. That is deliberate: the player is the only
-         * thing that knows which song it is on and how many there are, and
-         * asking three frontends to do the arithmetic is how one of them gets it
-         * wrong. `restart_song()` is the absolute form and refuses an out of
-         * range number rather than wrapping. */
+        /* The player wraps and re-initialises, restart_song() is the absolute form and refuses an out of range number */
         case 'n': case kKeyRight:
         case 'p': case kKeyLeft: {
           if (player.songs() <= 1) break;
@@ -1624,20 +1429,14 @@ int main(int argc, char ** argv)
           if (player.song() != before) song_started();
           break;
         }
-        /* Restart the song being played, from its start. Unlike n/p this also
-         * works on a tune with a single song, which has nothing to move to. */
+        /* Restart the current song, also works on a single song tune */
         case 'r':
           if (player.restart_song(player.song())) song_started();
           break;
         case 'f':
-          /* Fast forward is a **seek**, not audible fast playback: over USBSID
-           * every write carries the gap that precedes it and the board sits
-           * those gaps out, so it cannot be driven faster than the tune's own
-           * timing regardless of frame rate. So: no pacing at all while it
-           * runs, writes thrown away, chip silenced going in and caught up
-           * from the register file coming out, and the pacer re-anchored so
-           * the schedule afterwards is measured from where the seek ended
-           * rather than from where it began. */
+          /* Fast forward is a seek, the board sits out every write gap
+           * No pacing, writes thrown away, chip silenced and restored from the register file after
+           * Pacer re-anchored at the end of the seek */
           fast = !fast;
           if (fast) {
             silence();
@@ -1651,9 +1450,7 @@ int main(int argc, char ** argv)
             }
           }
           break;
-        /* Mute a voice of the selected chip. Twelve toggles is too many keys, so
-         * the digits address one chip and `c` moves between them; a single SID
-         * tune, which is most of them, never needs the selector. */
+        /* Mute a voice of the selected chip, digits address a voice, c moves between chips */
         case '1': case '2': case '3': {
           const uint8_t voice = static_cast<uint8_t>(k - '0');
           const bool now = (machine.sid().voice_mute(mute_chip) &
@@ -1673,8 +1470,7 @@ int main(int argc, char ** argv)
     }
 
     if (paused) {
-      /* Pacing is what keeps a paused player from spinning a core, and with no
-       * device there is no pacer to do it, so sleep instead. */
+      /* Sleep, there is no pacer without a device */
       if (!no_device && output != OutputMode::NetDevice) pacer.wait_for_frame(frame);
       else std::this_thread::sleep_for(std::chrono::milliseconds(10));
       if (status_line) {
@@ -1699,9 +1495,7 @@ int main(int argc, char ** argv)
     ++frame;
 
 #if US_HAVE_RTMIDI
-    /* The tune's init sets the CIA timer while it runs. The play rate is
-     * read from CIA1 over the first frames of each song. The environment
-     * message is resent only when the multiplier changes. */
+    /* Init sets the CIA timer, play rate is read from CIA1 over the first frames, environment message is only resent on a multiplier change */
     if (output == OutputMode::ASID && is_sid && frame - song_frame0 <= 8) {
       const int mult = asid_speed_multiplier(
         player.tune().song_uses_cia(player.song()),
@@ -1714,22 +1508,10 @@ int main(int argc, char ** argv)
     }
 #endif
 
-    /* Move what was synthesised this frame out to the device or the file.
-     *
-     * The device is the thing that decides the tempo here, not the pacer: a
-     * ring full means the emulation is ahead and should wait, which is the same
-     * backpressure the board gives through its own queue. So push what fits,
-     * and if the ring is full stop pushing rather than dropping audio, because
-     * dropped samples are a click and a late frame is nothing.
-     */
+    /* Push synthesised audio to the device or file, a full ring means wait, never drop audio */
     if (soft_active) {
-      /* take()'s own frames param and return are audio frames (1 sample
-       * mono, 2 interleaved stereo - see its header comment), while
-       * wav.write()/audio.push() both want the raw interleaved sample count,
-       * so soft_buf's element capacity has to be divided down to a frame
-       * request going in and the frame count taken back out multiplied by
-       * channels() coming out. Unchanged arithmetic for mono, where
-       * channels() is 1 and the two counts are the same thing. */
+      /* take() counts audio frames (mono 1, stereo 2 samples)
+       * wav.write()/audio.push() want interleaved samples, convert with channels() */
       const size_t ch = soft.channels();
       size_t frames_got;
       while ((frames_got = soft.take(soft_buf.data(), soft_buf.size() / ch)) != 0) {
@@ -1742,11 +1524,9 @@ int main(int argc, char ** argv)
             const size_t put = audio.push(soft_buf.data() + at, n - at);
             at += put;
             if (put == 0) {
-              /* A stalled device never drains the ring: drop the rest of the
-               * frame, the wall clock paces below instead. */
+              /* Stalled device never drains, drop the rest of the frame and pace on the wall clock */
               if (audio.stalled()) { audio_dropped += n - at; break; }
-              /* Ring full: let the device drain a little. Sleeping a fraction of
-               * the buffer keeps this from becoming a spin. */
+              /* Ring full, sleep a fraction of the buffer */
               std::this_thread::sleep_for(std::chrono::milliseconds(2));
               if (g_stop) break;
             }
@@ -1773,16 +1553,13 @@ int main(int argc, char ** argv)
       printf("\n");
     }
 
-    /* The song's own end, when the database knows it and no -t was given. A
-     * tune with more songs moves on to the next rather than stopping, which is
-     * what a database of every song's length is for. */
+    /* Song end from the database when no -t was given, a tune with more songs moves on to the following one */
     if (use_songlengths && frame_limit == 0) {
       const uint32_t ms = song_length_ms(lengths, player.tune(), player.song(), use_songlengths);
       if (ms > 0) {
         const double played_ms =
           1000.0 * static_cast<double>(frame - song_frame0) / pacer.frame_rate();
-        /* The last song ends on the shown time for a Network SID Device, which lets
-         * its queued tail play out. Moving on stays on emulated time. */
+        /* Last song ends on the shown time for a Network SID Device, lets the queued tail play out */
         const double shown_ms =
           1000.0 * static_cast<double>(disp_frames()) / pacer.frame_rate();
         const bool more = player.song() < player.songs();
@@ -1805,12 +1582,10 @@ int main(int argc, char ** argv)
       }
     }
 
-    /* Not while seeking: the whole point is to get ahead of the clock. */
+    /* Not while seeking */
     if (!no_device && !fast) pace(frame);
 
-    /* An audio device that stopped calling back holds nothing back, which
-     * would leave -t and the song length unreached. Pace on the wall clock
-     * while it stays stalled, re-anchored when the stall starts. */
+    /* Stalled audio device holds nothing back, pace on the wall clock while stalled */
     if (output == OutputMode::Audio && !fast) {
       const bool stalled = audio.stalled();
       if (stalled && !audio_wall) pacer.rebase(frame);
@@ -1819,9 +1594,7 @@ int main(int argc, char ** argv)
     }
 
 #if US_HAVE_NETDEVICE
-    /* The backend notices a dead server by itself (receive timeout) and drops
-     * every write after that, and pace() no longer waits; without this check the
-     * emulation would spin silently at full speed. No reconnect is attempted. */
+    /* Dead server is noticed by the backend and writes are dropped, exit when it is gone, no reconnect */
     if (output == OutputMode::NetDevice && !net.is_connected()) {
       if (status_line) printf("\n");
       printf("  device   : connection to %s:%d lost\n", net_host, net_port);
@@ -1836,12 +1609,8 @@ int main(int argc, char ** argv)
   printf("\n  stopped after %llu frames\n",
          static_cast<unsigned long long>(frame));
 
-  /* Clipping and underrun are the two ways software audio goes wrong quietly.
-   * Chips are summed with no headroom, so N chips can reach N times full scale
-   * and a loud three SID tune will clip where the same tune on one chip does
-   * not; underrun is silence the device invented because the emulation did not
-   * keep up. Both are counted already and both sound like "the tune", so they
-   * are reported rather than left for someone to wonder about. */
+  /* Chips are summed without headroom, N chips can reach N times full scale and clip
+   * Underrun is silence from an emulation that did not keep up */
   if (soft_active) {
     printf("  audio    : %llu samples",
            static_cast<unsigned long long>(soft.samples()));

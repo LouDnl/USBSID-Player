@@ -1,12 +1,11 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * memory.h
- * What the CPU sees of the world: one read and one write per bus cycle.
- * The MMU plugs in behind this interface; the CPU never learns the difference.
+ * CPU memory interface, one read and one write per bus cycle
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -35,11 +34,7 @@
 namespace usbsid {
 
 /**
- * @brief The CPU side of the address bus.
- *
- * Every call is one real bus cycle, including the dummy reads and the dummy
- * write of a read-modify-write. IO side effects depend on those, so they are
- * never optimised away.
+ * @brief CPU side of the address bus, every call is one bus cycle (dummy reads and writes included)
  */
 class Memory
 {

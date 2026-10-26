@@ -1,11 +1,11 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * sid_residfp.cpp
- * See sid_residfp.h for the three shape differences this file exists to bridge.
+ * Bridges the shape differences described in sid_residfp.h
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -39,30 +39,22 @@ namespace usbsid {
 
 namespace {
 
-/* The largest delta the seam can carry, so the scratch buffer can be sized for
- * the worst case once and never grown on the write path. reSIDfp emits at most
- * one sample per clock cycle, and only when the sample rate equals the clock
- * rate, which never happens here; sizing for it anyway costs 128 KB of host
- * memory and removes a whole class of question. */
+/* Largest delta the seam can carry, scratch buffers are sized for it once
+ * reSIDfp emits at most one sample per cycle, costs 128 KB of host memory */
 constexpr size_t kMaxDelta = 0x10000;
 
-/* Output rate bounds for set_speed(). Above ~215 kHz the two pass sinc
- * resampler's intermediate rate drops below the output rate and it can no
- * longer produce one sample per output slot. */
+/* Output rate bounds for set_speed(). Above ~215 kHz the intermediate rate of the
+ * two pass sinc resampler drops below the output rate */
 constexpr double kMinOutRate = 4000.0;
 constexpr double kMaxOutRate = 192000.0;
 constexpr double kMinSpeed = 0.1;
 constexpr double kMaxSpeed = 8.0;
 
-/* Anything at or above this is not a real chip's register: it is
- * kFmOplParkBase's block (mos6581_8580.cpp), reached when a tune writes
- * $df40/$df50 and no SID claims them. kMaxSids * 0x20 is exactly
- * kFmOplParkBase itself - real chips never reach it, so this is an exact
- * boundary, not a guess. */
+/* Registers at or above this are the kFmOplParkBase block (mos6581_8580.cpp)
+ * $df40/$df50 with no SID claiming them, kMaxSids * 0x20 is exactly kFmOplParkBase */
 constexpr addr_t kFmOplRange = static_cast<addr_t>(kMaxSids * 0x20);
 
-/* Scope frames kept for a reader that falls behind or stops reading: about a
- * second at 48 kHz. Older frames are dropped. */
+/* Scope frames kept for a reader that falls behind, about a second at 48 kHz. Older ones are dropped */
 constexpr size_t kScopeMaxFrames = 0x10000;
 
 } /* namespace */
@@ -97,9 +89,7 @@ bool ResidFpSidBackend::configure(uint8_t chips, double clock_hz,
   for (uint8_t i = 0; i < chips; i++) {
     if (sid_[i] == nullptr) sid_[i] = new reSIDfp::residfp();
     if (!sid_[i]->setChipModel(chip_model)) return false;
-    /* Order matters: the sampling parameters are derived from the clock, so a
-     * model change after them would leave the resampler configured for the
-     * previous one. */
+    /* Model first, the sampling parameters are derived from the clock */
     if (!sid_[i]->setSamplingParameters(clock_hz, method,
                                         static_cast<double>(out_rate_))) {
       return false;
@@ -107,8 +97,7 @@ bool ResidFpSidBackend::configure(uint8_t chips, double clock_hz,
     sid_[i]->reset();
     apply_filter_(i, true, filter_);
   }
-  /* Any chips above the new count are not kept around configured for an old
-   * rate, because a later configure() with more chips would then reuse them. */
+  /* Drop the chips above the new count */
   for (uint8_t i = chips; i < kMaxSoftSids; i++) {
     delete sid_[i];
     sid_[i] = nullptr;
@@ -118,9 +107,7 @@ bool ResidFpSidBackend::configure(uint8_t chips, double clock_hz,
   clock_hz_ = clock_hz;
   quality_ = quality;
   stereo_ = stereo;
-  /* Every chip starts Center - see set_pan()'s own comment - so a
-   * stereo-configured backend nobody calls set_pan() on still plays as an
-   * ordinary center mix on both channels, not silence on one of them. */
+  /* Chips start Center, see set_pan() */
   for (uint8_t i = 0; i < kMaxSoftSids; i++) pan_[i] = SidPan::Center;
   recompute_pan_headroom();
   scratch_.assign(kMaxDelta, 0);
@@ -157,8 +144,7 @@ double ResidFpSidBackend::set_speed(double mult)
   const unsigned rate = speed_rate_();
   if (rate == out_rate_) return speed();
 
-  /* setSamplingParameters() swaps the resampler only: voices, envelopes and
-   * filter state carry on. configure() would reset the chips. */
+  /* Swaps the resampler only, voice/envelope/filter state carries on */
   const reSIDfp::SamplingMethod method =
     (quality_ == SoftSidQuality::Good) ? reSIDfp::RESAMPLE : reSIDfp::DECIMATE;
   for (uint8_t i = 0; i < chips_; i++) {
@@ -225,25 +211,14 @@ void ResidFpSidBackend::recompute_pan_headroom(void)
 void ResidFpSidBackend::attach(Machine & machine)
 {
   machine.set_sid_backend(*this);
-  /* The one part of the contract that differs from a hardware backend. See the
-   * header: a software SID has no bus and so no access cycle to deduct, and
-   * leaving this at 1 puts every write a cycle early for the whole tune. */
+  /* Software SID has no access cycle to deduct, see the header */
   machine.sid().config().access_overhead = 0;
-  /* And the other part: a software SID has to be told about the time in which
-   * the tune did nothing, or a silent passage renders as no samples at all
-   * rather than as silence. See SidConfig::render_idle. */
+  /* Software SID needs the idle time too, see SidConfig::render_idle */
   machine.sid().config().render_idle = true;
 
-  /* Inherit the chips as the tune has already programmed them. This backend
-   * is often attached **after** something has been playing (the browser
-   * boots and RUNs a BASIC RSID, then configures software audio afterward),
-   * and reSIDfp is built fresh with every register at zero, so anything the
-   * tune set once and never repeats - starting with the master volume at
-   * $18 - is otherwise silently lost. Fixed by replaying the emulation's own
-   * write mirror, ascending `$00` to `$18` per chip (the order a driver
-   * writes them in anyway, so a gate that was already on stays on). What
-   * cannot be inherited is where each envelope had got to, since nothing
-   * carries that across a chip that did not exist a moment ago. */
+  /* Inherit the chips as the tune programmed them, attach can happen after playback started
+   * Replay the write mirror $00 to $18 per chip, master volume ($18) and gates survive
+   * Envelope positions cannot be inherited */
   Mos6581_8580 & sid = machine.sid();
   for (uint8_t chip = 0; chip < chips_; chip++) {
     if (sid_[chip] == nullptr) continue;
@@ -260,9 +235,7 @@ void ResidFpSidBackend::advance(uint32_t cycles)
 
   cycles_clocked_ += cycles;
 
-  /* Running through a stretch whose audio is not wanted: the time is accounted
-   * for above and nothing is clocked, which is the whole saving. See
-   * set_render(). */
+  /* Skipped stretch, account the time and clock nothing, see set_render() */
   if (!render_) return;
 
   uint32_t left = cycles;
@@ -271,14 +244,9 @@ void ResidFpSidBackend::advance(uint32_t cycles)
                                              : left;
     left -= step;
 
-    /* Chip one sets how many samples this step produced, and the rest are
-     * summed onto it rather than trusted to agree, since a differing count
-     * would hide a configuration mistake instead of showing it.
-     *
-     * Stereo (opt in, see configure()): each chip's own samples go into mix_
-     * (left), mix_r_ (right), or both, per pan_[] - hard panning, the same
-     * three positions a v5 tune's own panning hint can ask for (set_pan()'s
-     * own comment). Mono (the default): summed into mix_ only. */
+    /* Chip one sets the sample count of this step, the rest are summed onto it
+     * Stereo: samples go to mix_ (left), mix_r_ (right) or both per pan_[], hard panning
+     * Mono: summed into mix_ only */
     if (scope_on_) sid_[0]->setScopeTap(tap_.data());
     const int n = sid_[0]->clock(step, scratch_.data());
     size_t scope_base = 0;
@@ -298,10 +266,7 @@ void ResidFpSidBackend::advance(uint32_t cycles)
       for (int s = 0; s < n; s++) mix_[static_cast<size_t>(s)] = scratch_[static_cast<size_t>(s)];
     }
 
-    /* Every chip is clocked on every step regardless of what chip one
-     * produced: most steps produce no samples at all (the sample rate is a
-     * fortieth of the clock rate), and skipping a chip on those steps would
-     * let it fall behind the others over time. */
+    /* Clock every chip each step, most steps produce no samples */
     for (uint8_t c = 1; c < chips_; c++) {
       if (sid_[c] == nullptr) continue;
       if (scope_on_) sid_[c]->setScopeTap(tap_.data());
@@ -320,15 +285,9 @@ void ResidFpSidBackend::advance(uint32_t cycles)
 
     if (n <= 0) continue;
 
-    /* Divided by the per-channel headroom (chips_ itself, mono; pan_count_l_/
-     * pan_count_r_, stereo - see recompute_pan_headroom()). Each reSIDfp
-     * instance uses the whole sixteen bit range on its own, so N chips summed
-     * reach N times full scale; dividing rather than clamping avoids the
-     * audible distortion a clamp produces on loud multi-chip passages.
-     * Deterministic attenuation rather than a limiter, since a limiter is
-     * level dependent and would make the same tune sound different depending
-     * on how loud the moment before it was. The clamp below stays as a guard
-     * with its own counter, and should now never fire. */
+    /* Divide by the per-channel headroom (chips_ mono, pan_count_l_/pan_count_r_ stereo)
+     * See recompute_pan_headroom(). A clamp would distort on loud multi-chip passages
+     * The clamp below is a guard with a counter */
     const size_t before = out_.size();
     if (stereo_) {
       for (int s = 0; s < n; s++) {
@@ -336,9 +295,7 @@ void ResidFpSidBackend::advance(uint32_t cycles)
         int32_t r = mix_r_[static_cast<size_t>(s)];
         if (pan_count_l_ > 1) l /= static_cast<int32_t>(pan_count_l_);
         if (pan_count_r_ > 1) r /= static_cast<int32_t>(pan_count_r_);
-        /* sid_gain_: applied here, before the clamp, same spot the per-chip
-         * headroom divide above just used - see set_sid_gain(). Unity by
-         * default, so this is a no-op unless a caller asked for otherwise. */
+        /* sid_gain_ before the clamp, unity by default, see set_sid_gain() */
         if (sid_gain_ != 1.0f) {
           l = static_cast<int32_t>(std::lround(l * sid_gain_));
           r = static_cast<int32_t>(std::lround(r * sid_gain_));
@@ -348,12 +305,8 @@ void ResidFpSidBackend::advance(uint32_t cycles)
         out_.push_back(static_cast<int16_t>(l));
         out_.push_back(static_cast<int16_t>(r));
       }
-      /* FM has no pan of its own yet (always center): rendered once - it is
-       * stateful, generating new OPL samples on every call, so this must not
-       * run once per channel - into fm_scratch_ (zeroed first, so what comes
-       * back is the attenuated FM signal alone), then that one mono result
-       * added onto both already-mixed channels by hand, since mix_into()
-       * itself only knows how to add onto one contiguous buffer. */
+      /* FM has no pan yet (always center), rendered once as it is stateful
+       * Into fm_scratch_ (zeroed first), then added to both channels */
       if (fm_.ready()) {
         std::fill(fm_scratch_.begin(), fm_scratch_.begin() + n, 0);
         fm_.mix_into(fm_scratch_.data(), static_cast<size_t>(n));
@@ -377,25 +330,21 @@ void ResidFpSidBackend::advance(uint32_t cycles)
         else if (v < -32768) { v = -32768; clipped_++; }
         out_.push_back(static_cast<int16_t>(v));
       }
-      /* The FM voices onto the SID voices, the way the two chips are summed on
-       * a machine that has both. Nothing to do for the tunes that have no FM:
-       * the chip is only built once one writes to it. */
+      /* Sum FM onto the SID voices, built once a tune writes to it */
       if (fm_.ready()) fm_.mix_into(out_.data() + before, static_cast<size_t>(n));
     }
     produced_ += static_cast<uint64_t>(n);
   }
 
-  /* Reclaim the space already handed out, once it is worth the move. Keeps the
-   * vector from growing for the length of a tune without memmoving on every
-   * take(). taken_ counts frames (see take()'s own comment); out_ is
-   * elements, so it takes channels() of them per frame taken. */
+  /* Reclaim handed out space when worth the move
+   * taken_ counts frames, out_ elements (channels() per frame) */
   const size_t taken_elems = taken_ * channels();
   if (taken_ > 0 && taken_elems >= out_.size() / 2 && taken_ > 4096) {
     out_.erase(out_.begin(), out_.begin() + static_cast<long>(taken_elems));
     taken_ = 0;
   }
 
-  /* Same for the scope frames, after dropping what nobody read in time. */
+  /* Same for the scope frames, after dropping unread ones */
   if (scope_on_) {
     const size_t v = scope_voices();
     const size_t waiting = scope_.size() / v - scope_taken_;
@@ -428,8 +377,7 @@ void ResidFpSidBackend::set_scope(bool on)
   scope_taken_ = 0;
   if (on) {
     tap_.assign(kMaxDelta * 3, 0);
-    /* A silent scope frame per rendered frame not yet taken: keeps
-     * take_scope() in line with take(). */
+    /* Silent scope frame per rendered frame not yet taken, keeps take_scope() in line with take() */
     if (ready_) scope_.assign(available() * scope_voices(), 0);
     return;
   }
@@ -459,26 +407,20 @@ void ResidFpSidBackend::write(addr_t reg, data_t value, uint16_t cycles)
 {
   if (!ready_) return;
 
-  /* kFmOplRange and up is $df40/$df50 with no SID claiming them (see
-   * kFmOplRange above). reSIDfp has no FM, so the gap is still honoured (the
-   * tune's timeline does not care what the write was for) and the write
-   * itself is counted and dropped. */
+  /* kFmOplRange and up is $df40/$df50 with no SID claiming them
+   * The gap is honoured, the write goes to the OplChip and is counted */
   if (reg >= kFmOplRange) {
     advance(cycles);
     fm_writes_++;
-    /* The gap first, above, so the write lands after the samples that came
-     * before it, exactly as a SID write does. `reg`'s local offset within
-     * kFmOplParkBase's block is 0 for $df40 (the index port) or 0x10 for
-     * $df50 (the data port) - see translate(), mos6581_8580.cpp - which is
-     * mapped back onto the kFmAddressReg/kFmDataReg pair OplChip::bus_write()
-     * actually wants. */
+    /* Local offset in the kFmOplParkBase block is 0 for $df40 (index port) or 0x10 for $df50 (data port)
+     * See translate() in mos6581_8580.cpp, mapped to the kFmAddressReg/kFmDataReg pair for OplChip::bus_write() */
     if (!fm_.ready()) fm_.configure(out_rate_);
     const uint8_t opl_reg = ((reg & 0x1f) == 0x10) ? kFmDataReg : kFmAddressReg;
     fm_.bus_write(opl_reg, value);
     return;
   }
 
-  /* The gap first, then the write: this is the ordering difference. */
+  /* Gap first, then the write */
   advance(cycles);
 
   const uint8_t chip = static_cast<uint8_t>(reg >> 5);
@@ -512,8 +454,7 @@ void ResidFpSidBackend::reset(void)
   produced_ = 0;
   clipped_ = 0;
   fm_writes_ = 0;
-  /* The OPL belongs to the tune that programmed it: carrying its registers into
-   * the next one leaves that one playing the last one's instruments. */
+  /* The OPL belongs to the tune that programmed it */
   fm_.reset();
   cycles_clocked_ = 0;
 }
@@ -522,8 +463,7 @@ size_t ResidFpSidBackend::take(int16_t * out, size_t frames)
 {
   if (out == nullptr || frames == 0) return 0;
   const unsigned ch = channels();
-  /* taken_ counts frames, out_ counts elements (interleaved L/R when stereo)
-   * - see the header's own take()/channels() comments. */
+  /* taken_ counts frames, out_ elements (interleaved L/R when stereo) */
   const size_t have = (out_.size() / ch) - taken_;
   const size_t n = (frames < have) ? frames : have;
   if (n != 0) {

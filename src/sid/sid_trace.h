@@ -1,14 +1,12 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * sid_trace.h
- * A backend that records what was written and when, so a run can be compared
- * against another player or against a previous run of this one. This is the
- * evidence that the emulation is right, so it lives in the source tree and
- * not in the tests.
- *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * A backend that records what was written and when
+ * A run can be compared against another player or a previous run
+ * Lives in the source tree
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -42,17 +40,16 @@
 namespace usbsid {
 
 /**
- * @brief Records every SID event with the cycle it happened on.
+ * @brief Record every SID event with the cycle it happened on
  *
- * The buffer is fixed and supplied by the caller, so this works on the
- * embedded target as well. When it fills up it stops recording and counts
- * what it dropped rather than overwriting history.
+ * The buffer is fixed and supplied by the caller, works on the embedded target
+ * When full it stops recording and counts the dropped events
  */
 class TraceSidBackend final : public SidBackend
 {
   public:
     struct Event {
-      uint64_t cycle;   /* running total, so two traces line up */
+      uint64_t cycle;   /* running total, two traces line up */
       uint64_t play;    /* bus cycles since the tune started, for play time */
       uint16_t delta;   /* cycles since the previous event */
       addr_t reg;
@@ -66,30 +63,24 @@ class TraceSidBackend final : public SidBackend
       : events_(buffer), capacity_(capacity) {}
 
     /**
-     * @brief Pass everything on to another backend after recording it.
+     * @brief Pass everything on to another backend after recording it
      *
-     * Without this, recording and playing are exclusive: the machine has one
-     * backend and the trace was it, so a trace could only ever be taken of a
-     * silent run. Chained, the trace sits in front of the board or of the
-     * software SID and writes down what goes past on its way there, which is
-     * the only way to see what was actually sent while a tune was playing.
-     *
-     * Recording happens first so that the file is complete even if the thing
-     * behind it fails, and the cycle deltas handed on are the ones that came
-     * in: nothing here changes what the backend below sees.
+     * Chained, the trace sits in front of the board or the software SID and
+     * records what goes past (a tune can be traced while it plays)
+     * Recording happens first, the file is complete even when the backend
+     * behind it fails. Deltas handed on are the ones that came in
      */
     void set_next(SidBackend * next) { next_ = next; }
     SidBackend * next(void) const { return next_; }
 
     /**
-     * @brief Label events with the source's C64 address, chip and play time.
+     * @brief Label events with the C64 address, chip and play time of the source
      *
-     * Without a source, chip comes from the register block and play time
-     * from the summed deltas.
+     * Without a source the chip comes from the register block and play time from the summed deltas
      */
     void set_source(const Mos6581_8580 * source) { source_ = source; }
 
-    /** @brief C64 clock in Hz, converts play cycles to time in dump(). */
+    /** @brief C64 clock in Hz, converts play cycles to time in dump() */
     void set_clock_hz(uint32_t hz) { clock_hz_ = (hz != 0) ? hz : 985248u; }
 
     void write(addr_t reg, data_t value, uint16_t cycles) override
@@ -101,17 +92,16 @@ class TraceSidBackend final : public SidBackend
     data_t read(addr_t reg, uint16_t cycles) override
     {
       cycle_ += cycles;
-      /* A chained read records what the backend below answered, which is the
-       * value the tune went on to act on. Unchained there is nothing to record
-       * but the fact of the read, as before. */
+      /* A chained read records the answer of the backend below (the value the tune acts on)
+       * Unchained only the fact of the read is recorded */
       const data_t v = (next_ != nullptr) ? next_->read(reg, cycles) : 0;
       record('r', reg, v, cycles);
       return v;
     }
     void note_read(addr_t reg, data_t value, uint16_t cycles) override
     {
-      /* Positioned at the current cycle without consuming the delta: the next
-       * event still carries the whole gap, so the running total stays exact. */
+      /* Positioned at the current cycle without consuming the delta, the following
+       * event still carries the whole gap. The running total stays exact */
       const uint64_t base = cycle_;
       cycle_ += cycles;
       record('r', reg, value, cycles);
@@ -139,10 +129,10 @@ class TraceSidBackend final : public SidBackend
     const Event & at(size_t i) const { return events_[i]; }
 
     /**
-     * @brief One line per event, laid out like -srw plus cycle and play time.
+     * @brief One line per event like -srw plus cycle and play time
      *
      * [C] is the delta sent to the backend, @ the running cycle total,
-     * [T] the play time as MM:SS.mmm.
+     * [T] the play time as MM:SS.mmm
      */
     void dump(FILE * out) const
     {

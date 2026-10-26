@@ -1,15 +1,11 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * machine_harness.h
  * Test-only helpers: boot a machine, load a PRG, run it to its exit code.
  *
- * Both the Acid800 tests and the Lorenz test suite report the same way: $00
- * to $d7ff means passed, $ff means failed, and then the program stops. That
- * makes one runner enough for both.
- *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -69,15 +65,12 @@ inline bool screen_contains(Ram & ram, const data_t * codes, size_t len)
 }
 
 /**
- * @brief A booted C64 that can run test PRGs.
+ * @brief Booted C64 for running test PRGs
  */
 struct TestC64 {
   Machine machine;
 
-  /* Both suites write their verdict to $d7ff, which is the last register of
-   * the SID's mirror image, register $1f. With a SID fitted the write goes to
-   * the chip and not to RAM, exactly as on hardware, so the verdict is read
-   * back out of the SID's register file. */
+  /* Verdict goes to $d7ff, a mirror of SID register $1f ~ read back from the SID register file */
   static constexpr addr_t kResultAddr = 0xd7ff;
   static constexpr data_t kResultReg = 0x1f;
   static constexpr data_t kSentinel = 0x55;
@@ -90,7 +83,7 @@ struct TestC64 {
 
   data_t result(void) { return machine.sid().peek(kResultReg); }
 
-  /* Read what the program printed on the screen, as ASCII, for diagnostics */
+  /* Read the screen as ASCII for diagnostics */
   void screen_text(char * out, size_t out_len)
   {
     size_t o = 0;
@@ -110,9 +103,7 @@ struct TestC64 {
     out[o] = 0;
   }
 
-  /* Run the KERNAL until BASIC prints its prompt, so the screen editor and
-   * the KERNAL vectors are alive for anything the test program calls. */
-  /* Finish whatever instruction is in flight, so the pc can be set safely */
+  /* Finish the instruction in flight, pc can be set afterwards */
   void sync_to_instruction(void)
   {
     while (!machine.cpu().instruction_done()) machine.tick();
@@ -132,7 +123,7 @@ struct TestC64 {
   }
 
   /**
-   * @brief Load a PRG and find the address its BASIC stub SYSes to.
+   * @brief Load a PRG and find the address of its BASIC SYS
    */
   bool load_prg(const std::vector<data_t> & prg, addr_t & entry)
   {
@@ -140,7 +131,7 @@ struct TestC64 {
     const addr_t load_addr = static_cast<addr_t>(prg[0] | (prg[1] << 8));
     machine.ram().load(load_addr, prg.data() + 2, prg.size() - 2);
 
-    /* the stub is: link, line number, $9e ("SYS"), decimal digits, 0 */
+    /* Stub is link, line number, $9e (SYS), decimal digits, 0 */
     entry = 0;
     for (size_t i = 2; i < prg.size() && i < 32; i++) {
       if (prg[i] != 0x9e) continue;
@@ -161,11 +152,7 @@ struct TestC64 {
   enum class RunResult { Passed, Failed, Trapped, Jammed, TimedOut, NoEntry };
 
   /**
-   * @brief Load a PRG, jump to its entry point and wait for the exit code.
-   *
-   * $d7ff is the convention both suites use. The sentinel written before the
-   * run makes "the program never reported anything" distinguishable from
-   * "the program reported success".
+   * @brief Run a PRG from its entry point until it reports an exit code
    */
   RunResult run_prg(const char * path, uint64_t cycle_limit,
                     uint64_t & cycles_used, addr_t & stopped_at)
@@ -176,18 +163,12 @@ struct TestC64 {
     addr_t entry = 0;
     if (!load_prg(prg, entry)) return RunResult::NoEntry;
 
-    machine.mmu().write(kResultAddr, kSentinel);
-    /* Setting the pc part way through an instruction leaves the state machine
-     * finishing the old instruction at the new address, which sends the CPU
-     * somewhere random. Always land on an instruction boundary first. */
+    machine.mmu().write(kResultAddr, kSentinel);  /* Sentinel, no verdict yet */
+    /* Land on an instruction boundary before setting pc */
     while (!machine.cpu().instruction_done()) machine.tick();
     machine.cpu().pc(entry);
 
-    /* A test program signals "finished" by looping on itself. Comparing the
-     * pc with the address the instruction came from is not enough: taking an
-     * interrupt also leaves those two equal for one boundary, so a program
-     * that is merely busy handling NMIs looks stopped. Counting repeats of
-     * the same pc tells the two apart. */
+    /* Finished = looping on itself ~ interrupts also repeat pc once, count repeats */
     addr_t last_pc = 0xffff;
     unsigned repeats = 0;
     bool in_instruction = false;
@@ -197,10 +178,7 @@ struct TestC64 {
       machine.tick();
       ++cycles_used;
 
-      /* An instruction boundary is a transition, not a level. While the VIC
-       * holds BA low the CPU sits at a boundary for up to forty cycles, and
-       * treating each of those as a completed instruction makes a stalled
-       * machine look like a program looping on itself. */
+      /* Boundary is a transition ~ VIC holding BA low keeps the CPU at a boundary for up to 40 cycles */
       if (!machine.cpu().instruction_done()) { in_instruction = true; continue; }
       if (!in_instruction) continue;
       in_instruction = false;

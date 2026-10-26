@@ -4,13 +4,11 @@
  * Copyright (c) 2025, LouD <emudore@mail.loudai.nl>
  *
  * MC68B50.h
- * An IoDevice on IO1 ($de00-$deff), Datel/Kerberos register layout
- * (CONTROL $de04, TXDR $de05, STATUS $de06, RXDR $de07). Ported from
- * emulator-repo's emudore-based version to run inside USBSID-Player: no more
- * C64/Memory dependency, and the CPU IRQ is a level on the bus instead of a
- * direct, repeatedly-poked call.
+ * IoDevice on IO1 ($de00-$deff), Datel/Kerberos register layout
+ * (CONTROL $de04, TXDR $de05, STATUS $de06, RXDR $de07), ported from
+ * the emudore fork, the IRQ is a level on the bus
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -121,7 +119,7 @@ class MC6850BitMasks
       STATUS_3   = 0x06, /* status register        ~ read only */
       TXDR_3     = 0x05, /* transmit data register ~ write only */
       RXDR_3     = 0x07, /* receive data register  ~ read  only */
-      /* NAMESOFT ~ SAME REGISTERS AS SEQUENTIAL SO NOT USED! */
+      /* NAMESOFT ~ SAME REGISTERS AS SEQUENTIAL, NOT USED! */
       CONTROL_4  = 0x00, /* control register       ~ write only */
       STATUS_4   = 0x02, /* status register        ~ read only */
       TXDR_4     = 0x01, /* transmit data register ~ write only */
@@ -136,12 +134,9 @@ class MC6850BitMasks
 /**
  * @brief Motorola 68B50 Asynchronous Communications Interface Adapter
  *
- * Emulates the Motorola 68B50 ACIA (for Midi and or Uart communication) as
- * an IoDevice sitting on IO1 ($de00-$deff). Its register file is its own,
- * 16 bytes, addressed by the low byte of the address the MMU hands in: real
- * hardware only decodes $de04-$de07, everything else here is a harmless
- * read-your-last-write scratchpad rather than open bus, which matches the
- * original emudore port closely enough and needs no RAM to shadow.
+ * IoDevice on IO1 ($de00-$deff) for Midi and or Uart communication.
+ * 16 byte register file addressed by the low byte, only $de04-$de07 are decoded
+ * on real hardware, the rest reads back the last write
  */
 class MC68B50 : protected MC6850BitMasks, public IoDevice
 {
@@ -164,7 +159,7 @@ class MC68B50 : protected MC6850BitMasks, public IoDevice
     void io_write(addr_t addr, data_t value) override;
 
     void reset(void);
-    /* Drain one queued MIDI byte if room, called once per frame */
+    /* Drain one queued MIDI byte if room */
     void emulate(void);
 
 };

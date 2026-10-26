@@ -1,28 +1,19 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * console.h
- * One keypress at a time, without waiting for one.
- *
- * The player's loop has a frame to spend and cannot afford to block on input,
- * so this reads a key if there is one and says so if there is not. That means
- * raw mode, and raw mode is where the two platforms part company:
+ * One keypress at a time, never waits
  *
  *   POSIX          termios, with ICANON and ECHO off and a zero timeout read
- *   Windows        _kbhit and _getch from <conio.h>, and no mode to change
+ *   Windows        _kbhit and _getch from <conio.h>, no mode to change
  *
- * The MSYS2 MINGW64 build in the release matrix is a **native Windows binary**
- * and has no <termios.h> at all, which is why this is conditional from the
- * start rather than added when the release job goes red.
+ * The MSYS2 MINGW64 build is a native Windows binary without <termios.h>
  *
- * The part that matters to whoever runs the player: **raw mode must be put back
- * on every exit path**, including a signal, or the shell is left with no echo
- * and no line editing afterwards. RawConsole is a scope guard for that reason,
- * and `console_restore()` exists so a signal handler can call it too, since a
- * handler cannot run a destructor.
+ * Raw mode must be restored on every exit path including signals, or the shell
+ * keeps no echo, RawConsole is the scope guard, console_restore() is for signal handlers
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -57,18 +48,16 @@
 
 namespace usbsid {
 
-/** @brief No key waiting. Distinct from every key, so 0 is not usable. */
+/** @brief No key waiting */
 constexpr int kNoKey = -1;
 
 #if !defined(_WIN32)
-/* File scope so a signal handler can reach it: a handler cannot run a
- * destructor, and leaving the terminal raw is the one failure here that
- * outlives the process. */
+/* File scope for signal handlers, they cannot run a destructor */
 inline termios & console_saved(void) { static termios saved{}; return saved; }
 inline bool & console_raw(void) { static bool raw = false; return raw; }
 #endif
 
-/** @brief Put the terminal back the way it was. Safe to call twice. */
+/** @brief Restore the terminal, safe to call twice */
 inline void console_restore(void)
 {
 #if !defined(_WIN32)
@@ -79,11 +68,7 @@ inline void console_restore(void)
 }
 
 /**
- * @brief Raw mode for as long as this is alive.
- *
- * Does nothing when stdin is not a terminal, which is what makes the player
- * usable from a pipe or a script: there is no mode to set and no keys to read,
- * and asking for either would fail rather than be ignored.
+ * @brief Raw mode while alive, does nothing when stdin is not a terminal (pipe or script)
  */
 class RawConsole
 {
@@ -94,10 +79,9 @@ class RawConsole
       if (!isatty(STDIN_FILENO)) return;
       if (tcgetattr(STDIN_FILENO, &console_saved()) != 0) return;
       termios raw = console_saved();
-      /* ICANON off so a key arrives without a newline, ECHO off so it does not
-       * appear on the line the status is being drawn on. */
+      /* ICANON off ~ key without newline, ECHO off ~ no echo on the status line */
       raw.c_lflag = static_cast<tcflag_t>(raw.c_lflag & ~(ICANON | ECHO));
-      /* Return immediately whether or not anything was typed. */
+      /* Return immediately */
       raw.c_cc[VMIN] = 0;
       raw.c_cc[VTIME] = 0;
       if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) != 0) return;
@@ -110,7 +94,7 @@ class RawConsole
     RawConsole(const RawConsole &) = delete;
     RawConsole & operator=(const RawConsole &) = delete;
 
-    /** @brief Is a keyboard actually attached? */
+    /** @brief Keyboard attached */
     static bool interactive(void)
     {
 #if defined(_WIN32)
@@ -122,11 +106,10 @@ class RawConsole
 };
 
 /**
- * @brief The next key, or kNoKey. Never waits.
+ * @brief The following key or kNoKey, never waits
  *
- * An arrow key arrives as three bytes, escape then '[' then a letter. Those are
- * folded into the single negative values below so a caller can switch on one
- * value, and a bare escape still comes back as 27 for "quit".
+ * Arrow keys (escape, '[', letter) are folded into the negative values below,
+ * a bare escape is 27 for quit
  */
 constexpr int kKeyUp    = -2;
 constexpr int kKeyDown  = -3;
@@ -138,7 +121,7 @@ inline int console_key(void)
 #if defined(_WIN32)
   if (!_kbhit()) return kNoKey;
   const int c = _getch();
-  if (c == 0 || c == 224) {           /* the two byte form for the arrows */
+  if (c == 0 || c == 224) {           /* Two byte form for arrows */
     if (!_kbhit()) return kNoKey;
     switch (_getch()) {
       case 72: return kKeyUp;
@@ -155,8 +138,7 @@ inline int console_key(void)
   if (read(STDIN_FILENO, &c, 1) != 1) return kNoKey;
   if (c != 27) return static_cast<int>(c);
 
-  /* Escape, so possibly an arrow. With VMIN 0 the rest of the sequence is
-   * already in the buffer if it is coming; nothing more means a bare escape. */
+  /* Escape, maybe an arrow (VMIN 0 ~ rest is buffered, else bare escape) */
   unsigned char b = 0;
   if (read(STDIN_FILENO, &b, 1) != 1 || b != '[') return 27;
   if (read(STDIN_FILENO, &b, 1) != 1) return 27;

@@ -1,12 +1,12 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * net_compat.h
- * Thin BSD sockets / Winsock2 shim for the Network SID Device client
- * (sid_netdevice.cpp) and its loopback test. Header only, inline.
+ * BSD sockets / Winsock2 shim for the Network SID Device client
+ * (sid_netdevice.cpp) and its loopback test, header only, inline
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -61,14 +61,13 @@
 
 namespace usbsid {
 
-/* Socket handle held as a signed integer: int on POSIX, SOCKET (pointer
- * sized) on Windows. -1 is the invalid value everywhere. */
+/* Socket handle as a signed integer: int on POSIX, SOCKET (pointer sized) on Windows, -1 is invalid everywhere */
 typedef std::intptr_t net_sock_t;
 constexpr net_sock_t kNetInvalidSock = -1;
 typedef std::ptrdiff_t net_ssize_t;
 
-/* Winsock needs WSAStartup before any socket call; once per process is enough
- * (the OS refcounts it and reclaims at exit). No-op elsewhere. */
+/* Winsock needs WSAStartup before any socket call, once per process is enough
+ * (the OS refcounts it and reclaims at exit), no-op elsewhere */
 inline bool net_startup(void)
 {
 #ifdef _WIN32
@@ -92,11 +91,11 @@ inline net_sock_t net_socket(int family, int type, int protocol)
 #endif
 }
 
-/* Connect with an upper bound on the wait. A plain blocking connect to an
- * unreachable host takes ~21 s on Windows and minutes on macOS/Linux. The
- * socket goes non-blocking for the connect, select() waits for the result
- * (writable on success; on Windows failure arrives in exceptfds), SO_ERROR
- * gives the verdict, and blocking mode is restored before returning. */
+/* Connect with a bounded wait, a plain blocking connect to an unreachable host
+ * takes ~21 s on Windows and minutes on macOS/Linux
+ * The socket goes non-blocking, select() waits for the result (writable on success,
+ * on Windows failure arrives in exceptfds), SO_ERROR gives the verdict
+ * and blocking mode is restored before returning */
 inline bool net_connect(net_sock_t s, const struct sockaddr * addr, size_t len,
                         int timeout_ms = 3000)
 {
@@ -104,7 +103,7 @@ inline bool net_connect(net_sock_t s, const struct sockaddr * addr, size_t len,
   const SOCKET fd = static_cast<SOCKET>(s);
   u_long nb = 1;
   if (::ioctlsocket(fd, FIONBIO, &nb) != 0) {
-    /* Cannot bound the wait: fall back to a plain blocking connect. */
+    /* Cannot bound the wait, fall back to a plain blocking connect */
     return ::connect(fd, addr, static_cast<int>(len)) == 0;
   }
   bool ok = false;
@@ -120,7 +119,7 @@ inline bool net_connect(net_sock_t s, const struct sockaddr * addr, size_t len,
     struct timeval tv;
     tv.tv_sec = timeout_ms / 1000;
     tv.tv_usec = (timeout_ms % 1000) * 1000;
-    /* First argument is ignored by Winsock. */
+    /* First argument is ignored by Winsock */
     if (::select(0, nullptr, &wfds, &efds, &tv) > 0 && FD_ISSET(fd, &wfds)) {
       int err = 0;
       int elen = sizeof(err);
@@ -135,7 +134,7 @@ inline bool net_connect(net_sock_t s, const struct sockaddr * addr, size_t len,
   const int fd = static_cast<int>(s);
   const int flags = ::fcntl(fd, F_GETFL, 0);
   if (flags < 0 || ::fcntl(fd, F_SETFL, flags | O_NONBLOCK) != 0) {
-    /* Cannot bound the wait: fall back to a plain blocking connect. */
+    /* Cannot bound the wait, fall back to a plain blocking connect */
     return ::connect(fd, addr, static_cast<socklen_t>(len)) == 0;
   }
   bool ok = false;
@@ -148,8 +147,8 @@ inline bool net_connect(net_sock_t s, const struct sockaddr * addr, size_t len,
     tv.tv_usec = (timeout_ms % 1000) * 1000;
     int sel;
     do {
-      /* Linux select() updates tv with the time left; an EINTR retry
-       * does not restart the full timeout there; other systems keep tv. */
+      /* Linux select() updates tv with the time left, an EINTR retry
+       * does not restart the full timeout there. Other systems keep tv */
       fd_set wfds;
       FD_ZERO(&wfds);
       FD_SET(fd, &wfds);
@@ -166,8 +165,8 @@ inline bool net_connect(net_sock_t s, const struct sockaddr * addr, size_t len,
 #endif
 }
 
-/* Bind to 127.0.0.1 on an OS chosen port and listen; the port comes back in
- * host order. For the loopback test server. */
+/* Bind to 127.0.0.1 on an OS chosen port and listen, the port comes back in
+ * host order. For the loopback test server */
 inline bool net_listen_loopback(net_sock_t s, uint16_t * port)
 {
   sockaddr_in a;
@@ -209,8 +208,8 @@ inline void net_close(net_sock_t s)
 #endif
 }
 
-/* macOS has no MSG_NOSIGNAL: SO_NOSIGPIPE per socket (net_nosigpipe) instead.
- * Windows has no SIGPIPE. */
+/* macOS has no MSG_NOSIGNAL, SO_NOSIGPIPE per socket (net_nosigpipe)
+ * Windows has no SIGPIPE */
 inline void net_nosigpipe(net_sock_t s)
 {
 #if defined(SO_NOSIGPIPE) && !defined(_WIN32)
@@ -243,7 +242,7 @@ inline net_ssize_t net_recv(net_sock_t s, uint8_t * buf, size_t len)
 #endif
 }
 
-/* Non-blocking read of whatever is already queued; <= 0 when nothing is. */
+/* Non-blocking read of whatever is queued, <= 0 when nothing is */
 inline net_ssize_t net_recv_nowait(net_sock_t s, uint8_t * buf, size_t len)
 {
 #ifdef _WIN32
@@ -272,7 +271,7 @@ inline void net_set_nodelay(net_sock_t s)
 #endif
 }
 
-/* SO_RCVTIMEO / SO_SNDTIMEO: DWORD milliseconds on Windows, timeval elsewhere. */
+/* SO_RCVTIMEO / SO_SNDTIMEO: DWORD milliseconds on Windows, timeval elsewhere */
 inline void net_set_timeouts(net_sock_t s, unsigned seconds)
 {
 #ifdef _WIN32

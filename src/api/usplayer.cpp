@@ -1,16 +1,13 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * usplayer.cpp
- * The C API the firmware calls, on top of Machine and Player.
+ * The C API the firmware calls, on top of Machine and Player
  *
- * Everything here is statically allocated. There is no heap on the device
- * worth the name, the machine is needed for the whole life of the firmware
- * anyway, and a static object is one less thing that can fail at three in the
- * morning halfway through a tune.
+ * Everything in this file is statically allocated, no heap on the device
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -37,9 +34,7 @@
 #include "player.h"
 #include "types.h"
 
-/* Which backend the writes go to is the one thing that differs per target.
- * Everything below is written against the pair of them, so the names and the
- * call order are the same whether this is the firmware or a browser tab. */
+/* Backend the writes go to differs per target, firmware or browser tab */
 #if defined(WEB) && WEB
 #include "sid_web.h"
 #else
@@ -48,14 +43,10 @@
 
 using namespace usbsid;
 
-/* The firmware's clock switch, reached through a pointer for the same reason as
- * the bus functions in sid_embedded.h: an undefined weak symbol is an ELF idea
- * and this builds on Mach-O and PE as well. The index is into the firmware's own
- * table: { DEFAULT, PAL, NTSC, DREAN, NTSC2 }.
- *
- * Under EMBEDDED the real symbol is there and is taken by address, so the
- * firmware needs no edit; everywhere else it starts null and the clock is simply
- * not switched, which is what a null weak did. */
+/* Firmware clock switch through a pointer (undefined weak symbols are ELF only,
+ * this builds on Mach-O and PE too), index into the firmware table:
+ * { DEFAULT, PAL, NTSC, DREAN, NTSC2 }
+ * EMBEDDED takes the real symbol by address, elsewhere it is null (no switch) */
 #if defined(EMBEDDED) && EMBEDDED
 extern "C" void apply_clockrate(int n_clock, bool suspend_sids);
 #endif
@@ -70,17 +61,14 @@ void (*us_apply_clockrate)(int, bool) = nullptr;
 
 namespace {
 
-/* A SID file is at most a 64 KB payload plus its header. Copying it is not a
- * luxury: usbsid.c frees the buffer it handed us before init_sidplayer() is
- * called, and the payload has to survive until the driver is installed and,
- * for a subtune restart, well past that. */
+/* SID file is at most a 64 KB payload plus header, copied because usbsid.c
+ * frees its buffer before init_sidplayer() */
 constexpr size_t kMaxTuneBytes = 0x10000 + 0x100;
 
-/* Declaration order is construction order, and the player needs the machine */
+/* Declaration order is construction order, player needs the machine */
 Machine g_machine;
 #if defined(WEB) && WEB
-/* The exports in src/host/web_api.cpp drain the same ring the player fills,
- * and they cannot see this file's statics, so both go through web_backend(). */
+/* web_api.cpp drains the same ring, both go through web_backend() */
 WebSidBackend & g_backend = web_backend();
 #else
 EmbeddedSidBackend g_backend;
@@ -90,11 +78,11 @@ Player g_player(g_machine);
 data_t g_tune_bytes[kMaxTuneBytes];
 size_t g_tune_size = 0;
 
-bool g_initialised = false;   /* the backend has been attached */
-bool g_prepared = false;      /* init_sidplayer() has run and succeeded */
+bool g_initialised = false;   /* Backend attached */
+bool g_prepared = false;      /* init_sidplayer() succeeded */
 bool g_is_prg = false;
 bool g_clock_follows_tune = true;
-uint16_t g_song = 0;          /* 1 based, 0 means the file's default */
+uint16_t g_song = 0;          /* 1 based, 0 is the file default */
 
 void attach_once(void)
 {
@@ -104,18 +92,16 @@ void attach_once(void)
 }
 
 /**
- * @brief Ask the board for the clock the tune was written for.
+ * @brief Ask the board for the clock of the tune
  *
- * The firmware indexes its clock table (sid_defs.h) rather than taking a
- * frequency; a rate not in it is left alone rather than set wrong.
+ * Firmware takes an index into its clock table (sid_defs.h), unknown rates are left alone
  */
 void apply_tune_clock(void)
 {
   static const uint32_t kRates[] = { 1000000, 985248, 1022727, 1023440, 1022730 };
   const uint32_t want = vic_timing(g_machine.video_model()).clock_hz;
 
-  /* The backend needs the rate whether or not the board is allowed to follow
-   * it: it is what turns a cycle gap into microseconds to wait out. */
+  /* Backend always needs the rate (cycle gap to microseconds) */
   g_backend.set_clock_hz(want);
 
   if (!g_clock_follows_tune || us_apply_clockrate == nullptr) return;
@@ -128,21 +114,17 @@ void apply_tune_clock(void)
 } /* namespace */
 
 /* ------------------------------------------------------------------------ *
- * loading and streaming upload
+ * Loading and streaming upload
  *
- * The three primitives load_sidtune()/load_prg() are themselves now built
- * on: a caller with the whole file in one buffer already (load_sidtune/
- * load_prg) copies it in with a single usplayer_upload_feed() instead of a
- * private loop, and a caller receiving it in USB packets (the firmware) can
- * feed it straight into g_tune_bytes as each packet arrives, with no
- * firmware-owned staging buffer at all.
+ * load_sidtune()/load_prg() are built on these, the firmware feeds USB
+ * packets straight into g_tune_bytes
  * ------------------------------------------------------------------------ */
 
 void usplayer_upload_start(void)
 {
   attach_once();
   g_prepared = false;
-  g_is_prg = false; /* set for real by whichever finish_*() is eventually called */
+  g_is_prg = false; /* Set by finish_*() */
   g_tune_size = 0;
 }
 
@@ -155,9 +137,7 @@ bool usplayer_upload_feed(const uint8_t * buf, size_t len)
   for (size_t i = 0; i < n; i++) g_tune_bytes[g_tune_size + i] = buf[i];
   g_tune_size += n;
 
-  /* false means some of this packet did not fit and was dropped, the same
-   * truncation load_sidtune()/load_prg() already did for an oversized
-   * single buffer, just discoverable per packet instead of silent. */
+  /* False when part of the packet did not fit and was dropped */
   return n == len;
 }
 
@@ -168,8 +148,7 @@ void usplayer_upload_finish_tune(char subt)
 
   if (g_tune_size == 0) return;
 
-  /* The firmware counts subtunes from zero and uses zero for "the tune's own
-   * default", which is how the old player read it too. */
+  /* Firmware counts subtunes from zero, zero is the tune default */
   const int sub = static_cast<int>(static_cast<unsigned char>(subt));
   g_song = (sub == 0) ? 0 : static_cast<uint16_t>(sub + 1);
 
@@ -182,11 +161,9 @@ void usplayer_upload_finish_tune(char subt)
 }
 
 /**
- * @brief Finish an upload as a program and start it.
+ * @brief Finish an upload as a program and start it
  *
- * Unlike a tune, a program has no separate init step: boot, load and RUN
- * all happen here, making this the slow call. `loop` is accepted and
- * ignored - nothing here decides a program has finished.
+ * No separate init step, boot, load and RUN all happen in this call (slow), loop is ignored
  */
 void usplayer_upload_finish_prg(bool loop)
 {
@@ -202,17 +179,13 @@ void usplayer_upload_finish_prg(bool loop)
   }
 
   g_backend.reset_hardware();
-  /* The same clock a tune gets. This used to tell the backend the rate and
-   * stop there, so the board kept whatever clock the last tune left it on and
-   * a program ran at the wrong speed, on hardware, for as long as it played. */
+  /* Same clock as a tune */
   apply_tune_clock();
 
-  /* Booting the machine and loading the program is not part of the program's
-   * timeline. Pacing it would sit out every gap in it in real time, which for
-   * a PRG is nearly three seconds of waiting for work that takes two. */
+  /* Boot and load are not part of the program timeline, no pacing */
   g_backend.set_pacing(false);
   g_prepared = g_player.init_prg();
-  /* A program has no separate start call, so the pacer starts here instead */
+  /* No separate start call for a program, pacer starts after init */
   g_backend.set_pacing(true);
 }
 
@@ -235,43 +208,38 @@ void load_prg(uint8_t * binary_, size_t binsize_, bool loop)
 }
 
 /* ------------------------------------------------------------------------ *
- * playing
+ * Playing
  * ------------------------------------------------------------------------ */
 
 void init_sidplayer(void)
 {
   attach_once();
 
-  /* A program was already booted, loaded and started by load_prg(), because
-   * that is the order the firmware calls things in. Nothing to do. */
+  /* A program is already started by load_prg() */
   if (g_is_prg) return;
 
   g_prepared = false;
   if (g_tune_size == 0) return;
 
   g_backend.reset_hardware();
-  g_backend.set_pacing(false); /* see load_prg: setup is not playback */
-  /* load_sid turns a BASIC RSID into a program, since that is what it is. */
+  g_backend.set_pacing(false); /* Setup is not playback */
+  /* load_sid turns a BASIC RSID into a program */
   g_prepared = g_player.is_prg() ? g_player.init_prg() : g_player.init_tune(g_song);
   g_backend.set_pacing(true);
 }
 
 void start_sidplayer(bool loop)
 {
-  (void)loop; /* the firmware drives the loop itself, one frame per call */
+  (void)loop; /* Firmware drives the loop, one frame per call */
   if (!g_prepared) return;
-  /* The pacer measures the tune's timeline from its first access. Start it
-   * here, so the setup that init_sidplayer() just ran is not part of it. */
+  /* Pacer measures the timeline from its first access, init_sidplayer() setup is excluded */
   g_backend.set_pacing(true);
   g_player.start();
 }
 
 void loop_sidplayer(void)
 {
-  /* One frame per call. The firmware's core 1 loop checks its own flags
-   * between calls, so this has to return promptly and cannot be the whole of
-   * playback. A frame always ends: the VIC keeps counting whatever the CPU
-   * does, so even a tune that has jammed comes back from here. */
+  /* One frame per call, always returns (VIC keeps counting, also on a jammed tune) */
   g_player.run_frame();
 }
 
@@ -300,7 +268,7 @@ void force_socktwo(void)
 }
 
 /* ------------------------------------------------------------------------ *
- * control
+ * Control
  * ------------------------------------------------------------------------ */
 
 void emu_pause_playing(bool pause)
@@ -310,9 +278,7 @@ void emu_pause_playing(bool pause)
 
 void emu_ffwd(bool enable)
 {
-  /* Nothing to do yet: on the device the SID writes themselves are the pacing,
-   * so "as fast as possible" is what already happens. It becomes real when the
-   * pacer arrives for the embedded build. */
+  /* Unfinished, on the device the SID writes are the pacing */
   (void)enable;
 }
 
@@ -337,7 +303,7 @@ void emu_write_byte(uint16_t address, uint8_t data)
 }
 
 /* ------------------------------------------------------------------------ *
- * the keyboard
+ * Keyboard
  * ------------------------------------------------------------------------ */
 
 bool usplayer_type(const char * text)
@@ -370,7 +336,7 @@ bool usplayer_typing(void)
 }
 
 /* ------------------------------------------------------------------------ *
- * configuration and state
+ * Configuration and state
  * ------------------------------------------------------------------------ */
 
 void usplayer_set_sid_config(uint8_t numsids, uint8_t sids_socket_one,
@@ -382,20 +348,12 @@ void usplayer_set_sid_config(uint8_t numsids, uint8_t sids_socket_one,
   cfg.sids_socket_two = sids_socket_two;
   cfg.fmopl_sid = fmopl_sid;
 
-  /* `numsids` is not applied. How many chips the player emulates is the
-   * tune's business and nothing else's: it decides which addresses the
-   * emulation decodes, and every one of them ends up as a register write on
-   * the same bus whatever the board is carrying. Clamping it to the board's
-   * count only threw away the second chip's writes of a two SID tune. */
+  /* numsids is not applied, the tune decides the chip count */
   (void)numsids;
 }
 
 /**
- * @brief The machine itself, for a frontend that needs to reach past this API.
- *
- * C++ only, not part of the C surface - the software audio backend must
- * attach to the same machine the player is stepping. attach_once() first,
- * so the machine is always set up.
+ * @brief The machine, for the software audio backend (C++ only)
  */
 namespace usbsid {
 Machine & usplayer_machine(void)
@@ -420,11 +378,7 @@ uint32_t usplayer_irq_sources(void)
   uint32_t out = 0;
   if (g_tune_size == 0) return 0;
 
-  /* A CIA source is armed when the interrupt mask allows it and, for the two
-   * timers, when the timer is actually started. A mask bit on its own says
-   * nothing: plenty of init routines set the mask and never start the timer,
-   * and reporting that as "this tune runs on Timer B" would be wrong. Control
-   * register bit 0 is the start bit for both timers. */
+  /* Armed = mask bit set and timer started (control register bit 0) */
   struct { Mos6526 & cia; uint32_t ta, tb, tod; } cias[] = {
     { g_machine.cia1(), USP_IRQ_CIA1_TA, USP_IRQ_CIA1_TB, USP_IRQ_CIA1_TOD },
     { g_machine.cia2(), USP_IRQ_CIA2_TA, USP_IRQ_CIA2_TB, USP_IRQ_CIA2_TOD },
@@ -436,7 +390,7 @@ uint32_t usplayer_irq_sources(void)
     if ((imr & 0x04) != 0) out |= c.tod;
   }
 
-  /* The VIC's own interrupt enable, bit 0 being the raster compare. */
+  /* VIC interrupt enable, bit 0 is the raster compare */
   if ((g_machine.vic().irq_enable() & 0x01) != 0) out |= USP_IRQ_VIC_RASTER;
   return out;
 }
@@ -450,8 +404,7 @@ uint16_t usplayer_cia_latch(uint8_t cia, uint8_t timer)
 int usplayer_start_mode(void)
 {
   if (!g_is_prg) return USP_START_DRIVER;
-  /* A BASIC RSID is loaded as a program, so the two are told apart by whether
-   * a tune was parsed at all. */
+  /* A BASIC RSID is loaded as a program, told apart by a parsed tune */
   return g_player.tune().valid ? USP_START_BASIC : USP_START_PRG;
 }
 
@@ -467,10 +420,9 @@ bool usplayer_is_pal(void)
 }
 
 /**
- * @brief Frames per second of the video model the tune asked for.
+ * @brief Frames per second of the tune video model
  *
- * PAL is 50.125, not 50 (19656 cycles/frame @ 985248 Hz). Pace playback
- * against this exact value or drift by a frame every ~8 seconds.
+ * PAL is 50.125 (19656 cycles/frame @ 985248 Hz), drifts a frame every ~8 seconds if rounded
  */
 double usplayer_refresh_hz(void)
 {
@@ -523,10 +475,8 @@ const char * usplayer_tune_name(void) { return g_player.tune().name; }
 const char * usplayer_tune_author(void) { return g_player.tune().author; }
 const char * usplayer_tune_released(void) { return g_player.tune().released; }
 
-/* v5: the tune's own idea of how many SID chips it wants, and where. Its own
- * count may run past what this player can actually wire up (4, everywhere);
- * that cap is applied in Player::load_sid, not here, so this stays the raw,
- * informational figure a frontend would want to show. */
+/* v5 chip count and addresses of the tune, raw and informational
+ * The cap of 4 is applied in Player::load_sid */
 uint8_t usplayer_sid_count(void) { return g_player.tune().sid_count; }
 uint16_t usplayer_sid_addr(uint8_t chip)
 {
@@ -558,8 +508,7 @@ uint32_t usplayer_benchmark(uint32_t cycles)
 
   if (us_time_us_64 == nullptr || cycles == 0) return 0;
 
-  /* Nothing should reach the SIDs while this runs, and whatever was playing
-   * should find its backend where it left it. */
+  /* Nothing may reach the SIDs, previous backend is restored after */
   static NullSidBackend measuring;
   SidBackend & previous = g_machine.sid().backend();
   g_machine.set_sid_backend(measuring);
@@ -572,7 +521,7 @@ uint32_t usplayer_benchmark(uint32_t cycles)
   g_machine.sid().resync();
 
   if (elapsed == 0) return 0;
-  /* cycles per microsecond is cycles per second in thousands */
+  /* Cycles per microsecond = kcycles per second */
   return static_cast<uint32_t>((static_cast<uint64_t>(cycles) * 1000ull) /
                                elapsed);
 }

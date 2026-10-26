@@ -1,15 +1,14 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
- * host/session.h
- * A playback session for interactive frontends (Android, GUIs): owns the
- * machine and the player, runs them on an engine thread, takes commands
- * between frames and reports a status snapshot. Where the writes go and what
- * paces the frames is a SessionSink: phone audio, a board, the network, or
- * nothing (tests).
+ * session.h
+ * Playback session for interactive frontends (Android, GUIs)
+ * Machine and player run on an engine thread, commands are taken between
+ * frames and a status snapshot is reported. A SessionSink decides where the
+ * writes go and what paces the frames (phone audio, board, network, none)
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -55,82 +54,75 @@
 
 namespace usbsid {
 
-/** @brief Play time of a song nothing knows the length of, 0 for no limit. */
+/** @brief Play time of a song with unknown length, 0 for no limit */
 constexpr uint32_t kSessionDefaultSongMs = 5u * 60u * 1000u;
 
 /**
- * @brief Where a session's register writes go and what paces its frames.
+ * @brief Where the register writes go and what paces the frames
  *
- * Every call comes from the session's engine thread, or from the caller's
- * thread while no engine runs, never from both at once.
+ * Calls come from the engine thread, or from the caller thread while no engine runs
  */
 class SessionSink
 {
   public:
     virtual ~SessionSink(void) = default;
 
-    /** @brief Short name for status and logs. */
+    /** @brief Short name for status and logs */
     virtual const char * name(void) const = 0;
 
-    /** @brief The backend the machine writes to. */
+    /** @brief The backend the machine writes to */
     virtual SidBackend & backend(void) = 0;
 
     /**
-     * @brief Become the machine's backend, before a file is loaded.
-     *
-     * @return false when the output is unusable
+     * @brief Become the machine backend before a file is loaded, false when the output is unusable
      */
     virtual bool attach(Machine & machine) = 0;
 
     /**
-     * @brief The file is parsed: clock and chip count are known.
+     * @brief File is parsed and clock and chip count are known, false when the output cannot play it
      *
-     * Runs before the tune's init, so its writes already use this setup.
+     * Runs before the tune init
      *
-     * @param machine  the machine, on the tune's video standard
+     * @param machine  the machine, on the tune video standard
      * @param tune     the parsed SID file, nullptr for a program
-     * @return false when the output cannot play it
      */
     virtual bool prepare(Machine & machine, const SidFile * tune) = 0;
 
     /**
-     * @brief One frame was emulated: move its output on.
+     * @brief One frame is emulated, pass on its output, false when the output failed (device gone)
      *
-     * Called outside the session lock. May block (a full audio ring), and
-     * returns early once `stopping` is set.
-     *
-     * @return false when the output failed (device gone)
+     * Called outside the session lock, may block (full audio ring) and returns early when stopping is set
      */
     virtual bool frame_done(const std::atomic<bool> & stopping) = 0;
 
-    /** @brief True when the session paces frames on the wall clock. */
+    /** @brief True when the session paces frames on the wall clock */
     virtual bool wall_clock(void) const = 0;
 
     /**
-     * @brief True when the output plays behind the emulation by a queue.
+     * @brief True when the output plays behind the emulation by a queue
      *
-     * The session then shows a wall clock elapsed time, clamped to the
-     * emulated one, and lets the last song play out before it ends.
+     * Elapsed time is shown from the wall clock (clamped to the emulated one)
+     * and the last song plays out before the end
      */
     virtual bool lags_audio(void) const { return false; }
 
-    /** @brief Silence the output for a pause or a seek. */
+    /** @brief Silence the output for a pause or seek */
     virtual void silence(Machine & machine) { (void)machine; }
 
-    /** @brief Put the sound back after silence(), from the register file. */
+    /** @brief Restore the sound after silence() from the register file */
     virtual void restore(Machine & machine) { (void)machine; }
 
-    /** @brief Playback ended or the session closes. */
+    /** @brief Playback ended or the session closes */
     virtual void detach(Machine & machine) { (void)machine; }
 
-    /** @brief Audio underruns while playing, 0 for outputs without a ring. */
+    /** @brief Audio underruns while playing, 0 without a ring */
     virtual uint64_t underruns(void) const { return 0; }
 
-    /** @brief Clipped samples, 0 for outputs without synthesis. */
+    /** @brief Clipped samples, 0 without synthesis */
     virtual uint64_t clipped(void) const { return 0; }
 };
 
-/** @brief Discards everything. Unpaced, or wall clock paced for timing tests. */
+/** @brief Discards everything, unpaced or wall clock paced */
 class NullSessionSink final : public SessionSink
 {
   public:
@@ -155,7 +147,7 @@ class NullSessionSink final : public SessionSink
     }
     bool wall_clock(void) const override { return paced_; }
 
-    /** @brief Writes seen, for tests. */
+    /** @brief Writes seen */
     uint32_t writes(void) const { return backend_.writes; }
 
   private:
@@ -163,7 +155,7 @@ class NullSessionSink final : public SessionSink
     bool paced_;
 };
 
-/** @brief Playback choices that are not about the output. */
+/** @brief Playback choices unrelated to the output */
 struct SessionOptions {
   /** Play the following subtune when a song reaches its length */
   bool auto_advance = true;
@@ -173,20 +165,20 @@ struct SessionOptions {
   bool use_song_lengths = true;
 };
 
-/** @brief A snapshot of a session, copied out under its lock. */
+/** @brief Snapshot of a session, copied under the lock */
 struct SessionStatus {
   bool loaded = false;
-  bool playing = false;        /* engine running a tune, paused or not */
+  bool playing = false;        /* Engine running a tune, paused or not */
   bool paused = false;
   bool seeking = false;
-  bool ended = false;          /* the last song played out */
-  bool failed = false;         /* the output failed, see error */
+  bool ended = false;          /* Last song played out */
+  bool failed = false;         /* Output failed, see error */
   bool is_prg = false;
-  bool needs_roms = false;     /* cannot start without BASIC and KERNAL */
+  bool needs_roms = false;     /* Needs BASIC and KERNAL */
   bool stuck_without_roms = false;
   uint16_t song = 0;           /* 1 based */
   uint16_t songs = 0;
-  uint32_t elapsed_ms = 0;     /* in the current song */
+  uint32_t elapsed_ms = 0;     /* In the current song */
   uint32_t length_ms = 0;      /* 0: plays until stopped */
   uint64_t frames = 0;         /* since play() */
   double frame_rate = 0.0;
@@ -203,10 +195,10 @@ struct SessionStatus {
 };
 
 /**
- * @brief A tune or program playing on an engine thread.
+ * @brief A tune or program playing on an engine thread
  *
- * Commands may come from any thread. While the engine runs they are queued
- * and executed between two frames; while it is stopped they run at once.
+ * Commands come from any thread, queued between two frames while the engine
+ * runs and executed at once while it is stopped
  */
 class Session
 {
@@ -218,17 +210,17 @@ class Session
     Session & operator=(const Session &) = delete;
 
     /**
-     * @brief Choose the output. Stops playback first.
+     * @brief Choose the output, stops playback first
      *
-     * @param sink  the output, owned by the session from here on
+     * @param sink  the output, owned by the session
      */
     void set_sink(std::unique_ptr<SessionSink> sink);
 
-    /** @brief Change playback options, applied from the next song on. */
+    /** @brief Change playback options, applied from the following song */
     void set_options(const SessionOptions & options);
 
     /**
-     * @brief Replace the ROM images, applied from the next play().
+     * @brief Replace the ROM images, applied at the following play()
      *
      * @param basic    kRomSizeBasic bytes or nullptr
      * @param kernal   kRomSizeKernal bytes or nullptr (stub KERNAL)
@@ -236,62 +228,60 @@ class Session
      */
     void set_roms(const data_t * basic, const data_t * kernal, const data_t * chargen);
 
-    /** @brief Back to the build's own ROM set. */
+    /** @brief Back to the default ROM set of the build */
     void default_roms(void);
 
     /**
-     * @brief Song length database text (Songlengths.md5), copied.
+     * @brief Copy the song length database text (Songlengths.md5)
      *
-     * @param text  the whole file, empty to drop it
-     * @param len   its length
+     * @param text  file contents, empty to drop it
+     * @param len   length
      */
     void set_song_lengths(const char * text, size_t len);
 
     /**
-     * @brief Copy and parse a SID file, PRG or P00. Stops playback first.
+     * @brief Copy and parse a SID file, PRG or P00, false when it is neither, stops playback first
      *
-     * @param bytes  the file
-     * @param len    its length
-     * @param song   1 based subtune, 0 for the file's default
-     * @return false when the file is not a tune or program
+     * @param bytes  file contents
+     * @param len    length
+     * @param song   1 based subtune, 0 for the file default
      */
     bool load(const data_t * bytes, size_t len, uint16_t song = 0);
 
     /**
-     * @brief Start the loaded file and the engine thread.
+     * @brief Start the loaded file and the engine thread
      *
-     * @return false without a loaded file, without a sink, or when the
-     *         output or the start failed (see status().error)
+     * Returns false without a loaded file or sink, or when the output or start
+     * failed (see status().error)
      */
     bool play(void);
 
-    /** @brief Stop the engine and silence the output. */
+    /** @brief Stop the engine and silence the output */
     void stop(void);
 
-    /** @brief Hold or resume playback, the output silenced while held. */
+    /** @brief Hold or resume playback, output is silenced while held */
     void pause(bool paused);
 
-    /** @brief Following or previous subtune from its start, wrapping. */
+    /** @brief Following or previous subtune from its start, wraps */
     void next_subtune(void);
     void previous_subtune(void);
 
     /**
-     * @brief One subtune from its start.
+     * @brief One subtune from its start
      *
      * @param song  1 to songs, out of range does nothing
      */
     void select_song(uint16_t song);
 
     /**
-     * @brief Jump forward in the current song, emulating unpaced and silent.
+     * @brief Jump forward in the current song, emulating unpaced and silent
      *
-     * @param ms  position in the song to jump to, behind the current one
-     *            does nothing
+     * @param ms  position to jump to, behind the current one does nothing
      */
     void seek(uint32_t ms);
 
     /**
-     * @brief Mute one voice or a whole chip, kept across subtunes.
+     * @brief Mute one voice or a whole chip, kept across subtunes
      *
      * @param chip   1 to kMaxSids
      * @param voice  1 to 3, 0 for the whole chip
@@ -300,19 +290,17 @@ class Session
     void set_mute(uint8_t chip, uint8_t voice, bool muted);
 
     /**
-     * @brief Run a function on the engine thread at the start of its life.
-     *
-     * For thread priority and similar; set before play().
+     * @brief Run a function at the start of the engine thread (priority etc), set before play()
      */
     void set_engine_thread_setup(std::function<void(void)> setup);
 
-    /** @brief A copy of the current state. */
+    /** @brief Copy of the current state */
     SessionStatus status(void) const;
 
-    /** @brief The loaded SID file, valid until the next load(). */
+    /** @brief Loaded SID file, valid until the following load() */
     const SidFile & tune(void) const { return player_.tune(); }
 
-    /** @brief The loaded program, valid until the next load(). */
+    /** @brief Loaded program, valid until the following load() */
     const PrgFile & program(void) const { return player_.prg(); }
 
   private:
@@ -354,7 +342,7 @@ class Session
     uint8_t voice_mute_[kMaxSids] = { 0 };
     char error_[96] = { 0 };
 
-    /* Shown elapsed time for outputs that lag the emulation, see shown_frames() */
+    /* Shown elapsed time for lagging outputs (see shown_frames()) */
     mutable std::chrono::steady_clock::time_point shown_t0_ =
       std::chrono::steady_clock::now();
     mutable uint64_t shown_base_ = 0;  /* song frames shown at the anchor */

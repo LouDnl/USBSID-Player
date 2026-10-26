@@ -1,10 +1,10 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * bus.cpp
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -65,8 +65,7 @@ void Bus::reset(void)
   nmi_edge_  = false;
   ba_        = true;
 
-  /* Reset order mirrors the tick order so a device that looks at the bus
-   * during reset sees the same neighbours it will see while running. */
+  /* Reset in tick order */
   if (vic_  != nullptr) vic_->reset();
   if (cia1_ != nullptr) cia1_->reset();
   if (cia2_ != nullptr) cia2_->reset();
@@ -91,9 +90,8 @@ void Bus::cia_rescheduled(const Mos6526 * who)
   else if (who == fast_cia2_) cia2_wake_ = 1;
 }
 
-/* One PHI2 cycle. With a whole machine attached, the four devices are
- * called by their real types - direct calls instead of vtable dispatch,
- * worth more on a Cortex-M33 where indirect calls predict badly. */
+/* One PHI2 cycle, direct calls by real type when a whole machine is attached
+   (indirect calls predict badly on Cortex-M33) */
 #if defined(US_PROFILE) && US_PROFILE
 Profile profile;
 #endif
@@ -110,10 +108,7 @@ void Bus::tick(void)
       vic_wake_ = fast_vic_->cycles_to_event();
     }
 
-    /* The CIAs are only looked at when they said something would happen. In
-     * between, this is a decrement: a timer counting down from a thousand has
-     * nothing to show for nine hundred and ninety nine of those cycles, and
-     * anything that reads the chip catches it up before it looks. */
+    /* CIAs are only looked at when an event is due, reads catch them up */
     if (US_UNLIKELY(--cia1_wake_ == 0)) {
       US_PROF(woke_cia1);
       fast_cia1_->catch_up(cycles_ + 1);
@@ -131,7 +126,7 @@ void Bus::tick(void)
     return;
   }
 
-  /* one chip at a time, which is how the tests bring the machine up */
+  /* One chip at a time */
   if (vic_ != nullptr)  vic_->tick();
   if (cia1_ != nullptr) cia1_->tick();
   if (cia2_ != nullptr) cia2_->tick();

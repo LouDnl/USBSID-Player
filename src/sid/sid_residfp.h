@@ -1,51 +1,31 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * sid_residfp.h
- * A SidBackend that synthesises audio with reSIDfp instead of driving a board.
+ * A SidBackend that synthesises audio with reSIDfp
  *
- * This is the seam working as intended: the emulation does not know or care
- * that nothing is being written to hardware. What arrives here is exactly what
- * arrives at the USBSID-Pico backend, and the only reason this file is more
- * than twenty lines is that reSIDfp wants the same information in a different
- * shape.
+ * Receives the same writes as the USBSID-Pico backend would, in another shape:
  *
- * Three things about that shape, each of which is somewhere an off by one would
- * hide:
+ * 1. The access cycle is not deducted
+ *    Hardware backends get cycles with one already taken off (SidConfig::access_overhead)
+ *    A software SID has no bus, attach() sets access_overhead to 0
  *
- * 1. **The access cycle must not be deducted.** Every hardware backend is
- *    handed `cycles` with one already taken off, because performing the access
- *    on USBSID-Pico costs a cycle of bus time (`SidConfig::access_overhead`).
- *    A software SID has no bus and no such cycle. So a player using this
- *    backend must set `access_overhead = 0`, and `attach()` does it rather than
- *    leaving it to the caller to remember. Getting this wrong is inaudible on
- *    one write and is the tempo across a frame of a digi tune.
+ * 2. reSIDfp wants the delta before the write
+ *    The seam hands over a write with the gap since the last event
+ *    reSIDfp wants clock(cycles) and then write(reg, value)
  *
- * 2. **reSIDfp wants the delta before the write, separately.** The seam hands
- *    over a gap *with* a write, meaning "this write happens `cycles` after the
- *    last event". reSIDfp wants `clock(cycles)` and then `write(reg, value)`.
- *    Same information, opposite order, and the ordering is what makes a write
- *    land on the right cycle.
+ * 3. The chip is folded into the register
+ *    reg is physical: $000-$01f chip 1, $020-$03f chip 2, up to $1c0-$1df for chip kMaxSoftSids (15)
+ *    reg >> 5 picks the instance, reg & 0x1f the register
+ *    Every chip is clocked by the same delta, they share phi2
+ *    reg is 16 bit (addr_t), 15 chips do not fit the top 3 bits of a byte
  *
- * 3. **The chip is folded into the register.** `reg` is physical: `$000-$01f` is
- *    chip 1, `$020-$03f` chip 2, up to `$1c0-$1df` for chip kMaxSoftSids (15).
- *    `reg >> 5` picks the instance and `reg & 0x1f` the register. Every
- *    configured chip is clocked by the same delta whether or not it was
- *    written to, because they all run off the same phi2 whatever the tune is
- *    doing. `reg` is 16 bit (addr_t), not 8, because 15 chips no longer fit
- *    the top 3 bits of a byte the way the 4 this backend used to be capped at
- *    did - see SidBackend::write()'s own comment.
+ * FM/OPL
+ *    Writes to $df40/$df50 reach the backend as reg >= kFmOplRange (kFmOplParkBase, mos6581_8580.cpp)
+ *    reSIDfp has no FM, they go to the OplChip and are counted in fm_writes()
  *
- * What this cannot do: **FM/OPL**. `kFmOplParkBase`'s two addresses
- * (mos6581_8580.cpp) reach a backend when a tune writes `$df40`/`$df50` and
- * no SID claims them - `reg >= kFmOplRange` below, chosen to sit past even
- * the widest real chip range so it can never be mistaken for one. reSIDfp has
- * no FM, so those writes are counted and dropped, and `fm_writes()` is non
- * zero afterwards so a frontend can say so once rather than being
- * mysteriously quiet.
- *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -84,30 +64,25 @@ namespace usbsid {
 
 class Machine;
 
-/** @brief How many chips this backend will synthesise at once. Matches
- * kMaxSids (sidfile.h), the most a v5 tune's own multiSidConfig can ask
- * for: this is the one backend "playing SIDs" is actually meant to expand
- * to more than 4 for (CLI and Web audio) - a real board (UsbSidBackend,
- * EmbeddedSidBackend, WebSidBackend) stays at its own physical 4 sockets. */
+/** @brief Max chips synthesised at once, same as kMaxSids (sidfile.h) */
 constexpr uint8_t kMaxSoftSids = kMaxSids;
 
-/** @brief Which resampler, mapped onto reSIDfp's own enum by the .cpp. */
+/** @brief Resampler, mapped to the reSIDfp enum */
 enum class SoftSidQuality : uint8_t {
   Fast,      /* linear interpolation, DECIMATE */
   Good,      /* sinc, RESAMPLE. The expensive one and the right one */
 };
 
-/** @brief Which chip to model. Taken from the tune's header when it says. */
+/** @brief Chip to model, taken from the tune header when it says */
 enum class SoftSidModel : uint8_t { Mos6581, Csg8580 };
 
-/** @brief reSIDfp's combined waveforms strength. */
+/** @brief reSIDfp combined waveforms strength */
 enum class SoftSidWaveforms : uint8_t { Average, Weak, Strong };
 
 /**
- * @brief reSIDfp filter settings, applied to every chip.
+ * @brief reSIDfp filter settings for every chip
  *
- * Defaults are reSIDfp's own. The 6581 range is one setting for every chip
- * in the process, a reSIDfp limit.
+ * Defaults are the reSIDfp ones, the 6581 range is shared by all chips (reSIDfp limit)
  */
 struct SoftSidFilter {
   bool enabled = true;
@@ -117,9 +92,7 @@ struct SoftSidFilter {
   SoftSidWaveforms waveforms = SoftSidWaveforms::Average;
 };
 
-/**
- * @brief Synthesises what the emulation writes, instead of sending it anywhere.
- */
+/** @brief Synthesise what the emulation writes */
 class ResidFpSidBackend final : public SidBackend
 {
   public:
@@ -130,24 +103,14 @@ class ResidFpSidBackend final : public SidBackend
     ResidFpSidBackend & operator=(const ResidFpSidBackend &) = delete;
 
     /**
-     * @brief Build the chips and set the sample rate.
+     * @brief Build the chips and set the sample rate, return false if reSIDfp rejects the parameters
      *
      * @param chips        1 to kMaxSoftSids
-     * @param clock_hz     the tune's C64 clock, 985248 PAL or 1022727 NTSC
-     * @param sample_rate  the device's rate, not a wish: on a phone it is fixed
+     * @param clock_hz     the tune C64 clock, 985248 PAL or 1022727 NTSC
+     * @param sample_rate  device rate (fixed on a phone)
      * @param quality      Fast or Good, see SoftSidQuality
-     * @param model        which chip to model
-     * @param stereo       opt in to a stereo mix, see set_pan(). Off by
-     *                     default: every existing caller of this backend
-     *                     (WAV, the live audio device, the web ring) assumed
-     *                     one channel, and changing that under them without
-     *                     asking would silently double their buffer's real
-     *                     meaning. Every chip starts out Center either way,
-     *                     which is an ordinary mono mix panned to both
-     *                     channels, so turning this on with no set_pan()
-     *                     calls is harmless on its own.
-     * @returns false if reSIDfp would not accept the parameters, in which case
-     *          nothing is configured and this backend must not be used
+     * @param model        chip to model
+     * @param stereo       stereo mix, see set_pan(). Off by default, all chips start Center
      */
     bool configure(uint8_t chips, double clock_hz, unsigned sample_rate,
                    SoftSidQuality quality, SoftSidModel model,
@@ -156,102 +119,73 @@ class ResidFpSidBackend final : public SidBackend
     /** @brief Is it configured and safe to attach? */
     bool ready(void) const { return ready_; }
 
-    /** @brief Whether this instance is mixing to one channel or two. */
+    /** @brief Mono or stereo mix */
     bool stereo(void) const { return stereo_; }
 
-    /** @brief Samples per frame: 1 mono, 2 stereo. What take()'s caller must
-     * scale its own buffer and frame count by. */
+    /** @brief Samples per frame, 1 mono or 2 stereo */
     unsigned channels(void) const { return stereo_ ? 2u : 1u; }
 
     /**
-     * @brief Where one chip sits in the stereo mix. Chip counts from 1.
+     * @brief Set the stereo position of a chip, chip counts from 1
      *
-     * No effect at all unless `stereo` was true at configure() - see its own
-     * comment. Every chip starts Center (the v5 SID file format's own
-     * default hint, sidfile.h's SidPan, when a tune says nothing) until this
-     * is called, so a stereo-configured backend nobody calls this on still
-     * plays as an ordinary center mix on both channels.
-     *
-     * Hard panning, not a gain law: Left goes only to the left accumulator,
-     * Right only to the right, Center to both - the same three positions a
-     * v5 tune's own multiSidConfig panning hint can ask for (see
-     * compute_panning(), sidfile.cpp), so there is no finer position to
-     * represent. Per channel headroom (recompute_pan_headroom() in the .cpp)
-     * is the count of chips actually reaching that channel, Center counted
-     * in both, not chips_ itself - an L/R/L/R spread should not get quieter
-     * on either side just because a third, Center chip exists.
+     * Needs stereo at configure(), chips start Center
+     * Hard panning: Left goes to the left accumulator, Right to the right, Center to both
+     * Headroom per channel (recompute_pan_headroom() in the .cpp) is the count of chips reaching it, Center counts in both
      */
     void set_pan(uint8_t chip, SidPan pan);
 
-    /** @brief Where one chip sits in the stereo mix, chip from 1; Center
-     * when there is no such chip. */
+    /** @brief Stereo position of a chip from 1, Center if there is no such chip */
     SidPan pan(uint8_t chip) const
     {
       return (chip >= 1 && chip <= chips_) ? pan_[chip - 1] : SidPan::Center;
     }
 
     /**
-     * @brief Set the filter of every chip, at once and after each configure().
+     * @brief Set the filter of every chip
      *
-     * Only what differs from the current settings is applied: a 6581 curve
-     * or range change rebuilds reSIDfp tables.
+     * Only changed settings are applied, a 6581 curve or range change rebuilds reSIDfp tables
      *
      * @param filter the new settings
      */
     void set_filter(const SoftSidFilter & filter);
 
-    /** @brief The filter settings in effect. */
+    /** @brief Filter settings in effect */
     const SoftSidFilter & filter(void) const { return filter_; }
 
     /**
-     * @brief How much the SID mix is turned down (or up) before it is output.
+     * @brief Set the SID mix multiplier
      *
-     * A plain multiplier applied after the per-chip/per-pan headroom divide
-     * and before the clamp to int16 range - see advance(). 1.0 is unity (the
-     * default, identical output to before this existed), 0.0 silences the
-     * SID side. Independent of set_fm_gain(): the two chips are scaled
-     * separately, before they are summed, which a single post-mix volume
-     * control cannot do. Not reset by configure() - a host sets this once
-     * and it survives a tune/subtune change same as set_pan() would if the
-     * caller did not have to reapply it (pan_[] IS reset by configure(),
-     * this is not).
+     * Applied after the headroom divide and before the clamp to int16, see advance()
+     * 1.0 is unity, 0.0 silences the SID side. Scaled apart from set_fm_gain()
+     * Not reset by configure()
      *
-     * @param gain the new multiplier, clamped to >= 0
+     * @param gain multiplier, clamped to >= 0
      */
     void set_sid_gain(float gain) { sid_gain_ = (gain < 0.0f) ? 0.0f : gain; }
-    /** @brief The multiplier the SID mix is scaled by. */
+    /** @brief SID mix multiplier */
     float sid_gain(void) const { return sid_gain_; }
 
     /**
-     * @brief How much the FM/OPL side is turned down (or up) before it is
-     * summed onto the SID mix. Forwards to the owned OplChip - see
-     * OplChip::set_gain() for the default and what it means when there is no
-     * FM chip built yet (nothing to do until a tune actually writes to one,
-     * see fm()'s own comment - the gain is remembered on the OplChip either
-     * way and applied once it exists).
+     * @brief Set the FM/OPL multiplier, forwarded to OplChip::set_gain()
      *
-     * @param gain the new multiplier, clamped to >= 0
+     * Kept by the OplChip until the chip exists, see fm()
+     *
+     * @param gain multiplier, clamped to >= 0
      */
     void set_fm_gain(float gain) { fm_.set_gain(gain); }
-    /** @brief The multiplier the FM/OPL side is scaled by. */
+    /** @brief FM/OPL multiplier */
     float fm_gain(void) const { return fm_.gain(); }
 
     /**
-     * @brief Play faster or slower by changing the output rate, chips untouched.
+     * @brief Change speed via the output rate and return the multiplier in effect
      *
-     * Resamples to `sample_rate / mult` instead of `sample_rate`: fewer samples
-     * per emulated second above 1, more below, played at the device rate. Pitch
-     * follows speed. Chip state, the FM/OPL included, is kept. Callable before
-     * configure() and not reset by it, same as set_sid_gain().
+     * Resamples to sample_rate / mult, pitch follows speed. Chip and FM/OPL state is kept
+     * Callable before configure(), kept over it
      *
-     * @param mult speed multiplier, 1 is normal; clamped to 0.1 to 8, and
-     *             further to keep the output rate within 4 kHz to 192 kHz,
-     *             the range reSIDfp's two pass sinc resampler handles
-     * @returns the multiplier in effect after clamping
+     * @param mult speed multiplier, 1 is normal. Clamped to 0.1 to 8 and to an output rate of 4 kHz to 192 kHz (limit of the reSIDfp two pass sinc resampler)
      */
     double set_speed(double mult);
-    /** @brief The speed multiplier in effect, see set_speed(): the request
-     * until configure(), the rate clamped result after. */
+    /** @brief Speed multiplier in effect, the request until configure() and the clamped value after */
     double speed(void) const
     {
       return (ready_ && out_rate_ != 0)
@@ -260,10 +194,7 @@ class ResidFpSidBackend final : public SidBackend
     }
 
     /**
-     * @brief Attach to a machine, setting what this backend needs of it.
-     *
-     * Sets `access_overhead` to 0, which is the one part of the contract that
-     * is not the same as a hardware backend's. See the header comment.
+     * @brief Attach to a machine and set access_overhead to 0
      */
     void attach(Machine & machine);
 
@@ -278,52 +209,40 @@ class ResidFpSidBackend final : public SidBackend
     /* ---- what the audio path takes ------------------------------------- */
 
     /**
-     * @brief Take up to `frames` rendered frames.
+     * @brief Take up to frames rendered frames and return the number written
      *
-     * Whatever has been synthesised so far and not yet taken. Returns how many
-     * frames were written, which is fewer than asked for when the emulation
-     * has not run far enough yet: it is the caller's job to keep the
-     * emulation ahead of the device, exactly as it is with a board.
-     *
-     * `out` must have room for `frames * channels()` int16_t: one sample per
-     * frame mono, interleaved L, R, L, R... stereo. Unchanged shape from
-     * before stereo existed as long as the caller was already sizing by
-     * channels() (1 then, same as now for a mono-configured instance).
+     * Fewer than asked when the emulation has not run far enough, keep it ahead of the device
+     * out needs room for frames * channels() int16_t, interleaved L, R, L, R... when stereo
      */
     size_t take(int16_t * out, size_t frames);
 
-    /** @brief How many rendered frames are waiting. */
+    /** @brief Rendered frames waiting */
     size_t available(void) const { return out_.size() / channels() - taken_; }
 
     /* ---- the oscilloscope tap ------------------------------------------ */
 
     /**
-     * @brief Record every voice's own output beside the mix, or stop.
+     * @brief Record every voice output beside the mix, or stop
      *
-     * One scope frame per rendered frame, each holding scope_voices() int16
-     * values: chip 1 voices 1-3, then chip 2 voices 1-3, up to the last
-     * chip. Taken with
-     * take_scope() in step with take(). Off by default, and costs nothing
-     * then. Not reset by configure().
+     * One scope frame per rendered frame, scope_voices() int16 values: chip 1 voices 1-3, chip 2 voices 1-3 etc
+     * Read with take_scope() alongside take(). Off by default, kept over configure()
      *
-     * @param on true to record, false to stop and drop what is recorded
+     * @param on true to record, false to stop and drop the recording
      */
     void set_scope(bool on);
 
     /** @brief Is the scope tap recording? */
     bool scope(void) const { return scope_on_; }
 
-    /** @brief Values per scope frame: three per configured chip. */
+    /** @brief Values per scope frame, three per chip */
     unsigned scope_voices(void) const { return 3u * chips_; }
 
     /**
-     * @brief Take up to `frames` scope frames, oldest first.
+     * @brief Take up to frames scope frames, oldest first, return frames written
      *
-     * @param out        room for `frames * voices` int16_t
-     * @param frames     the most frames to take
-     * @param voices     values to keep per frame, the first ones; clamped to
-     *                   scope_voices()
-     * @returns frames written
+     * @param out        room for frames * voices int16_t
+     * @param frames     max frames to take
+     * @param voices     values to keep per frame (the first ones), clamped to scope_voices()
      */
     size_t take_scope(int16_t * out, size_t frames, unsigned voices);
 
@@ -331,21 +250,12 @@ class ResidFpSidBackend final : public SidBackend
     void discard(void);
 
     /**
-     * @brief Clock forward with no write, to flush the tail of a render.
+     * @brief Clock forward with no write, flushes the tail of a render
      *
-     * The seam only ever delivers a gap attached to a write, so the stretch
-     * between a tune's last SID event and wherever the emulation stopped is
-     * never handed over: there is no write to hang it on. That is correct for
-     * live playback, where the stream simply ends, and it leaves a render up to
-     * two frames short of the time it was asked for.
-     *
-     * Measured on Coma_Light: 1630 samples missing after 250 frames, 1586 after
-     * 500, 1504 after 1000. **Constant, not scaling**, which is what says it is
-     * the tail and not a per write cycle leak. A leak would have been the
-     * `access_overhead` mistake this backend's header warns about.
-     *
-     * A frontend that cares compares `cycles_clocked()` against the cycles it
-     * knows the emulation ran and drains the difference.
+     * The seam only delivers a gap attached to a write, the stretch after the last SID event is never handed over
+     * A render ends up to two frames short
+     * Measured on Coma_Light: 1630 samples missing after 250 frames, 1586 after 500, 1504 after 1000 (constant)
+     * Compare cycles_clocked() with the cycles the emulation ran and drain the difference
      */
     void drain(uint32_t cycles) { advance(cycles); }
 
@@ -353,13 +263,10 @@ class ResidFpSidBackend final : public SidBackend
     uint64_t cycles_clocked(void) const { return cycles_clocked_; }
 
     /**
-     * @brief Take the register writes but do not synthesise anything.
+     * @brief Take register writes but synthesise nothing
      *
-     * For skipping a silent stretch (e.g. a loader's lead-in) fast: writes
-     * still reach the chips, but oscillators/envelopes/filters don't clock,
-     * so no state is lost. Do not use this over a passage that is sounding.
-     * ~10x faster than synthesising (3.81ms/frame vs 0.39ms, measured).
-     * `cycles_clocked()` keeps counting regardless.
+     * Skips a silent stretch (loader lead-in) fast. Writes reach the chips, oscillators/envelopes/filters do not clock
+     * Do not use over a sounding passage. About 10x faster (3.81ms/frame vs 0.39ms), cycles_clocked() keeps counting
      */
     void set_render(bool on) { render_ = on; }
 
@@ -368,126 +275,101 @@ class ResidFpSidBackend final : public SidBackend
 
     /* ---- what a frontend needs to report ------------------------------- */
 
-    /** @brief Writes to $df40/$df50 that reSIDfp cannot make a sound for. */
+    /** @brief Writes seen to $df40/$df50 */
     uint64_t fm_writes(void) const { return fm_writes_; }
 
     /**
-     * @brief The FM/OPL chip, built the first time a tune writes to one.
+     * @brief The FM/OPL chip, built on the first $df40/$df50 write
      *
-     * reSIDfp has no FM; writes to $df40/$df50 are routed to an owned OplChip
-     * and summed into this backend's own samples, so every frontend gets FM
-     * without knowing about it.
+     * reSIDfp has no FM, those writes go to the OplChip and are summed into the samples
      */
     const OplChip & fm(void) const { return fm_; }
 
-    /** @brief Frames synthesised since the last reset (see take()'s own
-     * frame/channel distinction). */
+    /** @brief Frames synthesised since the last reset */
     uint64_t samples(void) const { return produced_; }
-    /** @brief Samples (not frames - one count per channel) that had to be
-     * clamped, so clipping is not silent. */
+    /** @brief Clamped samples (one count per channel) */
     uint64_t clipped(void) const { return clipped_; }
 
     unsigned sample_rate(void) const { return sample_rate_; }
     uint8_t chips(void) const { return chips_; }
 
   private:
-    /** @brief Clock every chip forward and keep what came out. */
+    /** @brief Clock every chip forward and keep the output */
     void advance(uint32_t cycles);
-    /** @brief Recount how many configured chips reach each channel, after
-     * configure() or set_pan() changes what pan_[] or chips_ says. Center
-     * counts toward both - see set_pan()'s own comment on why. */
+    /** @brief Recount chips reaching each channel, Center counts in both */
     void recompute_pan_headroom(void);
 
-    /** @brief Output rate for `speed_` at `sample_rate_`, clamped. */
+    /** @brief Output rate for speed_ at sample_rate_, clamped */
     unsigned speed_rate_(void) const;
 
     /**
-     * @brief Apply filter settings to one chip.
+     * @brief Apply filter settings to one chip
      *
      * @param chip  0-based chip
-     * @param all   true for every setting, false for those differing from
-     *              `was`
-     * @param was   the settings the chip has
+     * @param all   true for every setting, false for those differing from was
+     * @param was   settings the chip has
      */
     void apply_filter_(uint8_t chip, bool all, const SoftSidFilter & was);
 
     /**
-     * @brief Copy one chip's tapped voices into the scope frames.
+     * @brief Copy the tapped voices of a chip into the scope frames
      *
-     * @param chip  0-based chip, its slot in each frame
+     * @param chip  0-based chip, slot in each frame
      * @param count samples the chip produced this step
-     * @param base  index in scope_ of this step's first frame
+     * @param base  index in scope_ of the first frame of this step
      */
     void store_scope_(uint8_t chip, int count, size_t base);
 
     reSIDfp::residfp * sid_[kMaxSoftSids] = {};
     uint8_t chips_ = 0;
     unsigned sample_rate_ = 0;
-    /* Rate the chips and the FM/OPL resample to: sample_rate_ / speed_. */
+    /* Resample rate of chips and FM/OPL, sample_rate_ / speed_ */
     unsigned out_rate_ = 0;
     double clock_hz_ = 0.0;
     SoftSidQuality quality_ = SoftSidQuality::Good;
-    /** Requested multiplier, see set_speed(). Not touched by configure(). */
+    /** Requested multiplier, see set_speed() */
     double speed_ = 1.0;
     bool ready_ = false;
-    /* False while a stretch is being run through with nothing synthesised,
-     * see set_render(). */
+    /* False while skipping, see set_render() */
     bool render_ = true;
 
-    /* Opt-in stereo mix, set once at configure() time - see its own comment
-     * on why this is not a runtime toggle. */
+    /* Stereo mix, set at configure() */
     bool stereo_ = false;
     SidPan pan_[kMaxSoftSids] = {};
-    /* How many configured chips reach the left/right channel respectively,
-     * Center counted in both - the per-channel headroom divisor advance()
-     * uses. Always at least 1. Meaningless, and unused, when !stereo_. */
+    /* Chips reaching the left/right channel, Center counts in both
+     * At least 1, unused when !stereo_ */
     uint8_t pan_count_l_ = 1;
     uint8_t pan_count_r_ = 1;
 
-    /** See set_sid_gain(). Not touched by configure(). */
+    /** See set_sid_gain() */
     float sid_gain_ = 1.0f;
 
-    /** See set_filter(). Not touched by configure(). */
+    /** See set_filter() */
     SoftSidFilter filter_;
 
-    /* Rendered frames, oldest first: one int16_t each if mono, an
-     * interleaved L/R pair each if stereo (see channels()). A vector and not
-     * a fixed ring: the CLI drains this from a device callback at whatever
-     * size the device asks for, and a tune stepped a frame at a time
-     * produces about 800 frames a frame, so the sizes involved are small and
-     * predictable. */
+    /* Rendered frames, oldest first: one int16_t each if mono, an L/R pair each if stereo */
     std::vector<int16_t> out_;
     size_t taken_ = 0;
     uint64_t produced_ = 0;
     uint64_t clipped_ = 0;
     uint64_t fm_writes_ = 0;
-    /* Built on the first $df40/$df50 write and not before: most tunes have no
-     * FM side and should pay nothing for one. */
+    /* Built on the first $df40/$df50 write */
     OplChip fm_;
 
     uint64_t cycles_clocked_ = 0;
 
-    /* One chip's worth of samples, reused, so no allocation happens on the
-     * write path. reSIDfp returns at most one sample per cycle it is clocked
-     * and the seam's delta is sixteen bits, so this is the worst case. */
+    /* Samples of one chip, reSIDfp returns at most one per cycle and the seam delta is 16 bit */
     std::vector<int16_t> scratch_;
-    /* Mono accumulator (!stereo_) or, stereo, the left one; mix_r_ is the
-     * right one and is only ever touched when stereo_. Same kMaxDelta sizing
-     * as scratch_ above. */
+    /* Mono accumulator, or the left one when stereo. mix_r_ is the right one, sized like scratch_ */
     std::vector<int32_t> mix_;
     std::vector<int32_t> mix_r_;
-    /* Stereo-only scratch for OplChip::mix_into(), which mixes into a
-     * contiguous mono buffer in place and is stateful - it generates new OPL
-     * samples on every call, so it must run exactly once per chunk, never
-     * once per channel. FM is rendered once, into this (zeroed first), then
-     * that one mono result is added into both already-mixed SID channels by
-     * hand - see advance(). Unused, and left empty, when !stereo_, where
-     * mix_into() runs directly on out_ exactly as it always did. */
+    /* Stereo scratch for OplChip::mix_into(), stateful, runs once per chunk
+     * FM is rendered once into this (zeroed first) and added to both channels, see advance()
+     * Empty when !stereo_ */
     std::vector<int16_t> fm_scratch_;
 
-    /* Scope tap, see set_scope(). tap_ receives one chip's three voices per
-     * sample from reSIDfp, sized like scratch_; scope_ holds the interleaved
-     * frames not yet taken, scope_taken_ counts frames taken from its front. */
+    /* Scope tap, see set_scope(). tap_ gets 3 voices of one chip per sample
+     * scope_ holds frames not yet taken, scope_taken_ counts frames taken from its front */
     bool scope_on_ = false;
     std::vector<int16_t> tap_;
     std::vector<int16_t> scope_;

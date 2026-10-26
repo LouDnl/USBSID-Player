@@ -1,13 +1,11 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * machine.h
- * One assembled C64: RAM, ROMs, PLA, MMU, CPU and the bus that clocks them.
- * The chips that do not exist yet simply are not attached; the machine runs
- * without them, which is what every step up to now has relied on.
+ * One assembled C64: RAM, ROMs, PLA, MMU, CPU and the bus that clocks them
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -70,15 +68,14 @@ class Machine final : public CiaPortObserver
     Mos6526 & cia1(void) { return cia1_; }
     Mos6526 & cia2(void) { return cia2_; }
     Mos6569 & vic(void) { return vic_; }
-    /* The keyboard hangs off CIA1, which is the only place it is wired */
+    /* Keyboard is wired to CIA1 */
     Keyboard & keyboard(void) { return keyboard_; }
     Mos6581_8580 & sid(void) { return sid_; }
 
-    /* Swap where SID writes go. The machine owns a null backend so it always
-     * has somewhere to put them. */
+    /* Swap the SID write backend, default is a null backend */
     void set_sid_backend(SidBackend & backend) { sid_.set_backend(backend); }
 
-    /* Picking the video model retimes the VIC and the TOD dividers together */
+    /* Video model retimes the VIC and the TOD dividers */
     void set_video_model(VideoModel model);
     VideoModel video_model(void) const { return vic_.model(); }
 
@@ -86,8 +83,8 @@ class Machine final : public CiaPortObserver
     void cia_port_changed(uint8_t port, data_t value) override;
 
   private:
-    /* Declaration order is construction order: the MMU needs the RAM and the
-     * PLA, the CPU needs the MMU and the bus. */
+    /* Declaration order is construction order
+       (MMU needs RAM and PLA, CPU needs MMU and bus) */
     Ram ram_;
     Mos906114Pla pla_;
     Mmu mmu_;

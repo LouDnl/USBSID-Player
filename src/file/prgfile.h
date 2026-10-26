@@ -1,16 +1,12 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * prgfile.h
- * A C64 program file: two bytes of load address and then the bytes.
+ * C64 program file: 2 bytes load address then the data
+ * Also reads the PC64 .p00 container (26 byte header with the C64 name)
  *
- * Also the PC64 container the .p00 extension means, which is the same thing
- * behind a 26 byte header that carries the file's original C64 name. A .p00
- * is what a file transferred off a disk with a PC64 style tool looks like,
- * and there are enough of them about that reading them is worth twenty lines.
- *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -41,15 +37,10 @@ namespace usbsid {
 /* Where BASIC programs load, and where the KERNAL expects them */
 constexpr addr_t kBasicStart = 0x0801;
 
-/**
- * @brief A parsed program file.
- *
- * The payload is not copied, this points into the caller's bytes, the same way
- * SidFile does.
- */
+/** @brief A parsed program file, data points into the caller's bytes */
 struct PrgFile {
   bool valid = false;
-  bool is_p00 = false;          /* it arrived in a PC64 container */
+  bool is_p00 = false;          /* came in a PC64 container */
 
   addr_t load_addr = 0;
   addr_t end_addr = 0;          /* the last byte, inclusive */
@@ -57,24 +48,22 @@ struct PrgFile {
   const data_t * data = nullptr;
   size_t data_size = 0;
 
-  /* If the program starts with a BASIC line that SYSes somewhere, this is
-   * where. Nearly every machine code program on a disk does, because that is
-   * how you start one by typing RUN. */
+  /* Address a BASIC startup line SYSes to */
   bool has_sys_stub = false;
   addr_t sys_addr = 0;
 
-  char name[17] = { 0 };        /* from the container, when there is one */
+  char name[17] = { 0 };        /* from the container */
 
-  /** @brief True when this loads where BASIC programs go. */
+  /** @brief True if this loads where BASIC programs go */
   bool is_basic(void) const { return load_addr == kBasicStart; }
 };
 
 /**
- * @brief Parse a PRG or a P00.
+ * @brief Parse a PRG or P00
  *
- * @param bytes  the whole file
- * @param len    its length
- * @param out    filled in on success, out.valid says which
+ * @param bytes Whole file
+ * @param len Length of the file
+ * @param out Filled in on success, out.valid tells
  */
 bool prgfile_parse(const data_t * bytes, size_t len, PrgFile & out);
 

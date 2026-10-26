@@ -1,28 +1,16 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
- * host/audio_out.h
- * An audio device for the software SID path, via miniaudio.
+ * audio_out.h
+ * Audio device for the software SID path via miniaudio
  *
- * The threading is the whole reason this is a separate class rather than the
- * backend handing samples to a callback. miniaudio calls back on **its own
- * thread**, and `ResidFpSidBackend` is written for one thread: it renders while
- * the emulation runs, out of a vector it also compacts. Taking from that vector
- * on an audio thread is a data race, and the kind that produces a click once a
- * minute rather than a crash.
+ * miniaudio calls back on a separate thread and ResidFpSidBackend is single
+ * threaded, a ring sits between them. Main thread emulates and pushes, the
+ * device callback pops. Single producer, single consumer, two atomic indices,
+ * no locks on the audio thread, underruns are counted
  *
- * So there is a ring in between. The main thread emulates, takes samples out of
- * the backend and pushes them here; the device callback pops. Single producer,
- * single consumer, two atomic indices, no locks on the audio thread. Which is
- * the same shape as the board path: the emulation stays ahead of the consumer
- * and the consumer never blocks it.
- *
- * Underrun is counted rather than hidden. A frontend that is not keeping up
- * should be able to say so, and silence that is quietly inserted is
- * indistinguishable from a tune that is quiet.
- *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -54,7 +42,7 @@
 namespace usbsid {
 
 /**
- * @brief A 16 bit output device, fed from the main thread. Mono by default.
+ * @brief 16 bit output device fed from the main thread, mono by default
  */
 class AudioOut
 {
@@ -66,103 +54,74 @@ class AudioOut
     AudioOut & operator=(const AudioOut &) = delete;
 
     /**
-     * @brief Open the default output device.
+     * @brief Open the default output device, returns false with error() set on failure
      *
-     * @param rate         sample rate to ask for. The device may not give it;
-     *                     `rate()` afterwards is what it actually runs at, and
-     *                     that is what the synthesis has to be configured for.
-     * @param channels     1 or 2. Must match what the caller will push()/
-     *                     fill() as: this class treats its ring as a flat
-     *                     interleaved sample stream and has no channel
-     *                     awareness of its own, so mismatching this against
-     *                     ResidFpSidBackend::channels() interleaves garbage.
-     * @param buffer_ms    how much to keep between the emulation and the device.
-     *                     Bigger is more latency and fewer underruns.
-     * @returns false if no device could be opened, with `error()` set
+     * @param rate         sample rate to ask for, the device may differ (see rate())
+     * @param channels     1 or 2, must match ResidFpSidBackend::channels() (ring is a flat interleaved stream)
+     * @param buffer_ms    buffer between emulation and device, bigger is more latency and fewer underruns
      */
     bool open(unsigned rate, unsigned channels = 1, unsigned buffer_ms = 120);
 
-    /** @brief Channels the device was opened with. */
+    /** @brief Channels the device was opened with */
     unsigned channels(void) const { return channels_; }
 
     /**
-     * @brief Stop and close. Safe to call twice.
+     * @brief Stop and close, safe to call twice
      *
-     * Returns as soon as the request is handed off, not once the device is
-     * actually torn down: the underlying `ma_device_uninit()` has been seen to
-     * block indefinitely on a backend bug (see the .cpp), so the real teardown
-     * happens on its own thread instead of this call's.
+     * Teardown runs on a detached thread, ma_device_uninit() can block forever (see source file)
      */
     void close(void);
 
     bool is_open(void) const { return open_; }
 
-    /** @brief What the device actually runs at, which may not be what was asked. */
+    /** @brief Sample rate the device runs at */
     unsigned rate(void) const { return rate_; }
 
-    /** @brief Why open() failed, or an empty string. */
+    /** @brief Why open() failed, empty when fine */
     const char * error(void) const { return error_; }
 
     /**
-     * @brief Push samples for the device to play. Main thread only.
+     * @brief Push samples for the device to play, main thread only
      *
-     * `samples`/`n` are raw interleaved samples, not frames: `n` for one
-     * stereo frame is 2, matching ResidFpSidBackend::take()'s own output
-     * shape when channels() is 2, so a caller already sizing by that can
-     * hand this whatever take() filled in unchanged.
-     *
-     * @returns how many were accepted. Fewer than `n` means the ring is full,
-     *          which is the signal to stop emulating for a moment rather than to
-     *          drop audio: the caller should retry rather than discard.
+     * Samples are raw interleaved (n is 2 for one stereo frame), the output shape of
+     * ResidFpSidBackend::take(). Returns the accepted count, fewer than n = ring full, retry later
      */
     size_t push(const int16_t * samples, size_t n);
 
-    /** @brief Room for this many more raw samples right now (see push()'s
-     * own note on samples vs frames). */
+    /** @brief Room for more raw samples */
     size_t space(void) const;
 
-    /** @brief Raw samples queued and not yet played (see push()'s own note
-     * on samples vs frames). */
+    /** @brief Raw samples queued and not yet played */
     size_t queued(void) const;
 
-    /** @brief How many samples of silence the device had to invent. */
+    /** @brief Samples of silence the device had to insert */
     uint64_t underruns(void) const { return underruns_.load(std::memory_order_relaxed); }
 
-    /** @brief Wait until the queue has drained, so a tune ends where it ends. */
+    /** @brief Wait until the queue has drained */
     void drain(void);
 
     /**
-     * @brief True when the device has not called back for kStallMs, or is closed.
+     * @brief True when the device has not called back for kStallMs or is closed, any thread
      *
-     * A device that never asks for samples (a VM without audio hardware, a
-     * stuck backend) leaves the ring full forever. The caller then paces on
-     * the wall clock and drops what does not fit, instead of waiting on the
-     * ring. Any thread.
+     * A VM without audio hardware or a stuck backend leaves the ring full, pace on the wall clock then
      */
     bool stalled(void) const;
 
-    /** @brief Callback silence after which the device counts as stalled. */
+    /** @brief Callback silence after which the device is stalled */
     static constexpr int64_t kStallMs = 500;
 
     /**
-     * @brief Fill a device buffer. **Audio thread only.**
+     * @brief Fill a device buffer, audio thread only
      *
-     * Public because the device callback has to reach it and the callback cannot
-     * be a member: miniaudio's type takes `ma_device *`, and casting a function
-     * pointer to a different signature to make a member fit is the sort of thing
-     * that works until it does not. So the callback is a free function in the
-     * .cpp with the exact signature, and this is what it calls.
-     *
-     * Whatever is short is filled with silence and counted as an underrun.
+     * Public for the free function callback in the .cpp (miniaudio signature).
+     * A shortage is filled with silence and counted as underrun
      */
     void fill(int16_t * out, size_t frames);
 
   private:
     size_t pop(int16_t * out, size_t n);
 
-    /* Opaque so miniaudio.h is included by exactly one translation unit: it is
-     * four megabytes of header and does not belong in everything that plays a
-     * tune. */
+    /* Opaque, miniaudio.h (4MB) is included in one translation unit only */
     void * device_ = nullptr;
     bool open_ = false;
     unsigned rate_ = 0;
@@ -170,14 +129,12 @@ class AudioOut
     const char * error_ = "";
 
     std::vector<int16_t> ring_;
-    /* Single producer, single consumer. head is written only by the main thread
-     * and tail only by the audio thread, so neither needs a lock, and release
-     * and acquire are what make the samples visible before the index that
-     * publishes them. */
+    /* Single producer, single consumer. head is written by the main thread,
+     * tail by the audio thread, release/acquire publishes the samples */
     std::atomic<size_t> head_{ 0 };
     std::atomic<size_t> tail_{ 0 };
     std::atomic<uint64_t> underruns_{ 0 };
-    /* Steady clock in microseconds at the last callback, or at open(). */
+    /* Steady clock in microseconds at the last callback or open() */
     std::atomic<int64_t> last_fill_us_{ 0 };
 };
 

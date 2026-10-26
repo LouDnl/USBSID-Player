@@ -1,10 +1,10 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * mos906114_pla.cpp
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -55,8 +55,7 @@ Mos906114Pla::Mos906114Pla(void)
 
 void Mos906114Pla::reset(void)
 {
-  /* After reset the processor port reads back all ones for the three latches,
-   * which is mode 31: BASIC, IO and KERNAL all visible. */
+  /* After reset all three latches read 1 (mode 31, BASIC IO and KERNAL visible) */
   port_ = kPortLoram | kPortHiram | kPortCharen;
   game_ = true;
   exrom_ = true;
@@ -69,12 +68,9 @@ void Mos906114Pla::set_cartridge_lines(bool game, bool exrom)
 }
 
 /**
- * @brief Recompute the bank map.
+ * @brief Recompute the bank map
  *
- * The rules below reproduce the documented 32 mode table
- * (https://www.c64-wiki.com/wiki/Bank_Switching#Mode_Table). They are written
- * as rules rather than as a table so the test can hold the table and the two
- * cannot share a mistake.
+ * Follows the 32 mode table https://www.c64-wiki.com/wiki/Bank_Switching#Mode_Table
  */
 void Mos906114Pla::update(data_t port, bool game, bool exrom)
 {
@@ -93,8 +89,7 @@ void Mos906114Pla::update(data_t port, bool game, bool exrom)
   Bank * b = banks_;
 
   if (ultimax()) {
-    /* Ultimax: almost everything is unmapped and the cartridge owns the
-     * reset vector. Only the first 4 KB of RAM and the IO block survive. */
+    /* Ultimax: cartridge owns the reset vector, only the first 4 KB of RAM and IO stay mapped */
     b[static_cast<uint8_t>(Zone::Ram0)]   = Bank::Ram;
     b[static_cast<uint8_t>(Zone::Ram1)]   = Bank::Open;
     b[static_cast<uint8_t>(Zone::Cart)]   = Bank::CartLo;
@@ -109,11 +104,11 @@ void Mos906114Pla::update(data_t port, bool game, bool exrom)
   b[static_cast<uint8_t>(Zone::Ram1)] = Bank::Ram;
   b[static_cast<uint8_t>(Zone::Ram2)] = Bank::Ram;
 
-  /* $8000: the cartridge low ROM needs both latches and an asserted EXROM */
+  /* $8000: cartridge low ROM needs both latches and an asserted EXROM */
   b[static_cast<uint8_t>(Zone::Cart)] =
     (loram && hiram && !exrom_) ? Bank::CartLo : Bank::Ram;
 
-  /* $a000: a 16 KB cartridge wins over BASIC */
+  /* $a000: 16 KB cartridge overrides BASIC */
   if (hiram && !game_ && !exrom_) {
     b[static_cast<uint8_t>(Zone::Basic)] = Bank::CartHi;
   } else if (loram && hiram) {
@@ -122,7 +117,7 @@ void Mos906114Pla::update(data_t port, bool game, bool exrom)
     b[static_cast<uint8_t>(Zone::Basic)] = Bank::Ram;
   }
 
-  /* $d000: CHAREN only decides anything while at least one latch is set */
+  /* $d000: CHAREN only applies while at least one latch is set */
   if (!loram && !hiram) {
     b[static_cast<uint8_t>(Zone::IoChar)] = Bank::Ram;
   } else {

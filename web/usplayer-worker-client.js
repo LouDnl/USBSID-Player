@@ -1,24 +1,21 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback, for embedding on RP2350 (Pico2), and in a browser.
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
- * web/usplayer-worker-client.js
- * The page's side of the worker player.
+ * usplayer-worker-client.js
+ * Page side of the worker player
  *
- * Presents the same surface `USBSIDPlayerWeb` does, so a page can swap one for
- * the other and change nothing else. What it actually does is own the worker,
- * own the AudioContext, and wire the audio thread straight to the worker so the
- * main thread is not in the playback path.
+ * Same surface as USBSIDPlayerWeb, a page can swap one for the other
+ * Owns the worker and the AudioContext, the audio thread is wired to the worker
+ * The main thread is not in the playback path
  *
- * The one thing that has to happen here is `requestDevice()`: it shows a picker,
- * so it needs a user gesture and a document. Once granted, the worker finds the
- * same board with `getDevices()`. See USBSIDWebUSBTransport.connectGranted().
+ * requestDevice() runs in the page, it needs a user gesture and a document
+ * The worker finds the granted board with getDevices(), see USBSIDWebUSBTransport.connectGranted()
  *
- * Use `USBSIDPlayerWorker.available()` to decide: it is false without Worker,
- * WebUSB or Web Audio, and the page should fall back to USBSIDPlayerWeb. ASID
- * always falls back, because Web MIDI has no worker API.
+ * USBSIDPlayerWorker.available() is false without Worker, WebUSB or Web Audio, fall back to USBSIDPlayerWeb
+ * ASID always falls back, Web MIDI has no worker API
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -43,10 +40,9 @@ const USBSID_PID = 0x4011;
 export class USBSIDPlayerWorker {
   /**
    * @param {object} opts
-   *   opts.wasmUrl    URL of usbsid.mjs, resolved from the worker. The
-   *                   default assumes it sits beside the worker, which is
-   *                   where the WEB build puts it.
-   *   opts.workerUrl  URL of usplayer-worker.js (default: next to this file)
+   *   opts.wasmUrl    URL of usbsid.mjs, resolved from the worker
+   *                   (default: beside the worker, where the WEB build puts it)
+   *   opts.workerUrl  URL of usplayer-worker.js (default: beside this file)
    */
   constructor(opts = {}) {
     this._wasmUrl = opts.wasmUrl || './usbsid.mjs';
@@ -55,19 +51,15 @@ export class USBSIDPlayerWorker {
     this._worker = null;
     this._audio = null;
     this._board = null;
-    /* Which transport the worker should build. Undefined means let it choose,
-     * which is what everything but the bench wants. Passing it matters because
-     * a main-thread leg and a worker leg using different transports is not a
-     * comparison of threads, it is a comparison of two unrelated things. */
+    /* Transport for the worker to build, undefined = worker chooses (bench sets it) */
     this._prefer = opts.prefer;
-    /* Where the worker's own notes go. The page has a log the user can read and
-     * paste; the console is where a worker's troubles used to stay. */
+    /* Log callback for worker messages */
     this._onLog = opts.onLog || null;
-    /** Set from the worker's own answer once connect() has run. */
+    /* Set from the worker answer after connect() */
     this.transportKind = null;
-    /** When a tick-driven state message last arrived. 0 means never. */
+    /* Time of the last tick driven state message, 0 = never */
     this._stateAt = 0;
-    /** True when the audio clock never ticked and the worker timer took over. */
+    /* True when the audio clock never ticked and the worker timer took over */
     this.clockFallback = false;
     this._seq = 1;
     this._pending = new Map();
@@ -76,13 +68,11 @@ export class USBSIDPlayerWorker {
       queueDepth: 0, refreshHz: 50.125, name: '', author: '', released: '',
       song: 1, songs: 1, stats: null,
     };
-    /* Called with the state snapshot whenever the worker reports, about ten
-     * times a second. A page that wants a counter reads it from here rather
-     * than polling across the thread boundary. */
+    /* Called with the state snapshot on each worker report (about 10 per second) */
     this.onState = null;
   }
 
-  /** Whether the worker path can run at all here. */
+  /* Worker path can run in this environment */
   static available() {
     return typeof Worker !== 'undefined' &&
            typeof navigator !== 'undefined' && !!navigator.usb &&
@@ -90,17 +80,10 @@ export class USBSIDPlayerWorker {
             typeof globalThis.webkitAudioContext !== 'undefined');
   }
 
-  /**
-   * One round trip to the worker.
-   *
-   * With a timeout, because the failure modes that do not produce a reply are
-   * the ones that used to look like nothing happening at all: a module worker
-   * whose import graph fails to load never installs its message handler, and an
-   * AudioContext that is not allowed to start leaves `resume()` pending
-   * indefinitely rather than rejecting. Either one left this promise unsettled
-   * and the page silent, with nothing to go on.
-   *
-   * `init` gets longer than the rest: it compiles the wasm and opens the board.
+  /*
+   * One round trip to the worker, with a timeout
+   * A worker that fails to load its imports never replies, resume() on a blocked AudioContext stays pending
+   * init gets 30 s (compiles the wasm and opens the board), the rest 15 s
    */
   _call(type, payload, transfer) {
     return new Promise((resolve, reject) => {
@@ -115,7 +98,7 @@ export class USBSIDPlayerWorker {
     });
   }
 
-  /** Fail everything outstanding, for when the worker itself has gone wrong. */
+  /* Fail all outstanding calls */
   _failPending(message) {
     for (const [, waiting] of this._pending) {
       if (waiting.timer) clearTimeout(waiting.timer);
@@ -133,7 +116,7 @@ export class USBSIDPlayerWorker {
     const { type, payload, id } = e.data || {};
     if (type === 'log') { this._log((payload && payload.message) || ''); return; }
     if (type === 'state') {
-      /* Only onTick posts these, so the timestamp is proof the clock runs. */
+      /* Posted by onTick only, the timestamp shows the clock runs */
       this._stateAt = Date.now();
       this._state = payload || this._state;
       if (this.onState) this.onState(this._state);
@@ -147,14 +130,12 @@ export class USBSIDPlayerWorker {
     else waiting.resolve(payload);
   }
 
-  /**
-   * Ask for the board, then bring the worker up.
-   *
-   * Must be called from a user gesture: the picker will not open otherwise.
+  /*
+   * Ask for the board, then start the worker
+   * Needs a user gesture for the picker
    */
   async connect() {
-    /* Breadcrumbs, because every step here can hang and they all used to look
-     * the same from outside: nothing. */
+    /* Log each step, any of them can hang */
     this._log('looking for a granted board');
     const devices = await navigator.usb.getDevices();
     const known = devices.some((d) => d.vendorId === USBSID_VID &&
@@ -162,7 +143,7 @@ export class USBSIDPlayerWorker {
     this._log(known ? 'board already granted, no picker needed'
                     : 'not granted yet, asking');
     if (!known) {
-      /* Only the picker needs the gesture; the worker opens it afterwards. */
+      /* Only the picker needs the gesture, the worker opens the board afterwards */
       await navigator.usb.requestDevice({
         filters: [{ vendorId: USBSID_VID, productId: USBSID_PID }],
       });
@@ -171,9 +152,7 @@ export class USBSIDPlayerWorker {
     this._log('starting the worker at ' + this._workerUrl);
     this._worker = new Worker(this._workerUrl, { type: 'module' });
     this._worker.onmessage = (e) => this._onMessage(e);
-    /* A module worker that cannot load its imports fires this and never runs a
-     * line of its own code, so without a handler every call hangs. Same for a
-     * message that cannot be deserialised. */
+    /* Fires when a module worker cannot load its imports, every call hangs without it */
     this._worker.onerror = (e) => {
       const where = e && e.filename ? ` (${e.filename}:${e.lineno})` : '';
       const msg = 'the worker failed to start: ' +
@@ -190,7 +169,7 @@ export class USBSIDPlayerWorker {
     const { opened, board, transport } =
       await this._call('init', { wasmUrl: this._wasmUrl, prefer: this._prefer });
     this._log('init answered: opened=' + opened + ', transport=' + transport);
-    /** Which transport the worker actually built, not which one we assumed. */
+    /* Transport the worker built */
     this.transportKind = transport || null;
     if (!opened) throw new Error('the worker could not open the board');
     this._board = board || null;
@@ -211,13 +190,10 @@ export class USBSIDPlayerWorker {
     return !!(r && r.ok);
   }
 
-  /**
-   * Start the clock, and give the worker its end of it.
-   *
-   * The AudioWorkletProcessor gets one port of a MessageChannel and the worker
-   * gets the other, so ticks go from the audio thread to the worker without
-   * this thread seeing them. That is the difference that matters when the tab
-   * goes to the back: nothing in the playback path is on a throttled thread.
+  /*
+   * Start the clock and give the worker its end
+   * AudioWorkletProcessor and worker each get one port of a MessageChannel
+   * Ticks bypass this thread, a background tab does not throttle playback
    */
   async start() {
     await this._startAudioClock();
@@ -225,17 +201,10 @@ export class USBSIDPlayerWorker {
     await this._ensureClockRunning();
   }
 
-  /**
-   * Make sure something is actually driving the emulation.
-   *
-   * The worker only advances on a tick, and every way of not getting one looks
-   * identical from here: the tune loads, the board is open, the calls all
-   * succeed, and nothing plays. A suspended AudioContext does it, and so does a
-   * browser that will not transfer a MessagePort into an AudioWorkletProcessor.
-   *
-   * State messages come from onTick and nowhere else, so their arrival is the
-   * only honest test. If none has, start the worker's own timer, which is worse
-   * in a backgrounded tab but is playing rather than silence, and say so.
+  /*
+   * Check the emulation is driven by ticks
+   * A suspended AudioContext or a refused MessagePort transfer gives no ticks and no sound
+   * State messages come from onTick only, if none arrived start the worker timer
    */
   async _ensureClockRunning() {
     const before = this._stateAt;
@@ -246,11 +215,11 @@ export class USBSIDPlayerWorker {
               `${state}. Falling back to a timer in the worker.`);
     this.clockFallback = true;
     await this._call('fallbackClock', { on: true });
-    /* Give the fallback the same chance to prove itself. */
+    /* Same check for the fallback */
     const beforeFallback = this._stateAt;
     await new Promise((r) => setTimeout(r, 800));
     if (this._stateAt === beforeFallback) {
-      this._log('the fallback timer produced no ticks either, so the clock is ' +
+      this._log('the fallback timer produced no ticks either, the clock is ' +
                 'not what is wrong: the worker is not stepping the emulation.');
     }
     return false;
@@ -260,7 +229,7 @@ export class USBSIDPlayerWorker {
     if (this._audio) return;
     const AC = globalThis.AudioContext || globalThis.webkitAudioContext;
     const ctx = new AC();
-    /* Produces no audio; it exists to be called on the audio thread. */
+    /* No audio, only runs on the audio thread */
     const src = `
       class UspClock extends AudioWorkletProcessor {
         constructor() {
@@ -280,16 +249,12 @@ export class USBSIDPlayerWorker {
     const r = await this._call('clock', { port: chan.port1 }, [chan.port1]);
     if (!r || !r.ok) {
       this._log('the worker did not get a usable clock port back (' +
-                ((r && r.kind) || 'no answer') + '), so the audio thread cannot ' +
+                ((r && r.kind) || 'no answer') + '), the audio thread cannot ' +
                 'drive it. The fallback timer will be used.');
     }
     node.port.postMessage({ port: chan.port2 }, [chan.port2]);
-    node.connect(ctx.destination);   // something has to pull it or it never runs
-    /* resume() on a context the browser will not let start does not reject: it
-     * stays pending until the user interacts with the page. Waiting on it for
-     * ever is how a second leg of a benchmark silently never began. Give it a
-     * moment, then carry on and say so: the clock will start by itself as soon
-     * as the context is allowed to run. */
+    node.connect(ctx.destination);   // needs a consumer to run
+    /* resume() stays pending until the user interacts with the page, wait 2 s at most */
     await Promise.race([
       ctx.resume(),
       new Promise((r) => setTimeout(r, 2000)),
@@ -335,8 +300,7 @@ export class USBSIDPlayerWorker {
   boardConfig() { return this._board || null; }
   stats() { return this._state.stats || null; }
 
-  /* The page reads these from the last snapshot rather than across the thread,
-   * so they are synchronous like the main thread player's are. */
+  /* Read from the last snapshot, synchronous like the main thread player */
   isPlaying() { return this._state.playing; }
   isPrg() { return this._state.prg; }
   frames() { return this._state.frames; }

@@ -1,11 +1,11 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * types.h
  * Basic types, branch hints and memory placement attributes.
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -34,9 +34,7 @@
 
 namespace usbsid {
 
-/* Free running PHI2 cycle counter.
- * 64 bit on purpose: at ~1 MHz a 32 bit counter wraps after ~72 minutes, which
- * is well inside normal playing time and would corrupt every cycle delta. */
+/* Free running PHI2 cycle counter, 64 bit (32 bit wraps after ~72 min at ~1 MHz) */
 using cycle_t = uint_fast64_t;
 
 /* C64 bus types */
@@ -44,21 +42,16 @@ using addr_t = uint16_t; /* 16 bit address bus */
 using data_t = uint8_t;  /* 8 bit data bus */
 using reg_t  = uint8_t;  /* chip register index */
 
-/* Sub cycle step counter inside one instruction (0..7 is enough for a 6510) */
+/* Sub cycle step counter inside one instruction (0..7) */
 using ustep_t = uint_fast8_t;
 
-/* Branch hints. The per cycle paths are dominated by "almost never taken"
- * checks (raster match, badline, timer underflow), so the hints matter. */
+/* Branch hints for rarely taken checks (raster match, badline, timer underflow) */
 #define US_LIKELY(x)   __builtin_expect(!!(x), 1)
 #define US_UNLIKELY(x) __builtin_expect(!!(x), 0)
 
-/* Memory placement.
- * On the RP2350 the per cycle code and the RAM array must not live in flash,
- * or XIP stalls destroy the timing. On desktop these are no-ops.
- *
- * Both macros are written in the trailing attribute position so they work on
- * member functions as well as on free functions:
- *   void run(cycle_t n) US_RAM_ATTR;
+/* Memory placement
+ * RP2350 per cycle code and RAM array must stay out of flash (XIP stalls break timing)
+ * No-ops on desktop, place after the declarator: void run(cycle_t n) US_RAM_ATTR;
  */
 #if defined(EMBEDDED) && EMBEDDED
 #define US_RAM_ATTR __attribute__((section(".time_critical.usbsid")))
@@ -68,7 +61,7 @@ using ustep_t = uint_fast8_t;
 #define US_RAM_DATA
 #endif
 
-/* Force inline for the small accessors that sit in the per cycle path */
+/* Force inline for small per cycle accessors */
 #define US_ALWAYS_INLINE inline __attribute__((always_inline))
 
 } /* namespace usbsid */

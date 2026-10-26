@@ -1,11 +1,11 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * test_netdevice.cpp
  * The Network SID Device client backend against a loopback NSD v5 server.
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -41,9 +41,8 @@ using namespace usbsid;
 
 namespace {
 
-/* Loopback NSD v5 server posing as USBSID-Pico (or as `name`): answers every
- * request OK, records each TRY_WRITE (5) and TRY_WRITE_EX (19) payload in
- * `packets` and every request in `all`. */
+/* Loopback NSD v5 server posing as USBSID-Pico (or as name): answers every request OK,
+   records each TRY_WRITE (5) and TRY_WRITE_EX (19) payload in packets and every request in all */
 struct FakeNsd {
   struct Packet { uint8_t cmd; uint8_t sid; std::vector<uint8_t> payload; };
   const char * name = "USBSID-Pico";
@@ -84,8 +83,7 @@ struct FakeNsd {
       if (!rd(fd, h, 4)) break;
       std::vector<uint8_t> pl(static_cast<size_t>((h[2] << 8) | h[3]));
       if (!pl.empty() && !rd(fd, pl.data(), pl.size())) break;
-      /* Assign temporaries, not `resp = { ... }`: GCC 16 -O3 flags that
-       * assign() into an empty vector with a false -Wnonnull. */
+      /* Assign temporaries, GCC 16 -O3 flags assign() into an empty vector with a false -Wnonnull */
       using Bytes = std::vector<uint8_t>;
       Bytes resp;
       switch (h[0]) {
@@ -165,9 +163,8 @@ int test_netdevice_ex_stream(void)
   return 0;
 }
 
-/* Software server, multi-SID: every chip gets a center position and a model
- * after the count (sid-device mixes 2+ chips silent without a position), and
- * chip N's writes keep N in the TRY_WRITE register byte. */
+/* Software server, multi-SID: each chip gets a center position and a model after the count,
+   sid-device mixes 2+ chips silent without a position ~ chip N keeps N in the TRY_WRITE register byte */
 int test_netdevice_software_multisid(void)
 {
   FakeNsd srv;
@@ -187,7 +184,7 @@ int test_netdevice_software_multisid(void)
   be.disconnect();
   srv.stop();
 
-  /* Last TRY_SET_SID_COUNT before the writes, and what follows it. */
+  /* Last TRY_SET_SID_COUNT before the writes, and what follows it */
   size_t last_count = srv.all.size();
   for (size_t i = 0; i < srv.all.size(); i++) if (srv.all[i].cmd == 1) last_count = i;
   US_CHECK(last_count < srv.all.size(), "TRY_SET_SID_COUNT sent");
@@ -214,8 +211,8 @@ int test_netdevice_software_multisid(void)
   return 0;
 }
 
-/* Server that refuses counts above N: the count steps down 8, 4, 1, sid_count()
- * ends at what was accepted and writes to the refused chips are dropped. */
+/* Server that refuses counts above N: the count steps down 8, 4, 1 and sid_count() ends at what was
+   accepted ~ writes to refused chips are dropped */
 int test_netdevice_count_fallback(void)
 {
   FakeNsd srv;
@@ -238,7 +235,7 @@ int test_netdevice_count_fallback(void)
   std::vector<uint8_t> counts;
   unsigned pos_mask = 0;
   for (const FakeNsd::Packet & p : srv.all) {
-    if (p.cmd == 1 && p.sid > 1) counts.push_back(p.sid); /* skip connect()'s own count of 1 */
+    if (p.cmd == 1 && p.sid > 1) counts.push_back(p.sid); /* skip the connect() count of 1 */
     if (p.cmd == 12) pos_mask |= 1u << p.sid;
   }
   US_CHECK_EQ_U(counts.size(), 3, "count tried 10, 8, 4");

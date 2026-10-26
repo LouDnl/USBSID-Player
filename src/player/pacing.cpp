@@ -1,10 +1,10 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * pacing.cpp
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -70,9 +70,7 @@ void Pacer::rebase(uint64_t frame)
 
 void Pacer::wait_for_frame(uint64_t frame)
 {
-  /* The deadline is measured from a fixed point, never from the previous
-   * frame, so an ordinary slow frame does not push every later one back with
-   * it and the error cannot accumulate. */
+  /* Deadline is measured from a fixed point */
   const uint64_t due = start_us_ +
     static_cast<uint64_t>(frame_us_ * static_cast<double>(frame - base_frame_));
   const uint64_t now = now_us();
@@ -85,13 +83,7 @@ void Pacer::wait_for_frame(uint64_t frame)
 
   lag_us_ = static_cast<int64_t>(now - due);
 
-  /* Falling a long way behind is different from being a little late, and
-   * catching up is the wrong answer to it. Running frames back to back until
-   * the schedule is met sends the hardware a burst of writes at many times
-   * the rate it can take them, and the ring buffer between here and the
-   * device has no room for that: what comes out is a crackle. Whatever caused
-   * the stall has already cost that time, so the schedule is moved instead
-   * and playback carries on from here. */
+  /* Long stall moves the schedule, catching up floods the ring buffer (crackle) */
   constexpr int64_t kResyncThresholdUs = 250000; /* about twelve frames */
 
   if (lag_us_ > kResyncThresholdUs) {

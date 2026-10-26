@@ -1,13 +1,12 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * test_cia.cpp
- * Step 2.5 gate: the delay pipeline behaviours the model exists for, the two
- * Acid800 tests that were deferred from step 2.3 because they need real CIA
- * interrupts, and the CIA timing tests from the Lorenz suite.
+ * CIA delay pipeline behaviour, the Acid800 cpu_clisei and cpu_bugs tests
+ * (requires real CIA interrupts) and the Lorenz CIA timing tests
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -63,11 +62,9 @@ struct CiaRig {
 
 int test_timer_basics(void)
 {
-  /* The latencies below are the timer state machine's, and they are what the
-   * Lorenz timer tests validate. */
+  /* Latencies are the timer state machine's, validated by the Lorenz timer tests */
   {
-    /* a stopped timer takes the new latch immediately when the high byte is
-     * written, no delay stage involved */
+    /* a stopped timer takes the new latch immediately when the high byte is written */
     CiaRig r;
     r.write(0x04, 0x34);
     r.write(0x05, 0x12);
@@ -108,7 +105,7 @@ int test_timer_basics(void)
   }
 
   {
-    /* one shot stops itself on underflow and clears the start bit */
+    /* one shot stops on underflow and clears the start bit */
     CiaRig r;
     r.write(0x04, 0x03);
     r.write(0x05, 0x00);
@@ -138,13 +135,12 @@ int test_timer_basics(void)
   return 0;
 }
 
-/* ---- interrupts, the part the pipeline exists for ---------------------- */
+/* ---- interrupts -------------------------------------------------------- */
 
 int test_interrupts(void)
 {
   {
-    /* the interrupt line goes low one clock after the underflow, and reading
-     * the ICR releases it and clears every event in one go */
+    /* interrupt line goes low one clock after the underflow, reading the ICR releases it and clears all events */
     CiaRig r;
     r.write(0x0d, 0x81);          /* enable timer A interrupts */
     r.write(0x04, 0x02); r.write(0x05, 0x00);
@@ -161,8 +157,7 @@ int test_interrupts(void)
   }
 
   {
-    /* an event that arrives while masked is remembered, and unmasking it
-     * afterwards delivers the interrupt */
+    /* an event arriving while masked is remembered, unmasking delivers the interrupt */
     CiaRig r;
     r.write(0x04, 0x02); r.write(0x05, 0x00);
     r.write(0x0e, 0x01);
@@ -170,7 +165,7 @@ int test_interrupts(void)
     US_CHECK(r.cia.int_asserted() == false, "masked events do not interrupt");
     US_CHECK_EQ_U(r.cia.icr() & 0x01, 0x01u, "but they are recorded");
 
-    r.write(0x0d, 0x81);          /* now enable it */
+    r.write(0x0d, 0x81);          /* then enable it */
     r.run(2);
     US_CHECK(r.cia.int_asserted(), "unmasking a pending event interrupts");
   }
@@ -337,8 +332,7 @@ int run_program(const char * label, const char * path, uint64_t limit)
 
 int test_acid800_interrupts(void)
 {
-  /* These two were deferred from step 2.3: cpu_clisei needs a CIA1 timer
-   * interrupt, cpu_bugs needs a CIA2 timer NMI. */
+  /* Deferred from step 2.3: cpu_clisei needs a CIA1 timer interrupt, cpu_bugs a CIA2 timer NMI */
   run_program("cpu_clisei", US_ASSET_DIR "/tests/Acid800/cpu_clisei.prg",
               50ull * 1000ull * 1000ull);
   run_program("cpu_bugs", US_ASSET_DIR "/tests/Acid800/cpu_bugs.prg",
@@ -365,16 +359,10 @@ int test_lorenz_cia(void)
 }
 
 
-/* ---- skipping and stepping have to be the same thing -------------------- */
+/* ---- skipping equals stepping ------------------------------------------ */
 
 /**
- * @brief The bus does not clock a CIA every cycle any more.
- *
- * It asks how long the chip can be left alone and leaves it alone, catching it
- * up whenever anything looks. That is only allowed if it cannot be told apart
- * from walking every cycle, so here the same tune is run both ways and the two
- * register traces are compared event by event: what was written, what value,
- * and how many cycles after the last one.
+ * @brief Scheduled and stepped CIA give equal register traces
  */
 int test_skipping_matches_stepping(void)
 {
@@ -411,7 +399,7 @@ int test_skipping_matches_stepping(void)
     TraceSidBackend & trace = (pass == 0) ? fast : slow;
     machine.set_sid_backend(trace);
 
-    /* the second pass gives up the schedule and walks every cycle */
+    /* the second pass walks every cycle */
     if (pass == 1) machine.bus().attach_fast(nullptr, nullptr, nullptr, nullptr);
 
     Player player(machine);
@@ -458,18 +446,10 @@ int test_skipping_matches_stepping(void)
 
 
 /**
- * @brief Timer A prescaling timer B, scheduled against stepped.
+ * @brief Timer A prescaling timer B, scheduled vs stepped
  *
- * Timer A free running on phi2 with a latch of two underflows every three
- * cycles as a prescaler for timer B cascaded off it. `cascade_skip()` applies
- * a whole run of those underflows as arithmetic, which is only sound if the
- * run really is invisible from outside.
- *
- * The chip is driven directly rather than through a Machine, because a Machine
- * runs the KERNAL and the KERNAL reprograms CIA1 out from under the test. One
- * instance is caught up in strides, the other is ticked every clock, and they
- * are compared on a stride that is prime so it never lands in step with the
- * three clock period.
+ * Timer A on phi2, latch 2 (underflow every 3 cycles), cascades timer B
+ * Driven directly, a Machine runs the KERNAL which reprograms CIA1
  */
 struct CascadeRig {
   Bus bus;
@@ -478,7 +458,7 @@ struct CascadeRig {
 
   void program(void)
   {
-    cia.io_write(0x0d, 0x7f);   /* clear every interrupt mask */
+    cia.io_write(0x0d, 0x7f);   /* clear all interrupt masks */
     cia.io_write(0x04, 0x02);   /* timer A latch 2, an underflow every three */
     cia.io_write(0x05, 0x00);
     cia.io_write(0x06, 0x40);   /* timer B counts 0x0140 of them */
@@ -496,13 +476,13 @@ int test_cascade_matches_stepping(void)
   slow.program();
 
   constexpr uint64_t kCycles = 2ull * 1000ull * 1000ull;
-  constexpr uint64_t kStride = 997; /* prime, never in step with the period */
+  constexpr uint64_t kStride = 997; /* prime, avoids the 3 clock period */
   uint64_t diverged_at = 0;
   unsigned irqs = 0;
   bool irq_was = false;
 
   for (uint64_t at = kStride; at <= kCycles && diverged_at == 0; at += kStride) {
-    /* the scheduled one is allowed to get there however it likes */
+    /* the scheduled one may get there in any way */
     fast.cia.catch_up(static_cast<cycle_t>(at));
     while (slow.cia.ticks() < static_cast<cycle_t>(at)) slow.cia.tick();
 
@@ -520,9 +500,7 @@ int test_cascade_matches_stepping(void)
              slow.cia.int_asserted() ? 1 : 0);
     }
 
-    /* Reading ICR clears it and lets the interrupt arm again, so this both
-     * counts timer B's underflows and keeps the line from simply staying low
-     * after the first one. Both chips are read so they stay symmetrical. */
+    /* Reading ICR clears it and re-arms the interrupt, counts timer B underflows ~ both chips are read */
     const data_t flags = fast.cia.io_read(0x0d);
     const data_t other = slow.cia.io_read(0x0d);
     if (flags != other) diverged_at = at;
@@ -534,8 +512,7 @@ int test_cascade_matches_stepping(void)
            "the cascade scheduled and stepped never differ (cycle %llu)",
            static_cast<unsigned long long>(diverged_at));
 
-  /* If timer B never underflowed this proved nothing: that underflow is the
-   * one event the run has to stop short of. */
+  /* Timer B must have underflowed, the run has to stop short of that event */
   US_CHECK(irqs > 2, "and timer B underflowed while it ran (%u times)", irqs);
 
   const cycle_t walked = fast.cia.real_ticks();
@@ -544,8 +521,7 @@ int test_cascade_matches_stepping(void)
          static_cast<unsigned long long>(kCycles),
          100.0 * static_cast<double>(walked) / static_cast<double>(kCycles));
 
-  /* It used to walk every one of them. Anything under a fifth means the run is
-   * being applied in bulk rather than counted out. */
+  /* Under a fifth means the run is applied in bulk */
   US_CHECK(walked < kCycles / 5,
            "and the prescaler run is applied in bulk (%llu of %llu walked)",
            static_cast<unsigned long long>(walked),

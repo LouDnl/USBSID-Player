@@ -1,6 +1,6 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * sid_voice3.h
  * The two registers a SID can be read from: $d41b and $d41c
@@ -17,7 +17,8 @@
  * Clocked lazily, nothing influences it between two accesses, catching up at
  * a read gives the answer of stepping every cycle at none of the cost
  * A write first catches up to its own cycle
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ *
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD

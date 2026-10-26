@@ -1,14 +1,13 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * mos6569.cpp
  *
- * The cycle numbers follow Christian Bauer's "The MOS 6567/6569 video
- * controller (VIC-II) and its application in the Commodore 64", which is the
- * document every C64 emulator's VIC timing comes from.
+ * Cycle numbers follow Christian Bauer's "The MOS 6567/6569 video
+ * controller (VIC-II) and its application in the Commodore 64"
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -36,30 +35,23 @@ namespace usbsid {
 
 namespace {
 
-/* The display window, in raster lines. Bad lines only happen inside it. */
+/* Display window in raster lines, bad lines only occur inside it */
 constexpr uint16_t kFirstDisplayLine = 0x30;
 constexpr uint16_t kLastDisplayLine  = 0xf7;
 
-/* A bad line pulls BA low three cycles before the first character access and
- * holds it until the last one, so cycles 12 to 54 inclusive. The CPU keeps
- * running through the first three of those on its own credit, which is where
- * the well known "40 cycles" comes from. */
+/* Bad line: BA low from cycle 12 to 54 inclusive (3 cycles before the first character access)
+ * CPU keeps running for the first 3, 40 cycles stolen */
 constexpr uint16_t kBadlineBaFirst = 12;
 constexpr uint16_t kBadlineBaLast  = 54;
 
-/* Sprite n is fetched in cycles 58+2n and 59+2n, and BA goes low three cycles
- * ahead of that. Both wrap into the next line for the higher numbered
- * sprites. */
+/* Sprite n is fetched in cycles 58+2n and 59+2n, BA goes low 3 cycles earlier, wraps into the following line for the higher sprites */
 constexpr uint16_t kSpriteFirstCycle = 58;
 
-/* Where the two pieces of sprite bookkeeping happen in a line: DMA is switched
- * on for a sprite whose Y matches, and the line counter that eventually
- * switches it off again runs well after the fetches. Named because the
- * scheduler has to know to stop on them. */
+/* Sprite bookkeeping cycles: DMA switch on (Y matches) and the line counter that ends DMA */
 constexpr uint16_t kSpriteDmaCycle   = 55;
 constexpr uint16_t kSpriteCountCycle = 15;
 
-/* Sprites are 21 lines tall, twice that when vertically expanded */
+/* Sprites are 21 lines tall, 42 when vertically expanded */
 constexpr uint8_t kSpriteHeight = 21;
 
 } /* namespace */
@@ -75,7 +67,7 @@ void Mos6569::set_model(VideoModel model)
 {
   model_ = model;
   timing_ = &vic_timing(model);
-  rebuild_sprite_ba();   /* the windows wrap on the line length */
+  rebuild_sprite_ba();   /* Windows wrap on the line length */
 }
 
 void Mos6569::reset(void)
@@ -90,7 +82,7 @@ void Mos6569::reset(void)
   ba_ = true;
 
   for (uint8_t i = 0; i < 0x40; i++) regs_[i] = 0;
-  /* the KERNAL finds these values on a real machine after reset */
+  /* Values the KERNAL finds on a real machine after reset */
   regs_[kRegControl1] = 0x1b;
   regs_[kRegControl2] = 0xc8;
   regs_[kRegMemPtr]   = 0x14;
@@ -109,9 +101,7 @@ void Mos6569::reset(void)
   bus_.set_ba(true);
 }
 
-/* ------------------------------------------------------------------------ *
- * interrupts
- * ------------------------------------------------------------------------ */
+/* interrupts */
 
 void Mos6569::update_irq_line(void)
 {
@@ -124,15 +114,11 @@ void Mos6569::raise_irq(data_t source)
   update_irq_line();
 }
 
-/* ------------------------------------------------------------------------ *
- * bad lines and BA
- * ------------------------------------------------------------------------ */
+/* bad lines and BA */
 
 void Mos6569::check_badline(void)
 {
-  /* A bad line needs the display to have been enabled somewhere in the first
-   * line of the display window, the raster inside the window, and the low
-   * three raster bits to match the vertical scroll. */
+  /* Bad line: DEN set in the first display line, raster inside the window, low 3 raster bits equal the vertical scroll */
   const data_t yscroll = static_cast<data_t>(regs_[kRegControl1] & 0x07);
   badline_ = den_seen_ &&
              raster_ >= kFirstDisplayLine && raster_ <= kLastDisplayLine &&
@@ -140,10 +126,9 @@ void Mos6569::check_badline(void)
 }
 
 /**
- * @brief Work out the BA low cycles, and the next change from each of them.
+ * @brief Work out the BA low cycles and the upcoming change from each of them
  *
- * Called only when a sprite's DMA changes (cycle 55 or cycle 15); the
- * per-tick path just reads the precomputed result.
+ * Called when sprite DMA changes (cycle 55 or 15)
  */
 void Mos6569::rebuild_sprite_ba(void)
 {
@@ -156,8 +141,7 @@ void Mos6569::rebuild_sprite_ba(void)
     if (!sprite_dma_[n]) continue;
     sprite_ba_any_ = true;
 
-    /* BA low from three cycles before the first fetch until the last one.
-     * The higher numbered sprites wrap into the next line. */
+    /* BA low from 3 cycles before the first fetch until the last, higher sprites wrap into the following line */
     const uint16_t first = static_cast<uint16_t>(kSpriteFirstCycle + 2 * n - 3);
     const uint16_t last  = static_cast<uint16_t>(kSpriteFirstCycle + 2 * n + 1);
 
@@ -168,11 +152,7 @@ void Mos6569::rebuild_sprite_ba(void)
     }
   }
 
-  /* The edges of the union: every cycle whose BA differs from the cycle
-   * before it. Cycle one's predecessor is the last cycle of the previous
-   * line, which is the same table, and that is what makes a window that
-   * wrapped show up as an edge at the start of the line rather than being
-   * missed. Getting that wrong was worth five failing lockstep checks. */
+  /* Edges of the union: cycles whose BA differs from the previous cycle (before cycle 1 is the last cycle of the previous line) */
   sprite_ba_nedges_ = 0;
   for (uint16_t c = 1; c <= line; c++) {
     const bool before = (c == 1) ? sprite_ba_low_[line] : sprite_ba_low_[c - 1];
@@ -205,13 +185,11 @@ void Mos6569::update_ba(void)
   }
 }
 
-/* ------------------------------------------------------------------------ *
- * the clock
- * ------------------------------------------------------------------------ */
+/* the clock */
 
 void Mos6569::start_of_line(void)
 {
-  /* DEN is sampled through the whole of the first display line */
+  /* DEN is sampled through the first display line */
   if (raster_ == kFirstDisplayLine) {
     if ((regs_[kRegControl1] & 0x10) != 0) den_seen_ = true;
   } else if (raster_ == 0) {
@@ -232,47 +210,37 @@ void Mos6569::end_of_line(void)
   start_of_line();
 }
 
-/* ------------------------------------------------------------------------ *
- * scheduling
- * ------------------------------------------------------------------------ */
+/* scheduling */
 
 uint32_t Mos6569::cycles_to_event(void) const
 {
-  /* The first display line samples DEN on every cycle of it */
+  /* First display line samples DEN on every cycle */
   if (raster_ == kFirstDisplayLine && !den_seen_) return 1;
 
-  /* The line boundary always matters: it moves the raster and, at the end of
-   * the frame, tells the SID layer to flush. */
+  /* Line boundary moves the raster, at frame end the SID layer flushes */
   uint16_t next = timing_->cycles_per_line;
 
-  /* Sprites. What matters on a line is bounded, not every cycle: cycle 55
-   * (DMA switch-on for a sprite whose Y matches), cycle 15 (line counter,
-   * only matters once DMA is active), and the start/stop edges of each
-   * active sprite's 5-cycle BA pull. Walking every cycle once any sprite is
-   * enabled instead measured 2.5x the emulation cost (1.8% of cycles walked
-   * vs all of them) - almost every PRG has a sprite somewhere. */
+  /* Sprites: cycle 55 (DMA switch on, Y matches), cycle 15 (line counter, once DMA is active)
+   * and the start/stop edges of each 5 cycle BA pull */
   if (regs_[kRegSprEnable] != 0 && kSpriteDmaCycle >= cycle_ &&
       kSpriteDmaCycle < next) {
     next = kSpriteDmaCycle;
   }
 
   if (sprite_ba_any_) {
-    /* the line counter, and the end of DMA, at cycle 15 */
+    /* Line counter and end of DMA at cycle 15 */
     if (kSpriteCountCycle >= cycle_ && kSpriteCountCycle < next) {
       next = kSpriteCountCycle;
     }
 
-    /* Where BA changes. `sprite_ba_edges_` holds the union's own edges, not
-     * every individual sprite window edge - windows are 5 cycles wide and 2
-     * apart, so with several sprites active they merge and most edges land
-     * inside the merged run, changing nothing. */
+    /* Where BA changes, sprite_ba_edges_ holds the union edges (windows are 5 cycles wide and 2 apart) */
     for (uint8_t i = 0; i < sprite_ba_nedges_; i++) {
       const uint16_t at = sprite_ba_edges_[i];
       if (at >= cycle_ && at < next) next = at;
     }
   }
 
-  /* BA drops for a bad line and comes back after it */
+  /* BA drops for a bad line and returns after it */
   if (badline_) {
     if (kBadlineBaFirst >= cycle_ && kBadlineBaFirst < next) {
       next = kBadlineBaFirst;
@@ -281,7 +249,7 @@ uint32_t Mos6569::cycles_to_event(void) const
     if (after >= cycle_ && after < next) next = after;
   }
 
-  /* The raster compare, at the top of the line it matches */
+  /* Raster compare at the top of the matching line */
   const bool compare_here = (raster_ != 0) ? (raster_ == raster_irq_)
                                            : (raster_irq_ == 0);
   if (compare_here) {
@@ -323,7 +291,7 @@ uint32_t Mos6569::cycles_to_frame_end(void)
   const uint32_t line = timing_->cycles_per_line;
   const uint32_t lines_left =
     static_cast<uint32_t>(timing_->lines_per_frame - 1 - raster_);
-  /* what is left of this line, then the whole lines after it */
+  /* Rest of this line, then the whole lines after it */
   return (line - cycle_ + 1) + lines_left * line;
 }
 
@@ -336,23 +304,21 @@ void Mos6569::tick(void)
 {
   ++ticks_;
   ++real_ticks_;
-  /* The raster interrupt is raised at the start of the line, except for line
-   * zero which is compared one cycle later because the counter wraps there. */
+  /* Raster interrupt at the start of the line, line 0 one cycle later (counter wraps) */
   if (cycle_ == 1 && raster_ != 0) {
     if (raster_ == raster_irq_) raise_irq(kIrqRaster);
   } else if (cycle_ == 2 && raster_ == 0) {
     if (raster_irq_ == 0) raise_irq(kIrqRaster);
   }
 
-  /* DEN keeps being sampled while the first display line runs */
+  /* DEN is sampled while the first display line runs */
   if (raster_ == kFirstDisplayLine && (regs_[kRegControl1] & 0x10) != 0 &&
       !den_seen_) {
     den_seen_ = true;
     check_badline();
   }
 
-  /* Sprite DMA switches on in cycle 55 for every enabled sprite whose Y
-   * coordinate matches this line. */
+  /* Sprite DMA switches on in cycle 55 for each enabled sprite whose Y matches this line */
   if (cycle_ == kSpriteDmaCycle) {
     const data_t enabled = regs_[kRegSprEnable];
     const data_t line    = static_cast<data_t>(raster_ & 0xff);
@@ -362,7 +328,7 @@ void Mos6569::tick(void)
       const data_t sprite_y = regs_[static_cast<uint8_t>(0x01 + 2 * n)];
       if ((enabled & (1u << n)) != 0 && sprite_y == line && !sprite_dma_[n]) {
         sprite_dma_[n] = true;
-        sprite_line_[n] = 1; /* this line is the first of the sprite's 21 */
+        sprite_line_[n] = 1; /* First of the 21 sprite lines */
         sprite_expand_toggle_[n] = false;
         changed = true;
       }
@@ -370,9 +336,7 @@ void Mos6569::tick(void)
     if (changed) rebuild_sprite_ba();
   }
 
-  /* Counting the sprite's lines happens well after the fetch windows, which
-   * run from cycle 55 into cycle 10 of the following line for sprite 7. Doing
-   * it in cycle 55 would end the DMA before the last line was fetched. */
+  /* Sprite lines are counted after the fetch windows (sprite 7 runs from cycle 55 into cycle 10 of the following line) */
   if (cycle_ == kSpriteCountCycle) {
     const data_t expand = regs_[kRegSprYExp];
     bool changed = false;
@@ -398,32 +362,14 @@ void Mos6569::tick(void)
   }
 }
 
-/* ------------------------------------------------------------------------ *
- * registers
- * ------------------------------------------------------------------------ */
+/* registers */
 
 /**
- * @brief The raster counter as a read of $d011/$d012 sees it.
+ * @brief Raster counter as a read of $d011/$d012 sees it
  *
- * Every line's increment happens in the line's first cycle, with one
- * exception: the wrap from the last line of the frame to line 0 is a cycle
- * later than that. So for the width of one cycle a program reading the raster
- * at the top of the frame is still shown the last line, and only then zero.
- *
- * This is the same fact that puts the raster IRQ for line 0 in cycle 2 while
- * every other line's is in cycle 1 (see `tick()`): one counter, one late
- * transition, two visible consequences. The internal `raster_` is left
- * alone, because the badline test, the sprite windows and the display window
- * all key off the line the chip is actually drawing.
- *
- * Acid800 `cpu_timing` is what this is measurable with. Its `_waitVCount`
- * polls $d011 every seven cycles for the frame to wrap, so where the sync
- * lands decides which line each of the sixteen counted loops ends on. Its
- * assert 13 counts 2533 cycles from the sync to its own read of $d012, which
- * under NTSC is 38 lines and 63 cycles: two cycles of tolerance out of sixty
- * five, and without this rule the sync lands inside them and the assert reads
- * a line early. The same count under PAL is 40 lines and 13 cycles, tolerant
- * from cycle 1 to cycle 50, which is why PAL never showed it.
+ * Line increment is in the first cycle of a line, the wrap from the last line to line 0 is one cycle later
+ * A read at the top of the frame shows the last line for one cycle, also puts the raster IRQ for line 0 in cycle 2 (see tick())
+ * The internal raster_ is unchanged (badline, sprite windows and display window use it)
  */
 uint16_t Mos6569::visible_raster(void) const
 {
@@ -449,7 +395,7 @@ data_t Mos6569::peek(uint8_t reg) const
     case kRegIrqEnable:
       return static_cast<data_t>(irq_enable_ | 0xf0);
     default:
-      if (r >= 0x2f) return 0xff; /* the unconnected registers read as $ff */
+      if (r >= 0x2f) return 0xff; /* Unconnected registers read $ff */
       return regs_[r];
   }
 }
@@ -463,8 +409,7 @@ data_t Mos6569::io_read(addr_t addr)
   switch (r) {
     case kRegSprSprCol:
     case kRegSprBgCol: {
-      /* the collision registers clear themselves on read. Nothing sets them
-       * without a rendered picture, so they always read as zero for now. */
+      /* Collision registers clear on read, nothing sets them (no rendered picture) */
       const data_t value = regs_[r];
       regs_[r] = 0;
       return value;
@@ -486,7 +431,7 @@ void Mos6569::io_write(addr_t addr, data_t value)
       regs_[kRegControl1] = value;
       raster_irq_ = static_cast<uint16_t>((raster_irq_ & 0x00ff) |
                                           ((value & 0x80) ? 0x100 : 0));
-      /* enabling the display inside the first display line still counts */
+      /* Enabling the display inside the first display line counts */
       if (raster_ == kFirstDisplayLine && (value & 0x10) != 0) den_seen_ = true;
       check_badline();
       update_ba();
@@ -502,7 +447,7 @@ void Mos6569::io_write(addr_t addr, data_t value)
       break;
 
     case kRegIrqFlags:
-      /* writing a one acknowledges that source */
+      /* Writing a 1 acknowledges that source */
       irq_flags_ = static_cast<data_t>(irq_flags_ & ~(value & 0x0f));
       update_irq_line();
       break;
@@ -517,7 +462,7 @@ void Mos6569::io_write(addr_t addr, data_t value)
       break;
   }
 
-  /* the schedule the bus is holding may no longer be right */
+  /* Bus schedule may be outdated */
   bus_.vic_rescheduled();
 }
 

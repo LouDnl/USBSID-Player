@@ -1,17 +1,12 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
  * pacing.h
- * Keeping emulated time and real time together.
+ * Hold emulated time to real time
+ * Deadlines are computed from the start of playback
  *
- * The emulation runs as fast as it can, which on a desktop is around a
- * hundred times too fast. Something has to hold it back to the tune's own
- * frame rate, and it has to do so without drifting: sleeping "a frame" every
- * frame accumulates error, so the deadline is always computed from the start
- * of playback.
- *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -42,27 +37,19 @@ namespace usbsid {
 class Pacer
 {
   public:
-    /** @brief Start pacing at a given number of cycles per frame and clock. */
+    /** @brief Start pacing at a given number of cycles per frame and clock */
     void start(uint32_t cycles_per_frame, uint32_t clock_hz);
 
-    /** @brief Sleep until frame number n is due. */
+    /** @brief Sleep until frame n is due */
     void wait_for_frame(uint64_t frame);
 
-    /**
-     * @brief Make frame n due now, and everything after it relative to that.
-     *
-     * For when time has deliberately been skipped rather than lost: a seek runs
-     * frames as fast as the host can and the schedule afterwards has nothing to
-     * do with the one before. `wait_for_frame` would eventually rebase itself,
-     * once the lag passed its threshold, but that is a recovery from a fault and
-     * this is not a fault.
-     */
+    /** @brief Make frame n due immediately and rebase the schedule on it (used after a seek) */
     void rebase(uint64_t frame);
 
-    /** @brief How far behind real time playback has fallen, in microseconds. */
+    /** @brief Playback lag in microseconds */
     int64_t lag_us(void) const { return lag_us_; }
 
-    /** @brief How many times the schedule had to be given up on and rebased. */
+    /** @brief Number of schedule rebases after a long stall */
     uint32_t resyncs(void) const { return resyncs_; }
 
     double frame_rate(void) const { return frame_rate_; }

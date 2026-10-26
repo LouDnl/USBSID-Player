@@ -1,22 +1,16 @@
 /*
- * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico, for command
- * line playback and for embedding on RP2350 (Pico2).
+ * USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+ * command line playback, websites and for embedding on RP2040/RP2350.
  *
- * host/wav_write.h
- * A 16 bit PCM WAV writer, for `--output=wav`.
+ * wav_write.h
+ * 16 bit PCM WAV writer for --output=wav
  *
- * Why this exists rather than only an audio device: it needs no device and no
- * library, so the synthesis path can be exercised on a headless CI runner and
- * checked byte for byte. The write stream hash proves the emulation is
- * unchanged; it cannot say anything about what the synthesis sounds like, and a
- * file that can be hashed can.
+ * Needs no device and no library, usable on a headless CI runner
  *
- * The header is written twice: once with zero lengths so the samples can be
- * streamed straight out without buffering a whole tune, and again on close with
- * the real ones. That means a file left behind by a crash is still a valid WAV
- * apart from its two length fields, which most players survive.
+ * Header is written twice, zero lengths first and the real ones on close.
+ * A file left by a crash only has wrong length fields
  *
- * This file is part of USBSID-Pico (https://github.com/LouDnl/USBSID-Player)
+ * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
  * File author: LouD
  *
  * Copyright (c) 2026 LouD
@@ -47,7 +41,7 @@
 namespace usbsid {
 
 /**
- * @brief Streams 16 bit PCM into a RIFF/WAVE file.
+ * @brief Stream 16 bit PCM into a RIFF/WAVE file
  */
 class WavWriter
 {
@@ -59,9 +53,9 @@ class WavWriter
     WavWriter & operator=(const WavWriter &) = delete;
 
     /**
-     * @brief Open a file and write a placeholder header.
+     * @brief Open a file and write a placeholder header
      *
-     * @param path      where to write. "-" is not special; use a real path.
+     * @param path      file path, "-" is not special
      * @param rate      sample rate in Hz
      * @param channels  1 or 2
      */
@@ -80,8 +74,7 @@ class WavWriter
     bool is_open(void) const { return f_ != nullptr; }
 
     /**
-     * @brief Write `n` samples. For stereo these are interleaved pairs, so `n`
-     *        counts samples and not frames.
+     * @brief Write n samples, stereo is interleaved (n counts samples)
      */
     bool write(const int16_t * samples, size_t n)
     {
@@ -92,7 +85,7 @@ class WavWriter
       return true;
     }
 
-    /** @brief Rewrite the two length fields and close. Safe to call twice. */
+    /** @brief Rewrite the two length fields and close, safe to call twice */
     bool close(void)
     {
       if (f_ == nullptr) return true;
@@ -108,9 +101,9 @@ class WavWriter
       return ok;
     }
 
-    /** @brief Samples written so far. */
+    /** @brief Samples written */
     uint64_t samples(void) const { return frames_; }
-    /** @brief Seconds written so far, for reporting. */
+    /** @brief Seconds written */
     double seconds(void) const
     {
       if (rate_ == 0 || channels_ == 0) return 0.0;

@@ -1,3 +1,11 @@
+<!--
+  USBSID-Player: a cycle exact C64 SID player for USBSID-Pico,
+  command line playback, websites and for embedding on RP2040/RP2350.
+
+  This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
+  File author: LouD
+  Copyright (c) 2026 LouD, GPL-2.0-or-later. See usplayer-web.js for the full notice.
+-->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>USBSID-Pico: Web Serial check</title>
@@ -80,8 +88,7 @@ document.getElementById('ask').onclick = async () => {
   if (!navigator.serial) { say('<p class="bad">No navigator.serial.</p>'); return; }
   let port;
   try {
-    /* Deliberately unfiltered, which is what the player does too: a filter that
-     * matches nothing looks exactly like having no ports. */
+    /* Unfiltered like the player, a filter without a match looks like no ports */
     port = await navigator.serial.requestPort({});
   } catch (e) {
     say(`<h2>Picker</h2><p class="bad">${esc(e.name)}: ${esc(e.message)}</p>
@@ -95,7 +102,7 @@ document.getElementById('ask').onclick = async () => {
   }
   say(`<h2>Picked a port</h2>${portTable([port])}`);
 
-  /* Now the only question that matters: does the board answer on it? */
+  /* Does the board answer on it */
   const t = new USBSIDWebSerialTransport({ port });
   const ok = await t.connect();
   if (ok) {

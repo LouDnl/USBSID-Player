@@ -148,6 +148,13 @@ uint16_t EmbeddedSidBackend::trim_to_now(uint16_t hw)
  */
 uint16_t EmbeddedSidBackend::schedule(uint16_t cycles)
 {
+  /* Fast forward, the timeline keeps counting, the hardware gets no pre delay
+   * The first access logic is skipped, leaving fast forward resyncs the clock */
+  if (ffwd_) {
+    due_cycles_ += static_cast<uint32_t>(cycles) + kAccountedAccess;
+    return 0;
+  }
+
   uint16_t hw = (cycles > kHwAccessCycles)
     ? static_cast<uint16_t>(cycles - kHwAccessCycles) : 0;
 
@@ -208,6 +215,12 @@ void EmbeddedSidBackend::wait(uint16_t cycles)
 {
   waited_ += cycles;
 
+  /* Fast forward, accounted and not waited */
+  if (ffwd_) {
+    due_cycles_ += cycles;
+    return;
+  }
+
   if (us_time_us_64 == nullptr || clock_hz_ == 0) return;
 
   if (!paced_) { /* the timeline starts at this point, see schedule() */
@@ -230,6 +243,7 @@ void EmbeddedSidBackend::reset(void)
   paced_cycles_ = 0;
   trimmed_cycles_ = 0;
   late_writes_ = 0;
+  /* Pacing and fast forward are modes the player sets, both are kept */
   resync_clock();
 }
 

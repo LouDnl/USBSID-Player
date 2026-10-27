@@ -93,6 +93,9 @@ class WebSidBackend final : public SidBackend
     uint32_t clock_hz(void) const { return clock_hz_; }
     void resync_clock(void) {}
     void set_pacing(bool on) { (void)on; }
+    /* Fast forward is not implemented in WASM */
+    void set_ffwd(bool on) { (void)on; }
+    bool ffwd(void) const { return false; }
 
     uint32_t writes(void) const { return writes_; }
     uint32_t reads(void) const { return reads_; }

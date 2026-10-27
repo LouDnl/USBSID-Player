@@ -84,6 +84,11 @@ bool g_is_prg = false;
 bool g_clock_follows_tune = true;
 uint16_t g_song = 0;          /* 1 based, 0 is the file default */
 
+/* Fast forward wanted, set by emu_ffwd() from the config handler on core 0
+ * loop_sidplayer() on core 1 applies it to the backend at a frame boundary
+ * A level and not an edge, a change between read and apply is never lost */
+volatile bool g_ffwd_want = false;
+
 void attach_once(void)
 {
   if (g_initialised) return;
@@ -111,6 +116,33 @@ void apply_tune_clock(void)
   }
 }
 
+/**
+ * @brief End fast forward, the request and the backend
+ *
+ * Call on the core that runs the player, before set_pacing(false)
+ * (switching fast forward off turns pacing on)
+ */
+void end_ffwd(void)
+{
+  g_ffwd_want = false;
+  g_backend.set_ffwd(false);
+}
+
+/**
+ * @brief Run a BASIC tune song change (reset, load, RUN) at normal speed and unpaced
+ *
+ * Boot is silent emulation of seconds, same ordering as init_sidplayer()
+ */
+template <typename F> bool basic_restart(F change)
+{
+  end_ffwd();
+  g_backend.reset_hardware();
+  g_backend.set_pacing(false); /* Boot is not playback */
+  const bool ok = change();
+  g_backend.set_pacing(true);
+  return ok;
+}
+
 } /* namespace */
 
 /* ------------------------------------------------------------------------ *
@@ -126,6 +158,9 @@ void usplayer_upload_start(void)
   g_prepared = false;
   g_is_prg = false; /* Set by finish_*() */
   g_tune_size = 0;
+  /* Request only, the config handler runs this
+   * finish_prg() and init_sidplayer() end the backend side */
+  g_ffwd_want = false;
 }
 
 bool usplayer_upload_feed(const uint8_t * buf, size_t len)
@@ -182,6 +217,8 @@ void usplayer_upload_finish_prg(bool loop)
   /* Same clock as a tune */
   apply_tune_clock();
 
+  /* A new program starts at normal speed */
+  end_ffwd();
   /* Boot and load are not part of the program timeline, no pacing */
   g_backend.set_pacing(false);
   g_prepared = g_player.init_prg();
@@ -222,6 +259,7 @@ void init_sidplayer(void)
   if (g_tune_size == 0) return;
 
   g_backend.reset_hardware();
+  end_ffwd(); /* A new tune starts at normal speed */
   g_backend.set_pacing(false); /* Setup is not playback */
   /* load_sid turns a BASIC RSID into a program */
   g_prepared = g_player.is_prg() ? g_player.init_prg() : g_player.init_tune(g_song);
@@ -239,6 +277,10 @@ void start_sidplayer(bool loop)
 
 void loop_sidplayer(void)
 {
+  /* Apply fast forward between frames, on the core that drives the backend */
+  const bool ffwd = g_ffwd_want;
+  if (ffwd != g_backend.ffwd()) g_backend.set_ffwd(ffwd);
+
   /* One frame per call, always returns (VIC keeps counting, also on a jammed tune) */
   g_player.run_frame();
 }
@@ -246,6 +288,7 @@ void loop_sidplayer(void)
 bool stop_sidplayer(void)
 {
   g_player.stop();
+  end_ffwd();
   g_backend.reset_hardware();
   g_prepared = false;
   return true;

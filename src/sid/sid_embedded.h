@@ -119,6 +119,23 @@ class EmbeddedSidBackend final : public SidBackend
      */
     void set_pacing(bool on) { pacing_ = on; if (on) resync_clock(); }
 
+    /**
+     * @brief Send every access with no pre delay and no pacing
+     *
+     * Writes still reach the chips, only the timing is dropped
+     * Switching on turns pacing off, switching off turns it on and restarts
+     * the clock from the current time (no catching up)
+     */
+    void set_ffwd(bool on)
+    {
+      if (on == ffwd_) return;
+      ffwd_ = on;
+      if (on) pacing_ = false;
+      else set_pacing(true);
+    }
+    /** @brief Check if fast forward is on */
+    bool ffwd(void) const { return ffwd_; }
+
     uint32_t writes(void) const { return writes_; }
     uint32_t reads(void) const { return reads_; }
     uint64_t cycles_waited(void) const { return waited_; }
@@ -152,6 +169,7 @@ class EmbeddedSidBackend final : public SidBackend
     uint32_t us_per_cycle_q16_ = 0;
     bool paced_ = false;      /* origin_us_ set */
     bool pacing_ = true;      /* wide gaps are waited */
+    bool ffwd_ = false;       /* no pre delays, no pacing */
 };
 
 } /* namespace usbsid */

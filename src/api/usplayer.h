@@ -167,7 +167,13 @@ extern void force_socktwo(void);
 /** @brief Pause playback, other calls still work */
 extern void emu_pause_playing(bool pause);
 
-/** @brief Run without pacing */
+/**
+ * @brief Play without pre delays and pacing, SID writes still go out
+ *
+ * Applied at a frame boundary, off restarts the pacer from the current time
+ * Ended by stop_sidplayer(), init_sidplayer() and a new upload
+ * Not implemented in the web build
+ */
 extern void emu_ffwd(bool enable);
 
 /* Straight at the emulated RAM, no banking, no side effects */

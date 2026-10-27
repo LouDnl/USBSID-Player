@@ -1,6 +1,9 @@
 # Changelog
 Please refer to the [releases page](https://github.com/LouDnl/USBSID-Player/releases) for more information on version changes
 
+#### Version: Unreleased
+* Fix next/previous subtune for Basic tunes
+* Fix bug in previous subtune selection for web players
 * Fix/Add ffwd for embedded player
 * Rewrite virtual Voice3 (thanks @WilfredC64)
 * Fix automatic tune stop when using SENDSID from WebSerial

@@ -124,6 +124,22 @@ int usp_load_sidtune(uint8_t * buf, int size, int subtune)
 }
 
 /**
+ * @brief Load a PSID or RSID from the heap at an explicit song, return 0 if it is not one
+ *
+ * Song counts from one, 0 is the file's default song. Song 1 has no spelling in
+ * usp_load_sidtune(), where 0 means the default
+ */
+int usp_load_sidtune_song(uint8_t * buf, int size, int song)
+{
+  usplayer_upload_start();
+  if (buf != nullptr && size > 0) {
+    usplayer_upload_feed(buf, static_cast<size_t>(size));
+  }
+  usplayer_upload_finish_song(song);
+  return usplayer_loaded() ? 1 : 0;
+}
+
+/**
  * @brief Load a program from the heap, return 0 if it is not one
  *
  * No separate init step, boots a machine, loads it and types RUN

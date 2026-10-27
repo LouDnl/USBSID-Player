@@ -111,6 +111,7 @@ bool Player::load_sid(const data_t * bytes, size_t len, uint16_t song)
   loaded_ = false;
   playing_ = false;
   is_prg_ = false;
+  basic_tune_ = false;
   frames_ = 0;
 
   if (!sidfile_parse(bytes, len, tune_)) return false;
@@ -139,6 +140,7 @@ bool Player::load_sid(const data_t * bytes, size_t len, uint16_t song)
     /* RUN starts it either way */
     prg_.has_sys_stub = false;
     is_prg_ = true;
+    basic_tune_ = true;
     loaded_ = true;
     return true;
   }
@@ -152,6 +154,7 @@ bool Player::load_prg(const data_t * bytes, size_t len)
   loaded_ = false;
   playing_ = false;
   is_prg_ = false;
+  basic_tune_ = false;
   frames_ = 0;
 
   if (!prgfile_parse(bytes, len, prg_)) return false;
@@ -237,6 +240,15 @@ bool Player::init_prg(void)
     ram.dma_write(static_cast<addr_t>(prg_.load_addr + i), prg_.data[i]);
   }
   set_basic_pointers(prg_.end_addr);
+
+  /* RSID BASIC flag: the 0 based song goes in $030C after the boot (RAMTAS clears it), before RUN
+   * $030D and $030E get it too, tunes read it from the SYS register save area */
+  if (basic_tune_) {
+    const data_t index = static_cast<data_t>(song_ - 1);
+    ram.dma_write(0x030c, index);
+    ram.dma_write(0x030d, index);
+    ram.dma_write(0x030e, index);
+  }
 
   Keyboard & keys = machine_.keyboard();
   keys.reset();
@@ -343,59 +355,36 @@ void Player::pause(bool paused)
   paused_ = paused;
 }
 
-/**
- * @brief Switch subtune through the driver "load another song" entry
- *
- * Fails on some tunes
- */
-void Player::select_subtune(uint16_t song)
-{
-  if (is_prg_ || !tune_.valid || !playing_) return;
-
-  song_ = song;
-
-  Ram & ram = machine_.ram();
-  ram.dma_write(static_cast<addr_t>(reloc_addr_ + kPsidDrvParamOffset),
-                static_cast<data_t>(song_));
-  /* BASIC tunes read the song number from the A/X/Y store */
-  ram.dma_write(780, static_cast<data_t>(song_ - 1));
-  ram.dma_write(781, static_cast<data_t>(song_ - 1));
-  ram.dma_write(782, static_cast<data_t>(song_ - 1));
-
-  while (!machine_.cpu().instruction_done()) machine_.tick();
-  machine_.cpu().pc(
-    static_cast<addr_t>(reloc_addr_ + kPsidDrvNextSongOffset));
-  /* hot_reset clears stack and interrupt disable inherited from the old song */
-  machine_.cpu().hot_reset();
-}
-
 void Player::next_subtune(void)
 {
-  /* Programs move on with the plus key */
-  if (is_prg_) { tap_key(kKeyPlus); return; }
+  /* A BASIC tune restarts as a whole with the next song, other programs move on with the plus key */
+  if (is_prg_ && !basic_tune_) { tap_key(kKeyPlus); return; }
   if (!tune_.valid) return;
   /* Single song tune, a driver jump would restart init inside the interrupt */
   if (tune_.songs <= 1) return;
   uint16_t next = static_cast<uint16_t>(song_ + 1);
   if (next > tune_.songs) next = 1;
-  /* Re-initialise, select_subtune() jumps break some tunes */
+  /* Re-initialise, a jump into the driver breaks some tunes */
+  if (basic_tune_) { song_ = next; init_prg(); return; }
   init_tune(next);
 }
 
 bool Player::restart_song(uint16_t song)
 {
-  if (is_prg_ || !tune_.valid) return false;
+  if ((is_prg_ && !basic_tune_) || !tune_.valid) return false;
   /* Absolute song numbers are not wrapped */
   if (song < 1 || song > tune_.songs) return false;
+  if (basic_tune_) { song_ = song; return init_prg(); }
   return init_tune(song);
 }
 
 void Player::previous_subtune(void)
 {
-  if (is_prg_) { tap_key(kKeyMinus); return; }
+  if (is_prg_ && !basic_tune_) { tap_key(kKeyMinus); return; }
   if (!tune_.valid) return;
   if (tune_.songs <= 1) return;
   uint16_t prev = (song_ <= 1) ? tune_.songs : static_cast<uint16_t>(song_ - 1);
+  if (basic_tune_) { song_ = prev; init_prg(); return; }
   init_tune(prev);
 }
 

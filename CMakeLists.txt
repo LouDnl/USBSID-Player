@@ -625,7 +625,7 @@ if(${WEB} EQUAL 1)
   set(US_WEB_EXPORTS
     _malloc _free
     _usp_alloc _usp_free
-    _usp_load_sidtune _usp_load_prg
+    _usp_load_sidtune _usp_load_sidtune_song _usp_load_prg
     _usp_init_sidplayer _usp_start _usp_step _usp_stop
     _usp_next_subtune _usp_prev_subtune _usp_pause
     _usp_force_socket_two _usp_key_runstop _usp_type

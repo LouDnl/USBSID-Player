@@ -268,6 +268,84 @@ int test_loader_state(void)
   return 0;
 }
 
+/* ---- RSID BASIC tunes ---------------------------------------------------- */
+
+/**
+ * @brief In memory RSID v2 with the BASIC flag: 10 POKE49152,PEEK(780)
+ *
+ * The program copies $030C (the 0 based song) to $c000
+ */
+std::vector<data_t> make_basic_rsid(void)
+{
+  std::vector<data_t> f(0x7c, 0);
+  memcpy(f.data(), "RSID", 4);
+  f[0x05] = 2;     /* version */
+  f[0x07] = 0x7c;  /* data offset */
+  f[0x0f] = 5;     /* songs */
+  f[0x11] = 1;     /* start song */
+  f[0x77] = 0x02;  /* flags: BASIC */
+  const data_t body[] = {
+    0x01, 0x08,                    /* load address in the data */
+    0x13, 0x08, 0x0a, 0x00,        /* next line, line 10 */
+    0x97, '4', '9', '1', '5', '2', ',', 0xc2, '(', '7', '8', '0', ')', 0x00,
+    0x00, 0x00                     /* end of program */
+  };
+  f.insert(f.end(), body, body + sizeof(body));
+  return f;
+}
+
+int test_basic_subtunes(void)
+{
+  TestC64 c64;
+  NullSidBackend backend;
+  c64.machine.set_sid_backend(backend);
+  if (!c64.machine.mmu().roms.complete()) {
+    ++us_test_checks;
+    printf("  skipped the BASIC subtune test, no ROMs\n");
+    return 0;
+  }
+
+  const std::vector<data_t> rsid = make_basic_rsid();
+  Player player(c64.machine);
+  Ram & ram = c64.machine.ram();
+
+  US_CHECK(player.load_sid(rsid.data(), rsid.size(), 3), "the BASIC RSID loads");
+  US_CHECK(player.is_basic_tune(), "and is a BASIC tune");
+  US_CHECK(player.init_prg(), "and starts");
+  player.run_frames(30);
+  US_CHECK_EQ_U(ram.dma_read(0xc000), 2u, "BASIC read song 3 as 2 from $030C");
+  US_CHECK_EQ_U(ram.dma_read(0x030c), 2u, "$030C holds it");
+  US_CHECK_EQ_U(ram.dma_read(0x030d), 2u, "$030D too");
+  US_CHECK_EQ_U(ram.dma_read(0x030e), 2u, "$030E too");
+
+  ram.dma_write(0xc000, 0xff);
+  US_CHECK(player.restart_song(5), "restart to song 5");
+  player.run_frames(30);
+  US_CHECK_EQ_U(player.song(), 5u, "it is song 5");
+  US_CHECK_EQ_U(ram.dma_read(0xc000), 4u, "and the program ran again with 4");
+
+  US_CHECK(player.restart_song(6) == false, "song 6 is out of range");
+  US_CHECK_EQ_U(player.song(), 5u, "and changes nothing");
+
+  ram.dma_write(0xc000, 0xff);
+  player.next_subtune();
+  player.run_frames(30);
+  US_CHECK_EQ_U(player.song(), 1u, "next from the last song wraps to 1");
+  US_CHECK_EQ_U(ram.dma_read(0xc000), 0u, "and the program read 0");
+
+  ram.dma_write(0xc000, 0xff);
+  player.previous_subtune();
+  player.run_frames(30);
+  US_CHECK_EQ_U(player.song(), 5u, "previous from song 1 wraps to 5");
+  US_CHECK_EQ_U(ram.dma_read(0xc000), 4u, "and the program read 4");
+
+  const data_t plain[] = { 0x00, 0xc0, 0x60 };
+  US_CHECK(player.load_prg(plain, sizeof(plain)), "a plain program loads after it");
+  US_CHECK(player.is_basic_tune() == false, "and is no BASIC tune");
+
+  return 0;
+}
+
 /* ---- the whole collection ------------------------------------------------ */
 
 int test_prg_sweep(void)
@@ -343,6 +421,7 @@ int us_test_prg(void)
 
   test_parse();
   test_loader_state();
+  test_basic_subtunes();
   test_acid800_through_loader();
   test_prg_sweep();
 

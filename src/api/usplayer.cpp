@@ -195,6 +195,25 @@ void usplayer_upload_finish_tune(char subt)
   apply_tune_clock();
 }
 
+/* Same as usplayer_upload_finish_tune() with a song counted from one, 0 is the file default
+ * Song 1 has no spelling in the zero based form above, where 0 means the default */
+void usplayer_upload_finish_song(int song)
+{
+  g_is_prg = false;
+  g_prepared = false;
+
+  if (g_tune_size == 0) return;
+
+  g_song = (song < 0) ? 0 : static_cast<uint16_t>(song);
+
+  if (!g_player.load_sid(g_tune_bytes, g_tune_size, g_song)) {
+    g_tune_size = 0;
+    return;
+  }
+
+  apply_tune_clock();
+}
+
 /**
  * @brief Finish an upload as a program and start it
  *
@@ -296,11 +315,19 @@ bool stop_sidplayer(void)
 
 void next_subtune(void)
 {
+  if (g_player.is_basic_tune() && g_player.songs() > 1) {
+    basic_restart([] { g_player.next_subtune(); return true; });
+    return;
+  }
   g_player.next_subtune();
 }
 
 void previous_subtune(void)
 {
+  if (g_player.is_basic_tune() && g_player.songs() > 1) {
+    basic_restart([] { g_player.previous_subtune(); return true; });
+    return;
+  }
   g_player.previous_subtune();
 }
 
@@ -321,8 +348,8 @@ void emu_pause_playing(bool pause)
 
 void emu_ffwd(bool enable)
 {
-  /* Unfinished, on the device the SID writes are the pacing */
-  (void)enable;
+  /* Request only, loop_sidplayer() applies it at a frame boundary */
+  g_ffwd_want = enable;
 }
 
 uint8_t emu_dma_read_ram(uint16_t address)
@@ -481,6 +508,9 @@ uint32_t usplayer_frames(void) { return g_player.frames_played(); }
 bool usplayer_restart_song(uint16_t song)
 {
   attach_once();
+  if (g_player.is_basic_tune()) {
+    return basic_restart([song] { return g_player.restart_song(song); });
+  }
   return g_player.restart_song(song);
 }
 

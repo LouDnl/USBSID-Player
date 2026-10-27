@@ -85,9 +85,6 @@ class Player
     /** @brief True while typed keys are still queued */
     bool typing(void) const { return machine_.keyboard().busy(); }
 
-    /** @brief Driver "load another song" entry, unused (jams the CPU on some tunes) */
-    void select_subtune(uint16_t song);
-
     /** @brief Switch to the following or previous song from its beginning, wrapping */
     void next_subtune(void);
     void previous_subtune(void);
@@ -108,6 +105,8 @@ class Player
     const PrgFile & prg(void) const { return prg_; }
     /** @brief True if the loaded file is a program, false for a tune */
     bool is_prg(void) const { return is_prg_; }
+    /** @brief True for an RSID with the BASIC flag, a program with subtunes (song goes in $030C) */
+    bool is_basic_tune(void) const { return is_prg_ && basic_tune_; }
     uint16_t song(void) const { return song_; }
     uint16_t songs(void) const { return tune_.songs; }
     addr_t driver_address(void) const { return reloc_addr_; }
@@ -125,6 +124,7 @@ class Player
     SidFile tune_;
     PrgFile prg_;
     bool is_prg_ = false;
+    bool basic_tune_ = false; /* set by load_sid for an RSID BASIC tune */
     uint16_t song_ = 1;
     addr_t reloc_addr_ = 0;
     bool loaded_ = false;

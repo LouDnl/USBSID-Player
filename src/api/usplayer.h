@@ -95,6 +95,9 @@ extern void usplayer_upload_finish_prg(bool loop);
 /** @brief Finish an upload as SID tune */
 extern void usplayer_upload_finish_tune(char subt);
 
+/** @brief Finish an upload as SID tune, song counted from one, 0 is the file default */
+extern void usplayer_upload_finish_song(int song);
+
 /** @brief Boot the machine, relocate the driver and enter it (slow) */
 extern void init_sidplayer(void);
 

@@ -210,7 +210,7 @@ void Session::previous_subtune(void)
 void Session::select_song(uint16_t song)
 {
   run_or_queue([this, song](void) {
-    if (!player_.playing() || player_.is_prg()) return;
+    if (!player_.playing() || (player_.is_prg() && !player_.is_basic_tune())) return;
     if (player_.restart_song(song)) after_song_start();
   });
 }
@@ -488,8 +488,9 @@ void Session::update_status(void)
   s.is_prg = player_.is_prg();
   s.needs_roms = loaded_ && player_.needs_roms();
   s.stuck_without_roms = player_.stuck_without_roms();
-  s.song = player_.is_prg() ? 0 : player_.song();
-  s.songs = player_.is_prg() ? 0 : player_.songs();
+  const bool plain_prg = player_.is_prg() && !player_.is_basic_tune();
+  s.song = plain_prg ? 0 : player_.song();
+  s.songs = plain_prg ? 0 : player_.songs();
   s.frame_rate = pacer_.frame_rate();
   s.elapsed_ms = (s.frame_rate > 0.0)
     ? static_cast<uint32_t>(1000.0 * static_cast<double>(shown_frames()) / s.frame_rate)

@@ -103,3 +103,6 @@ web/usbsid.wasm
 web/README.md
 web/bench.html
 web/usbsid-diag.html
+
+## Ignore previously tracked files
+src/driver/psiddrv.o65

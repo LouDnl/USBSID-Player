@@ -44,6 +44,7 @@ Machine::Machine(void)
   mmu_.attach_cia2(&cia2_);
   mmu_.attach_vic(&vic_);
   mmu_.attach_sid(&sid_);
+  sid_.attach_pla(&pla_);
   /* FM/OPL addresses are in the second expansion IO page */
   mmu_.attach_io2(&sid_);
   cia2_.set_port_observer(this);

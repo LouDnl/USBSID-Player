@@ -113,6 +113,7 @@ set_source_files_properties(${USPLAYER_ROOT}/src/driver/reloc65.c
 ### The psid driver: xa65 assembles the 6502 source, bin2h turns the o65 into a header
 add_custom_command(
   OUTPUT ${USPLAYER_ROOT}/src/driver/psiddrv.h
+  DEPENDS ${USPLAYER_ROOT}/src/driver/psiddrv.a65
   COMMAND $(MAKE) all
   # the o65 must not be left where a linker could find it
   COMMAND ${CMAKE_COMMAND} -E rm -f ${USPLAYER_ROOT}/src/driver/psiddrv.o65

@@ -102,6 +102,9 @@ class Bus
     void attach_fast(Mos6569 * vic, Mos6526 * cia1, Mos6526 * cia2,
                      Mos6510 * cpu);
 
+    /** @brief The CPU by real type, nullptr before attach_fast() */
+    const Mos6510 * cpu(void) const { return fast_cpu_; }
+
     /* A CIA schedule changed (control register write or input), ask it again */
     void cia_rescheduled(const Mos6526 * who) US_RAM_ATTR;
 

@@ -26,6 +26,8 @@
 
 #include "mos6581_8580.h"
 
+#include "mos6510.h"
+#include "mos906114_pla.h"
 #include "util/logging.h"
 
 namespace usbsid {
@@ -65,6 +67,7 @@ void Mos6581_8580::reset(void)
   }
   writes_ = 0;
   reads_ = 0;
+  volume_pending_ = false;
   backend_->reset();
 }
 
@@ -373,6 +376,15 @@ void Mos6581_8580::io_write(addr_t addr, data_t value)
   }
 
   if (chip >= 1 && chip <= kMaxSids) {
+    /* First tune write: issue the driver max volume through the normal path first */
+    if (volume_pending_ && !from_kernal_rom()) {
+      volume_pending_ = false;
+      if (!(chip == 1 && (addr & 0x1f) == 0x18)) {
+        io_write(0xd418, 0x0f);
+        io_addr_ = addr;
+        io_chip_ = chip;
+      }
+    }
     const bool chip_is_muted = (config_.chip_mute & (1u << (chip - 1))) != 0;
 
     /* --solo: local < 0x15 is one of 3 voice blocks (7 bytes: freq lo/hi, pulse lo/hi, control, ad, sr)
@@ -406,6 +418,14 @@ void Mos6581_8580::io_write(addr_t addr, data_t value)
     backend_->write(reg, mask_for_output(mirror, value), cycles_since_last_event());
     ++writes_;
   }
+}
+
+bool Mos6581_8580::from_kernal_rom(void) const
+{
+  const Mos6510 * cpu = bus_.cpu();
+  if (cpu == nullptr || pla_ == nullptr) return false;
+  return cpu->instruction_pc() >= 0xe000 &&
+         pla_->bank(Zone::Kernal) == Bank::Kernal;
 }
 
 data_t Mos6581_8580::io_read(addr_t addr)

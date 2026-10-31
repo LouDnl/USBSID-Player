@@ -39,6 +39,7 @@
 #include "sid_backend.h"
 #include "sid_voice3.h"
 #include "sidfile.h"
+#include "mos906114_pla.h"
 #include "types.h"
 
 namespace usbsid {
@@ -164,6 +165,17 @@ class Mos6581_8580 final : public IoDevice, public VicFrameObserver
       for (uint8_t i = 0; i < kMaxSids; i++) voice3_[i].resync(last_event_);
     }
 
+    /** @brief Set the PLA used to tell KERNAL ROM code from tune code */
+    void attach_pla(const Mos906114Pla * pla) { pla_ = pla; }
+
+    /**
+     * @brief Hold the driver max volume ($d418 = $0f) until the tune's first SID write
+     *
+     * KERNAL ROM writes pass through and keep it pending
+     * Cleared by reset()
+     */
+    void arm_deferred_volume(void) { volume_pending_ = true; }
+
     /** @brief Voice three of a chip, 1 based, for tests */
     SidVoice3 & voice3(uint8_t chip)
     {
@@ -256,6 +268,10 @@ class Mos6581_8580 final : public IoDevice, public VicFrameObserver
     volatile uint16_t chip_mute_pending_ = 0;
 
     void apply_chip_mute_pending(void);
+    /* True when the current instruction runs from KERNAL ROM that is banked in */
+    bool from_kernal_rom(void) const US_RAM_ATTR;
+    const Mos906114Pla * pla_ = nullptr;
+    bool volume_pending_ = false;
     uint32_t writes_ = 0;
     uint32_t reads_ = 0;
 };

@@ -326,6 +326,8 @@ bool Player::init_tune(uint16_t song)
 
   /* Time starts at this point */
   machine_.sid().resync();
+  /* Driver max volume waits for the first tune SID write (KERNAL IOINIT writes are skipped) */
+  machine_.sid().arm_deferred_volume();
 
   frames_ = 0;
   playing_ = true;

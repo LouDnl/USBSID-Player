@@ -105,9 +105,10 @@ ntsc	lda #$95
 timer	sta $dc04
 	stx $dc05
 
+	; 20261031 Disabled due to hard click on song start with reSIDfp
 	; Maximum volume ; JMP address for next and previous tune
-	lda #$0f  ; $89 $8a $8b
-	sta $d418 ; $8b $8c $8d
+	; lda #$0f  ; $89 $8a $8b
+	; sta $d418 ; $8b $8c $8d
 
 	; Get song number
 	ldy playnum ; $8e

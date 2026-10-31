@@ -47,7 +47,8 @@ constexpr addr_t kPsidDrvEntryOffset = 9;
  *   +9..11   entry jump (jmp_addr)
  *   +12..20  CBM80 block copied to $8000 (bck_addr)
  *   +21..    parameter block (drv_addr), first byte is the song
- *   +$89     "load another song" entry (nxt_addr)
+ *   +$89     "load another song" entry (nxt_addr), starts at the song select
+ *            (ldy playnum), the max volume write is not in the driver
  */
 constexpr addr_t kPsidDrvCbm80Offset = 12;
 constexpr addr_t kPsidDrvParamOffset = 21;

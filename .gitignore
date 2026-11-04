@@ -30,6 +30,8 @@
 !.github/workflows
 !.gitlab
 !.gitlab/**
+!.gitea
+!.gitea/**
 !assets
 !assets/cia6526_example
 !assets/cia6526_example/**

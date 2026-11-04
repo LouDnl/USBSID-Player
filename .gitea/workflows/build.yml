@@ -1,0 +1,240 @@
+# Gitea Actions copy of .github/workflows/build.yml (git.loudai.nl). Gitea runs
+# .gitea/workflows/ and ignores .github/workflows/ when this directory exists.
+# Differences: no macos-14 (no Apple Silicon runner), repositories under
+# LouDnl/ on GitHub live under usbsid/ here, releases go through Gitea's API.
+
+name: USBSID-Player Build
+
+env:
+  BUILD_THREADS: 4
+  BUILD_TYPE: Release
+
+on:
+  push:
+    paths:
+      - "CMakeLists.txt"
+      - "cmake/**"
+      - "src/**"
+      - "lib/**"
+      - "tests/**"
+      # The browser player is JavaScript around the same emulation, and the web
+      # job below builds and loads it. A change to either half should run it.
+      - "web/**"
+      - ".gitea/workflows/build.yml"
+  # Allows you to run this workflow manually from the Actions tab when needed
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build
+    if: ${{ ! startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,   shell: bash,          buildname: usbsid, executable: usplayer }
+          - { os: macos-15-intel,  shell: bash,          buildname: usbsid, executable: usplayer }
+          - { os: windows-2022,    shell: 'msys2 {0}',   buildname: usbsid, executable: usplayer }
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # Forces checkout of the branch head instead of a specific commit SHA
+          ref: ${{ github.ref }}
+          path: repo
+
+      # The driver is developed alongside this repository, so it is checked out
+      # here rather than pinned as a submodule: a build always gets the driver
+      # as it is now, instead of whatever revision a submodule bump last
+      # recorded. CMake picks it up at lib/driver/src, see CMakeLists.txt.
+      - name: Checkout USBSID driver
+        uses: actions/checkout@v4
+        with:
+          repository: usbsid/USBSID-Pico-driver
+          path: repo/lib/driver
+
+      - name: Install dependencies (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config cmake build-essential libusb-1.0-0 libusb-1.0-0-dev libudev1 libudev-dev libasound2-dev
+
+      - name: Install dependencies (MacOs)
+        if: matrix.os == 'macos-15-intel'
+        run: |
+          brew update
+
+      # - name: Install xa dependency
+      #   if: matrix.os == 'ubuntu-latest'
+      #   run: |
+      #     sudo apt-get update && sudo apt-get install -y xa65
+
+      # - name: Checkout bin2h source
+      #   uses: actions/checkout@v4
+      #   with:
+      #     repository: elnormous/bin2h
+      #     path: bin2h-src
+
+      # - name: Build and add to PATH
+      #   run: |
+      #     cd bin2h-src
+      #     make
+      #     # Add the current directory containing the built 'bin2h' to the runner's PATH
+      #     echo "$(pwd)" >> $GITHUB_PATH
+
+      # - name: Verify installation
+      #   run: bin2h --help
+
+      - name: Set up MSYS2 (Windows)
+        if: matrix.os == 'windows-2022'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-libusb
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-pkg-config
+            mingw-w64-ucrt-x86_64-ninja
+            patch
+
+      - name: Configure and build ${{ matrix.buildname }}
+        run: |
+          pushd repo
+          # The suite is built everywhere again. It used to be Linux only,
+          # because the embedded backend reached the firmware through weak
+          # symbols: an undefined weak resolves to null on ELF, Mach-O refuses to
+          # link one at all, and PE/COFF collided with the tests' own
+          # definitions. Those are function pointers now, which behave the same
+          # on all three, so this is the check that the fix actually holds. If
+          # macOS or Windows fails to link here, that is TODO 12 coming back.
+          TESTS=1
+          JOBS=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
+          # REQUIRE_AUDIO=1 turns "Software audio: OFF, lib/residfp is empty"
+          # from a STATUS line into a configure error. Without it a checkout
+          # missing the vendored reSIDfp sources builds a player with no
+          # --output=audio and no --output=wav and says so only in the log,
+          # which is what every build here did until those sources were added
+          # to the repository.
+          cmake -S . -B build -DDESKTOP=1 -DEMBEDDED=0 -DWEB=0 \
+            -DBUILD_TESTS=$TESTS -DPROFILE=0 -DSTRICT=1 -DREQUIRE_AUDIO=1 \
+            -DEXECUTABLE=${{ matrix.buildname }}
+          cmake --build build -j "$JOBS"
+          ls -lh build/${{ matrix.executable }}* || true
+          popd
+
+      - name: Run the test suite
+        run: |
+          pushd repo
+          # Built above and never run, which meant the pinned write stream hash
+          # was compiled and then thrown away. It is the one check that says the
+          # emulation still sends what it always sent.
+          #
+          # The name is `usplayer-test` whatever -DEXECUTABLE says: CMakeLists
+          # hardcodes it, so it does not follow matrix.buildname.
+          BIN=build/usplayer-test
+          [ -f "$BIN.exe" ] && BIN="$BIN.exe"
+          if [ ! -f "$BIN" ]; then
+            echo "::error::no test binary at $BIN"; ls -l build; exit 1
+          fi
+          "./$BIN"
+          popd
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.buildname }}-${{ matrix.os }}
+          # Exactly the player. A `${{ matrix.executable }}*` glob also picks up
+          # usplayer-test wherever the suite is built.
+          path: |
+            repo/build/${{ matrix.executable }}
+            repo/build/${{ matrix.executable }}.exe
+          if-no-files-found: error
+
+  ### The browser player. It had no CI at all, which is how a web only change
+  ### could break the wasm build without anything noticing until a release.
+  web:
+    name: Build web
+    if: ${{ ! startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Set up Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 4.0.12
+
+      # GitHub's ubuntu image ships CMake; Gitea's runner image does not.
+      - name: Install CMake (Gitea runner image)
+        run: command -v cmake >/dev/null || { sudo apt-get update && sudo apt-get install -y cmake; }
+
+      - name: Build the WASM player
+        run: |
+          # build-web/ is the same directory ./build.sh uses, so a runner and a
+          # developer configure the same tree the same way. It used to be
+          # temp/build_web, which read as if temp/ were part of the build: it
+          # is the project's scratch directory and is not in the repository.
+          emcmake cmake -S . -B build-web -DWEB=1 -DREQUIRE_AUDIO=1
+          cmake --build build-web -j "$(getconf _NPROCESSORS_ONLN)"
+
+      - name: Check the wasm exports the audio API
+        run: |
+          # The WEB build links with an explicit EXPORTED_FUNCTIONS list, so a
+          # function can compile and still not be reachable from JavaScript,
+          # which looks to a page exactly like a browser that cannot do audio.
+          # Loading it under node is the cheapest way to ask.
+          node --input-type=module -e "
+            import Module from './web/usbsid.mjs';
+            const M = await Module();
+            const want = ['_usp_audio_configure', '_usp_audio_take',
+                          '_usp_audio_discard', '_usp_audio_clipped',
+                          '_usp_audio_fm_writes'];
+            const missing = want.filter((f) => typeof M[f] !== 'function');
+            if (missing.length) {
+              console.error('missing from the wasm:', missing.join(', '));
+              process.exit(1);
+            }
+            console.log('the audio API is exported:', want.length, 'functions');
+          "
+
+      - name: Check every web module parses
+        run: |
+          # Nothing else compiles the JavaScript, so a syntax error in it is
+          # only found by loading a page. The worklet is a template literal
+          # inside usplayer-audio.js and is not covered by importing the module,
+          # so it is checked on its own: a stray backtick in a comment there
+          # silently ends the string, which has happened.
+          # `self` is shimmed because usplayer-worker.js is a worker script and
+          # assigns self.onmessage at the top level, which is a ReferenceError
+          # under node without it. Loading the module rather than only parsing
+          # it is worth the shim: it catches a bad import path too.
+          # usplayer-adapter-deepsid.js is excluded: it imports
+          # './usbsid-driver.js', which by design lives only in DeepSID's own
+          # deployed tree (see the file's own header comment), never in this
+          # repo's web/, so it can never resolve here.
+          for f in web/usplayer-*.js web/usbsid-*.js web/asid-midi.js; do
+            [ "$(basename "$f")" = "usplayer-adapter-deepsid.js" ] && continue
+            node --input-type=module \
+              -e "globalThis.self = globalThis; await import('./$f')" \
+              || { echo "::error file=$f::this module does not load"; exit 1; }
+            echo "ok $f"
+          done
+          node -e "
+            const fs = require('fs'), vm = require('vm');
+            const src = fs.readFileSync('web/usplayer-audio.js', 'utf8');
+            const m = src.match(/const PROCESSOR_SRC = \`([\s\S]*?)\n\`;/);
+            if (!m) { console.error('PROCESSOR_SRC not found'); process.exit(1); }
+            new vm.Script('function registerProcessor(){};' +
+                          m[1].replace('extends AudioWorkletProcessor', 'extends Object'));
+            console.log('ok the AudioWorklet processor source parses');
+          "

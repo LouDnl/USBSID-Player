@@ -46,6 +46,7 @@ Please refer to the [releases page](https://github.com/LouDnl/USBSID-Player/rele
 * Fix NTSC CIA1 timer A default to $4295
 * Set UNIX_COMPILE and WINDOWS_COMPILE per platform
 * Defer driver volume write to bus, waits untill first actual SID write
+* Add config requests and port sharing to the Web Serial transport
 
 #### Version: 1.4.0
 * Add multiboard playback (--boards SERIAL,... and --list-boards)

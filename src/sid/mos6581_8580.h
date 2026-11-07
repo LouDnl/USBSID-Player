@@ -176,6 +176,15 @@ class Mos6581_8580 final : public IoDevice, public VicFrameObserver
      */
     void arm_deferred_volume(void) { volume_pending_ = true; }
 
+    /**
+     * @brief Stop render_idle from pushing frame time into a software SID
+     *
+     * Set while the KERNAL boots for a program, cleared after resync()
+     * The boot is not rendered as seconds of silence, hardware skips it like
+     * cleared by reset()
+     */
+    void pause_idle_render(bool on) { idle_paused_ = on; }
+
     /** @brief Voice three of a chip, 1 based, for tests */
     SidVoice3 & voice3(uint8_t chip)
     {
@@ -272,6 +281,7 @@ class Mos6581_8580 final : public IoDevice, public VicFrameObserver
     bool from_kernal_rom(void) const US_RAM_ATTR;
     const Mos906114Pla * pla_ = nullptr;
     bool volume_pending_ = false;
+    bool idle_paused_ = false;
     uint32_t writes_ = 0;
     uint32_t reads_ = 0;
 };

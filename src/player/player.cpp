@@ -231,9 +231,15 @@ bool Player::init_prg(void)
 
   machine_.power_on();
   machine_.sid().reset();
+  /* Boot is not rendered as silence */
+  machine_.sid().pause_idle_render(true);
 
   /* Boot to the BASIC prompt first */
   boot_kernal();
+
+  /* A program can write to the SID while RUN is still typed, deltas count from the prompt on */
+  machine_.sid().resync();
+  machine_.sid().pause_idle_render(false);
 
   Ram & ram = machine_.ram();
   for (size_t i = 0; i < prg_.data_size; i++) {

@@ -68,6 +68,7 @@ void Mos6581_8580::reset(void)
   writes_ = 0;
   reads_ = 0;
   volume_pending_ = false;
+  idle_paused_ = false;
   backend_->reset();
 }
 
@@ -499,7 +500,7 @@ void Mos6581_8580::vic_frame_ended(void)
    * with the same kMaxDelta chunking as an access
    * Keeps rendering silence for a tune that writes nothing for many frames
    * Hardware skips this, deltas are the clock */
-  if (config_.render_idle) {
+  if (config_.render_idle && !idle_paused_) {
     const cycle_t now = bus_.cycles();
     uint32_t delta = static_cast<uint32_t>(now - last_event_);
     while (delta > kMaxDelta) {

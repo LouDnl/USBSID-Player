@@ -51,6 +51,7 @@ Please refer to the [releases page](https://github.com/LouDnl/USBSID-Player/rele
 * Fix start delay for BASIC tunes on reSIDfp
 * Add reSIDfp patch for a settled ExternalFilter start
 * Add onboard embedded player to the CLI outputs
+* Fix stale tune state and start race in the web player
 
 #### Version: 1.4.0
 * Add multiboard playback (--boards SERIAL,... and --list-boards)

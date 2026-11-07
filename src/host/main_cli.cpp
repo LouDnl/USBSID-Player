@@ -33,6 +33,10 @@
 #include <thread>
 #include <vector>
 #include <sys/stat.h>
+#if defined(_WIN32)
+#include <fcntl.h>
+#include <io.h>
+#endif
 
 #include "machine.h"
 #include "pacing.h"
@@ -49,6 +53,7 @@
 #endif
 #include "sidfile.h"
 #include "console.h"
+#include "onboard_cli.h"
 #include "audio_out.h"
 #include "sid_residfp.h"
 #include "wav_write.h"
@@ -244,6 +249,12 @@ void usage(const char * argv0)
     "  -n,  --no-device  run without hardware, useful for checking a tune\n"
     "  --no-roms         run on the stub KERNAL, without BASIC and character\n"
     "                    ROM, the way a build without ROMs does\n"
+    "  --detach          with --output=onboard: send, start and exit, the\n"
+    "                    tune keeps playing on the board\n"
+    "  --board-stop, --board-pause,\n"
+    "  --board-next, --board-prev\n"
+    "                    send that command to the board's own player and\n"
+    "                    exit, no file needed\n"
     "\n"
     "  sound:\n"
     "  -o,  --output M   usbsid (default)"
@@ -253,8 +264,13 @@ void usage(const char * argv0)
 #if US_HAVE_NETDEVICE
                          ", nsd"
 #endif
-                         ", audio or wav.\n"
-    "                    %s falls back to audio when no board is found\n"
+                         ", audio, wav or onboard.\n"
+    "                    %s falls back to audio when no board is found.\n"
+    "                    onboard uploads the tune to the board's own player\n"
+    "                    (_em firmware, one board, file or - for stdin, at\n"
+    "                    most 65535 bytes) and follows it with the same\n"
+    "                    keys; --boards takes one serial or index there, and\n"
+    "                    -T -S -ms -ss -fa -w are refused\n"
     "  -lb, --list-boards\n"
     "                    list every attached board's serial number and exit\n"
     "  -b,  --boards SPEC\n"
@@ -379,6 +395,19 @@ bool read_file(const char * path, std::vector<data_t> & out)
   const size_t got = fread(out.data(), 1, out.size(), f);
   fclose(f);
   return got == out.size();
+}
+
+/** @brief Read all of stdin as binary, true when something was read */
+bool read_stdin(std::vector<data_t> & out)
+{
+#if defined(_WIN32)
+  _setmode(_fileno(stdin), _O_BINARY);
+#endif
+  out.clear();
+  data_t buf[4096];
+  size_t n;
+  while ((n = fread(buf, 1, sizeof(buf), stdin)) > 0) out.insert(out.end(), buf, buf + n);
+  return !out.empty() && !ferror(stdin);
 }
 
 /**
@@ -525,6 +554,72 @@ static uint32_t song_length_ms(const usbsid::SongLengths & lengths, const SidFil
   return (ms > 0) ? ms : kDefaultSongMs;
 }
 
+/**
+ * @brief Look the tune up in the Songlengths database and print what was found
+ *
+ * Key is the MD5 of the whole file, a v5 tune can embed its own table.
+ *
+ * @param bytes             the whole file
+ * @param is_sid            false for a program, prints nothing
+ * @param tune              parsed SID file
+ * @param song              song to report the length of, counting from 1
+ * @param use_songlengths   false for --no-songlengths, prints nothing
+ * @param songlengths_path  --songlengths or nullptr
+ * @return the database entry, not valid when none was found
+ */
+static SongLengths load_songlengths(const std::vector<data_t> & bytes, bool is_sid, const SidFile & tune,
+                                    uint16_t song, bool use_songlengths, const char * songlengths_path)
+{
+  SongLengths lengths;
+  char db_path[1024] = { 0 };
+  /* A v5 tune can embed its length table (see print_tune())
+   * song_length_ms() prefers it, same as the external database
+   * Warn only when nothing knows the length */
+  const uint32_t embedded_ms = (is_sid && tune.has_embedded_song_lengths)
+    ? tune.embedded_song_length_ms(song) : 0;
+  if (is_sid && use_songlengths &&
+      songlengths_find_file(songlengths_path, db_path, sizeof(db_path))) {
+    std::vector<char> db;
+    FILE * dbf = fopen(db_path, "rb");
+    if (dbf != nullptr) {
+      fseek(dbf, 0, SEEK_END);
+      const long dbn = ftell(dbf);
+      fseek(dbf, 0, SEEK_SET);
+      if (dbn > 0) {
+        db.resize(static_cast<size_t>(dbn));
+        if (fread(db.data(), 1, db.size(), dbf) != db.size()) db.clear();
+      }
+      fclose(dbf);
+    }
+    char key[33];
+    songlengths_key(bytes.data(), bytes.size(), key);
+    if (!db.empty()) lengths = songlengths_lookup(db.data(), db.size(), key);
+    if (lengths.valid) {
+      const uint32_t ms = lengths.for_song(song);
+      printf("  length   : %u:%02u.%03u for this song, %u in the database\n",
+             ms / 60000u, (ms / 1000u) % 60u, ms % 1000u, lengths.count);
+    } else if (embedded_ms > 0) {
+      printf("  length   : %u:%02u for this song, from the file's own v5 song length table\n",
+             embedded_ms / 60000u, (embedded_ms / 1000u) % 60u);
+    } else {
+      printf("  length   : not in %s, using %u:%02u\n", db_path,
+             kDefaultSongMs / 60000u, (kDefaultSongMs / 1000u) % 60u);
+    }
+  } else if (is_sid && use_songlengths) {
+    if (embedded_ms > 0) {
+      printf("  length   : %u:%02u for this song, from the file's own v5 song length table\n",
+             embedded_ms / 60000u, (embedded_ms / 1000u) % 60u);
+    } else if (songlengths_path != nullptr) {
+      /* A path given on the command line that is not there is a mistake */
+      printf("  length   : cannot read %s\n", songlengths_path);
+    } else {
+      printf("  length   : no Songlengths database found. Point --songlengths at "
+             "one, or set $SONGLENGTHS or $HVSCROOT\n");
+    }
+  }
+  return lengths;
+}
+
 int main(int argc, char ** argv)
 {
   const char * path = nullptr;
@@ -568,6 +663,9 @@ int main(int argc, char ** argv)
 
   const char * boards_spec = nullptr;
   bool list_boards = false;
+  bool onboard_out = false;     /* -o onboard */
+  bool onboard_detach = false;
+  unsigned board_cmds = 0;      /* --board-stop etc, OnboardOneShot bits */
 #if US_HAVE_RTMIDI
   bool list_midi = false;
   int asid_midi_port = 0;
@@ -593,6 +691,11 @@ int main(int argc, char ** argv)
     else if ((!strcmp(a, "-ss") || !strcmp(a, "--select-sids")) && i + 1 < argc)
       select_sids_spec = argv[++i];
     else if (!strcmp(a, "-lb") || !strcmp(a, "--list-boards")) list_boards = true;
+    else if (!strcmp(a, "--detach")) onboard_detach = true;
+    else if (!strcmp(a, "--board-stop")) board_cmds |= kOnboardStop;
+    else if (!strcmp(a, "--board-pause")) board_cmds |= kOnboardPause;
+    else if (!strcmp(a, "--board-next")) board_cmds |= kOnboardNext;
+    else if (!strcmp(a, "--board-prev")) board_cmds |= kOnboardPrev;
     else if ((!strcmp(a, "-b") || !strcmp(a, "--boards")) && i + 1 < argc)
       boards_spec = argv[++i];
     else if (!strcmp(a, "-rr")) real_reads = true;
@@ -609,8 +712,10 @@ int main(int argc, char ** argv)
       if (!strcmp(a, "-o")) { if (i + 1 < argc) v = argv[++i]; }
       else if (a[8] == '=') v = a + 9;
       else if (a[8] == '\0' && i + 1 < argc) v = argv[++i];
-      if (v == nullptr) { printf("-o/--output needs usbsid, audio or wav\n"); return 2; }
-      if (!strcmp(v, "usbsid")) output = OutputMode::USBSID;
+      if (v == nullptr) { printf("-o/--output needs usbsid, audio, wav or onboard\n"); return 2; }
+      onboard_out = !strcmp(v, "onboard");
+      if (onboard_out) output = OutputMode::USBSID; /* not played by a backend, see run_onboard() */
+      else if (!strcmp(v, "usbsid")) output = OutputMode::USBSID;
       else if (!strcmp(v, "audio")) output = OutputMode::Audio;
       else if (!strcmp(v, "wav")) output = OutputMode::Wav;
       else if (!strcmp(v, "asid")) {
@@ -632,7 +737,7 @@ int main(int argc, char ** argv)
 #endif
       }
       else {
-        printf("unknown output '%s': use usbsid, audio"
+        printf("unknown output '%s': use usbsid, audio, onboard"
 #if US_HAVE_RTMIDI
                 ", asid"
 #endif
@@ -690,7 +795,7 @@ int main(int argc, char ** argv)
     else if (!strcmp(a, "-ins")) us_log.instructions = true;
     else if (!strcmp(a, "-tim")) us_log.timers = true;
     else if (!strcmp(a, "-lmem")) us_log.memstate = true;
-    else if (a[0] != '-') path = a;
+    else if (a[0] != '-' || !strcmp(a, "-")) path = a;
     else { printf("unknown option %s\n", a); usage(argv[0]); return 2; }
   }
 
@@ -727,11 +832,43 @@ int main(int argc, char ** argv)
     }
   }
 
+  /* The onboard player runs on exactly one board */
+  if ((onboard_out || board_cmds != 0) && board_order.size() > 1) {
+    printf("  onboard uses exactly one board, --boards names %zu\n", board_order.size());
+    return 2;
+  }
+  OnboardOptions onboard;
+  onboard.board = board_order.empty() ? nullptr : board_order[0].c_str();
+
+  /* One-shot board commands need no file */
+  if (board_cmds != 0) {
+    onboard.one_shots = board_cmds;
+    return onboard_command(onboard);
+  }
+
+  if (onboard_out) {
+    const char * refused = nullptr;
+    if (trace_path != nullptr) refused = "-T";
+    else if (solo_spec != nullptr) refused = "-S";
+    else if (mute_solo_spec != nullptr) refused = "-ms";
+    else if (select_sids_spec != nullptr) refused = "-ss";
+    else if (force_address) refused = "-fa";
+    else if (wav_path != nullptr) refused = "-w";
+    if (refused != nullptr) {
+      printf("%s cannot be used with --output=onboard\n", refused);
+      return 2;
+    }
+  } else if (onboard_detach) {
+    printf("--detach needs --output=onboard\n");
+    return 2;
+  }
+
   if (path == nullptr) { usage(argv[0]); return 2; }
 
   std::vector<data_t> bytes;
-  if (!read_file(path, bytes)) {
-    printf("cannot read %s\n", path);
+  const bool from_stdin = onboard_out && !strcmp(path, "-");
+  if (!(from_stdin ? read_stdin(bytes) : read_file(path, bytes))) {
+    printf("cannot read %s\n", from_stdin ? "stdin" : path);
     return 1;
   }
 
@@ -770,6 +907,46 @@ int main(int argc, char ** argv)
   if (is_sid && info.is_mus_player) {
     /* Refuse MUS data, it is not 6502 code */
     return 1;
+  }
+
+  /* Onboard player: the board plays, the host emulates nothing */
+  if (onboard_out) {
+    /* The upload size field is 16 bit */
+    if (bytes.size() > 65535) {
+      printf("%s is %zu bytes, the board takes at most 65535\n", path, bytes.size());
+      return 1;
+    }
+    const uint16_t songs = is_sid ? info.songs : 1;
+    if (song > songs) {
+      printf("song %u does not exist, the tune has %u\n", song, songs);
+      return 2;
+    }
+    onboard.data = bytes.data();
+    onboard.size = bytes.size();
+    onboard.is_sid = is_sid;
+    onboard.songs = songs;
+    onboard.default_song = is_sid ? info.start_song : 1;
+    onboard.sid_count = is_sid ? info.sid_count : 1;
+    onboard.song = song;
+    onboard.seconds = seconds;
+    onboard.force_two = force_socket_two;
+    onboard.detach = onboard_detach;
+    if (mute_spec != nullptr) {
+      if (!parse_voice_spec(mute_spec, onboard.mute_mask)) {
+        printf("  cannot read --mute %s, expected CHIP or CHIP:VOICE, for example 1:3,2\n", mute_spec);
+        return 2;
+      }
+      onboard.has_mute = true;
+    }
+    const SongLengths onboard_lengths =
+      load_songlengths(bytes, is_sid, info, song != 0 ? song : onboard.default_song,
+                       use_songlengths, songlengths_path);
+    onboard.song_length_ms = [&](uint16_t s) -> uint32_t {
+      return is_sid ? song_length_ms(onboard_lengths, info, s, use_songlengths) : 0u;
+    };
+    signal(SIGINT, on_signal);
+    signal(SIGTERM, on_signal);
+    return run_onboard(onboard, &g_stop);
   }
 
   Machine machine;
@@ -1206,53 +1383,8 @@ int main(int argc, char ** argv)
 
 
   /* Song lengths from the database, key is the MD5 of the whole file */
-  SongLengths lengths;
-  char db_path[1024] = { 0 };
-  /* A v5 tune can embed its length table (see print_tune())
-   * song_length_ms() prefers it, same as the external database
-   * Warn only when nothing knows the length */
-  const uint32_t embedded_ms = (is_sid && player.tune().has_embedded_song_lengths)
-    ? player.tune().embedded_song_length_ms(player.song()) : 0;
-  if (is_sid && use_songlengths &&
-      songlengths_find_file(songlengths_path, db_path, sizeof(db_path))) {
-    std::vector<char> db;
-    FILE * dbf = fopen(db_path, "rb");
-    if (dbf != nullptr) {
-      fseek(dbf, 0, SEEK_END);
-      const long dbn = ftell(dbf);
-      fseek(dbf, 0, SEEK_SET);
-      if (dbn > 0) {
-        db.resize(static_cast<size_t>(dbn));
-        if (fread(db.data(), 1, db.size(), dbf) != db.size()) db.clear();
-      }
-      fclose(dbf);
-    }
-    char key[33];
-    songlengths_key(bytes.data(), bytes.size(), key);
-    if (!db.empty()) lengths = songlengths_lookup(db.data(), db.size(), key);
-    if (lengths.valid) {
-      const uint32_t ms = lengths.for_song(player.song());
-      printf("  length   : %u:%02u.%03u for this song, %u in the database\n",
-             ms / 60000u, (ms / 1000u) % 60u, ms % 1000u, lengths.count);
-    } else if (embedded_ms > 0) {
-      printf("  length   : %u:%02u for this song, from the file's own v5 song length table\n",
-             embedded_ms / 60000u, (embedded_ms / 1000u) % 60u);
-    } else {
-      printf("  length   : not in %s, using %u:%02u\n", db_path,
-             kDefaultSongMs / 60000u, (kDefaultSongMs / 1000u) % 60u);
-    }
-  } else if (is_sid && use_songlengths) {
-    if (embedded_ms > 0) {
-      printf("  length   : %u:%02u for this song, from the file's own v5 song length table\n",
-             embedded_ms / 60000u, (embedded_ms / 1000u) % 60u);
-    } else if (songlengths_path != nullptr) {
-      /* A path given on the command line that is not there is a mistake */
-      printf("  length   : cannot read %s\n", songlengths_path);
-    } else {
-      printf("  length   : no Songlengths database found. Point --songlengths at "
-             "one, or set $SONGLENGTHS or $HVSCROOT\n");
-    }
-  }
+  SongLengths lengths = load_songlengths(bytes, is_sid, player.tune(), player.song(),
+                                         use_songlengths, songlengths_path);
 
   signal(SIGINT, on_signal);
   signal(SIGTERM, on_signal);

@@ -555,6 +555,7 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
 
   add_executable(${EXECUTABLE}
     ${CMAKE_CURRENT_LIST_DIR}/src/host/main_cli.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/host/onboard_cli.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sid/sid_usbsid.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/host/session_board.cpp
     ${US_NETDEVICE_SOURCES}
@@ -726,7 +727,7 @@ if(${DESKTOP} EQUAL 1 AND ${BUILD_TESTS} EQUAL 1)
   enable_testing()
 
   set(US_TEST_NAMES bus ram cpu mmu cia vic sid player embedded prg keyboard web roms session)
-  list(APPEND US_TEST_NAMES netdevice asid)
+  list(APPEND US_TEST_NAMES netdevice asid onboard)
 
   set(US_TEST_SOURCES "")
   foreach(t ${US_TEST_NAMES})

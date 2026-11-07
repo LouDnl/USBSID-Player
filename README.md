@@ -31,10 +31,21 @@ usage: usplayer [options] <file.sid|file.prg|file.p00>
   -n,  --no-device  run without hardware, useful for checking a tune
   --no-roms         run on the stub KERNAL, without BASIC and character
                     ROM, the way a build without ROMs does
+  --detach          with --output=onboard: send, start and exit, the
+                    tune keeps playing on the board
+  --board-stop, --board-pause,
+  --board-next, --board-prev
+                    send that command to the board's own player and
+                    exit, no file needed
 
   sound:
-  -o,  --output M   usbsid (default), asid, nsd, audio or wav.
-                    usplayer falls back to audio when no board is found
+  -o,  --output M   usbsid (default), asid, nsd, audio, wav or onboard.
+                    usplayer falls back to audio when no board is found.
+                    onboard uploads the tune to the board's own player
+                    (_em firmware, one board, file or - for stdin, at
+                    most 65535 bytes) and follows it with the same
+                    keys; --boards takes one serial or index there, and
+                    -T -S -ms -ss -fa -w are refused
   -lb, --list-boards
                     list every attached board's serial number and exit
   -b,  --boards SPEC
@@ -136,6 +147,16 @@ usage: usplayer [options] <file.sid|file.prg|file.p00>
   -lmem             the SID registers, once a frame
 
   -h, --help        this
+```
+
+## Onboard player
+`--output=onboard` does not emulate anything on the host. It uploads the tune to the player that runs on the board itself (firmware built with `ONBOARD_EMULATOR=1`, the `_em` builds) and follows it: the play time is polled from the board, the same keys work (pause, subtune, restart, fast forward, voice mute) and the song ends by the Songlengths database like the normal player. `--detach` sends, starts and exits, the tune keeps playing. The `--board-stop`, `--board-pause`, `--board-next` and `--board-prev` options need no file. `-` as the file reads the tune from stdin. `-s`, `-t`, `-f`, `-m`, `-b` (exactly one board, serial or index from `--list-boards`), `-sl` and `-nsl` apply, `-T -S -ms -ss -fa -w` are refused.
+```shell
+usplayer -o onboard tune.sid
+usplayer -o onboard -s 2 -t 90 -b AB12 tune.sid
+usplayer -o onboard --detach tune.sid
+usplayer --board-stop
+curl -sS https://example.org/tune.sid | usplayer -o onboard -
 ```
 
 

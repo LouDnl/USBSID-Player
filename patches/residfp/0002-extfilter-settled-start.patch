@@ -1,0 +1,48 @@
+diff -ruN a/ExternalFilter.cpp b/ExternalFilter.cpp
+--- a/ExternalFilter.cpp	2026-10-31 18:50:27.319668747 +0100
++++ b/ExternalFilter.cpp	2026-10-31 18:50:27.339600287 +0100
+@@ -73,6 +73,7 @@
+     // State of filter.
+     Vlp = 0; //1 << (15 + 11);
+     Vhp = 0;
++    primed = false;
+ }
+ 
+ } // namespace reSIDfp
+diff -ruN a/ExternalFilter.h b/ExternalFilter.h
+--- a/ExternalFilter.h	2026-10-31 18:50:27.319697817 +0100
++++ b/ExternalFilter.h	2026-10-31 18:50:27.339487186 +0100
+@@ -94,6 +94,9 @@
+     /// Highpass filter voltage
+     int32_t Vhp;
+ 
++    /// False after reset, the first clock() settles the filter on its input
++    bool primed = false;
++
+     int32_t w0lp_1_s7 = 0;
+ 
+     int32_t w0hp_1_s17 = 0;
+@@ -150,6 +153,12 @@
+ int32_t ExternalFilter::clock(int32_t input)
+ {
+     const int32_t Vi = input << 11;
++    if (unlikely(!primed))
++    {
++        // Start settled, no DC step tick at the first sample
++        Vlp = Vhp = Vi;
++        primed = true;
++    }
+     const int32_t dVlp = (w0lp_1_s7 * (Vi - Vlp)) >> 7;
+     const int32_t dVhp = (w0hp_1_s17 * (Vlp - Vhp)) >> 17;
+     Vlp += dVlp;
+diff -ruN a/State.cpp b/State.cpp
+--- a/State.cpp	2026-10-31 18:50:27.320864899 +0100
++++ b/State.cpp	2026-10-31 18:50:27.339694130 +0100
+@@ -251,6 +251,7 @@
+ 
+     s.externalFilter.Vlp = state.exVlp;
+     s.externalFilter.Vhp = state.exVhp;
++    s.externalFilter.primed = true;
+     s.externalFilter.m_ext_res = state.ext_res;
+ 
+     s.setSamplingParameters(state.clockFrequency, state.method, state.samplingFrequency);

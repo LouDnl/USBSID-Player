@@ -16,6 +16,7 @@ not apply.
 | File | What |
 |---|---|
 | `0001-scope-tap.patch` | Per voice output tap for oscilloscope views. `Voice::output()` caches its value, `SID::setScopeTap()` takes an int16 buffer, both `SID::clock()` variants store the three voice outputs at every sample. Off (nullptr) by default |
+| `0002-extfilter-settled-start.patch` | `ExternalFilter` starts settled after reset. `reset()` clears a `primed` flag, the first `clock()` sets Vlp and Vhp to its input, so the t=0 DC step through the output highpass (start tick) is gone. No added start delay. Restoring a `State` sets it primed |
 
 ## Re-vendoring reSIDfp
 

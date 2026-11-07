@@ -10,9 +10,13 @@
  * The main thread is not in the playback path
  *
  * requestDevice() runs in the page, it needs a user gesture and a document
- * The worker finds the granted board with getDevices(), see USBSIDWebUSBTransport.connectGranted()
+ * The worker finds the granted board with getDevices(),
+ * see USBSIDWebUSBTransport.connectGranted()
  *
- * USBSIDPlayerWorker.available() is false without Worker, WebUSB or Web Audio, fall back to USBSIDPlayerWeb
+ * USBSIDPlayerWorker.available() is false without Worker, WebUSB or Web Audio,
+ * fall back to USBSIDPlayerWeb
+ * available('webserial') checks navigator.serial instead of WebUSB
+ * connect() uses the Web Serial picker (prefer option)
  * ASID always falls back, Web MIDI has no worker API
  *
  * This file is part of USBSID-Player (https://github.com/LouDnl/USBSID-Player)
@@ -73,9 +77,10 @@ export class USBSIDPlayerWorker {
   }
 
   /* Worker path can run in this environment */
-  static available() {
+  static available(prefer) {
+    const api = prefer === 'webserial' ? 'serial' : 'usb';
     return typeof Worker !== 'undefined' &&
-           typeof navigator !== 'undefined' && !!navigator.usb &&
+           typeof navigator !== 'undefined' && !!navigator[api] &&
            (typeof AudioContext !== 'undefined' ||
             typeof globalThis.webkitAudioContext !== 'undefined');
   }
@@ -137,16 +142,29 @@ export class USBSIDPlayerWorker {
   async connect() {
     /* Log each step, any of them can hang */
     this._log('looking for a granted board');
-    const devices = await navigator.usb.getDevices();
-    const known = devices.some((d) => d.vendorId === USBSID_VID &&
-                                      d.productId === USBSID_PID);
-    this._log(known ? 'board already granted, no picker needed'
-                    : 'not granted yet, asking');
-    if (!known) {
-      /* Only the picker needs the gesture, the worker opens the board afterwards */
-      await navigator.usb.requestDevice({
-        filters: [{ vendorId: USBSID_VID, productId: USBSID_PID }],
+    if (this._prefer === 'webserial') {
+      /* Match ports like USBSIDWebSerialTransport.connectGranted() */
+      const ports = await navigator.serial.getPorts();
+      const known = ports.some((p) => {
+        const i = p.getInfo ? p.getInfo() : null;
+        return i && i.usbVendorId === USBSID_VID && i.usbProductId === USBSID_PID;
       });
+      this._log(known ? 'board already granted, no picker needed'
+                      : 'not granted yet, asking');
+      /* Ask unfiltered like USBSIDWebSerialTransport.connect(), the worker picks the port */
+      if (!known) await navigator.serial.requestPort({});
+    } else {
+      const devices = await navigator.usb.getDevices();
+      const known = devices.some((d) => d.vendorId === USBSID_VID &&
+                                        d.productId === USBSID_PID);
+      this._log(known ? 'board already granted, no picker needed'
+                      : 'not granted yet, asking');
+      if (!known) {
+        /* Only the picker needs the gesture, the worker opens the board afterwards */
+        await navigator.usb.requestDevice({
+          filters: [{ vendorId: USBSID_VID, productId: USBSID_PID }],
+        });
+      }
     }
 
     this._log('starting the worker at ' + this._workerUrl);

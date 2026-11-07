@@ -40,7 +40,7 @@
 <div id="out"></div>
 
 <script type="module">
-import { USBSIDWebSerialTransport } from './usbsid-webserial.js';
+import { USBSIDWebSerialTransport, BAUD_RATE } from './usbsid-webserial.js';
 
 const out = document.getElementById('out');
 const say = (html) => { out.innerHTML = html + out.innerHTML; };
@@ -103,6 +103,19 @@ document.getElementById('ask').onclick = async () => {
   say(`<h2>Picked a port</h2>${portTable([port])}`);
 
   /* Does the board answer on it */
+  /* Open the port with the transport's settings, opts.port means already open */
+  try {
+    await port.open({ baudRate: BAUD_RATE, bufferSize: 4096 });
+    if (port.setSignals) {
+      await port.setSignals({ dataTerminalReady: true, requestToSend: true });
+    }
+  } catch (e) {
+    say(`<p class="bad">Cannot open the picked port: ${esc(e.name)}: ${esc(e.message)}</p>
+      <p class="note">Another program or tab may hold it, or the OS denied access.
+      Close anything else using the board and try again.</p>`);
+    try { await port.close(); } catch (_) {}
+    return;
+  }
   const t = new USBSIDWebSerialTransport({ port });
   const ok = await t.connect();
   if (ok) {
@@ -117,5 +130,7 @@ document.getElementById('ask').onclick = async () => {
       USB UART among them, try the others: only one carries the SID bus.</p>`);
   }
   await t.disconnect();
+  /* Close the port, the transport leaves adopted ports open */
+  try { await port.close(); } catch (_) {}
 };
 </script>

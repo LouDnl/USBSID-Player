@@ -47,6 +47,7 @@ Please refer to the [releases page](https://github.com/LouDnl/USBSID-Player/rele
 * Set UNIX_COMPILE and WINDOWS_COMPILE per platform
 * Defer driver volume write to bus, waits untill first actual SID write
 * Add config requests and port sharing to the Web Serial transport
+* Fix serial-check port open and add Web Serial to the worker client
 
 #### Version: 1.4.0
 * Add multiboard playback (--boards SERIAL,... and --list-boards)

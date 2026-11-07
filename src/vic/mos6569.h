@@ -45,6 +45,8 @@
 
 namespace usbsid {
 
+class Mmu;
+
 /**
  * @brief Called when the VIC finishes a frame, the SID layer flushes its buffer
  */
@@ -97,6 +99,15 @@ class Mos6569 final : public ClockedDevice, public IoDevice
     uint16_t cycle_in_line(void) { catch_up_now(); return cycle_; }
     bool badline(void) { catch_up_now(); return badline_; }
     uint64_t frames(void) { catch_up_now(); return frames_; }
+
+    /**
+     * @brief Byte the VIC fetched in the current cycle, what an undriven CPU read of $de00-$dfff sees
+     *
+     * Display window cycles 16-55 give the glyph or bitmap byte (row, column and line counter derived
+     * from raster and cycle), anything else the idle fetch at $3fff ($39ff with ECM) of the VIC bank
+     * Read only, catches the chip up like a register read
+     */
+    data_t bus_byte(const Mmu & mmu) US_RAM_ATTR;
 
     /* Register state */
     data_t peek(uint8_t reg) const US_RAM_ATTR;

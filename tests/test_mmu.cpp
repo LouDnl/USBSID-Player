@@ -203,7 +203,7 @@ int test_memory_map(void)
 
   /* An empty socket does not drive the bus, the access falls through to the RAM underneath ~ the expansion IO page is empty */
   m.ram().dma_write(0xde00, 0x5a);
-  US_CHECK_EQ_U(m.mmu().read(0xde00), 0x5au, "an empty IO slot reads the RAM under it");
+  US_CHECK(m.mmu().read(0xde00) != 0x5au, "an empty IO slot reads the VIC bus, not the RAM under it");
   m.mmu().write(0xde01, 0x3c);
   US_CHECK_EQ_U(m.ram().dma_read(0xde01), 0x3cu, "and writes land there too");
 
@@ -257,6 +257,35 @@ int test_vic_view(void)
   m.mmu().set_vic_bank(1);
   US_CHECK_EQ_U(m.mmu().vic_read(0x1000), 0x22u,
                 "bank 1 has no character ROM, $5000 shows through");
+
+  return 0;
+}
+
+/* ---- unmapped IO1 and IO2 --------------------------------------------- */
+
+int test_unmapped_io_vic_bus(void)
+{
+  Machine m;
+
+  /* RAM under $df00 differs from the idle fetch at $3fff of VIC bank 0 */
+  m.ram().dma_write(0xdf00, 0xa5);
+  m.ram().dma_write(0xde00, 0xa5);
+  m.ram().dma_write(0x3fff, 0x7e);
+  m.mmu().set_vic_bank(0);
+
+  /* Line 5 is above the display window, the VIC fetches idle */
+  for (unsigned i = 0; i < 100000 && m.vic().raster() != 5; i++) m.run(1);
+  US_CHECK_EQ_U(m.vic().raster(), 5u, "the VIC reached raster 5");
+
+  US_CHECK_EQ_U(m.mmu().read(0xdf00), 0x7eu, "unmapped IO2 reads the VIC idle fetch");
+  US_CHECK_EQ_U(m.mmu().read(0xde00), 0x7eu, "unmapped IO1 reads the VIC idle fetch");
+  US_CHECK(m.mmu().read(0xdf00) != m.ram().dma_read(0xdf00), "and not the RAM under it");
+  US_CHECK_EQ_U(m.ram().dma_read(0xdf00), 0xa5u, "the RAM is untouched");
+
+  /* Another VIC bank moves the idle fetch */
+  m.ram().dma_write(0x7fff, 0x3c);
+  m.mmu().set_vic_bank(1);
+  US_CHECK_EQ_U(m.mmu().read(0xdf00), 0x3cu, "idle fetch follows the VIC bank");
 
   return 0;
 }
@@ -333,6 +362,7 @@ int us_test_mmu(void)
   test_processor_port();
   test_memory_map();
   test_vic_view();
+  test_unmapped_io_vic_bus();
   test_kernal_boot();
 
   US_TEST_END("mem/mmu");

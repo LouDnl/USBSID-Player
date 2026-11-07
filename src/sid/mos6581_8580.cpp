@@ -429,6 +429,13 @@ bool Mos6581_8580::from_kernal_rom(void) const
          pla_->bank(Zone::Kernal) == Bank::Kernal;
 }
 
+bool Mos6581_8580::answers(addr_t addr) const
+{
+  uint8_t chip = 0;
+  if (translate(addr, chip) != kSidNotMapped) return true;
+  return addr >= kFmOplWindowFirst && addr <= kFmOplWindowLast;
+}
+
 data_t Mos6581_8580::io_read(addr_t addr)
 {
   uint8_t chip = 0;

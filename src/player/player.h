@@ -46,6 +46,9 @@ class Player
     /** @brief Parse a SID file and install it without starting (bytes must outlive the player) */
     bool load_sid(const data_t * bytes, size_t len, uint16_t song = 0);
 
+    /** @brief Keep the machine video model when a tune states no clock (forced -P or -N) */
+    void keep_video_model(bool keep) { keep_video_ = keep; }
+
     /** @brief Parse a PRG or P00 without starting (bytes must outlive the player) */
     bool load_prg(const data_t * bytes, size_t len);
 
@@ -124,6 +127,7 @@ class Player
     SidFile tune_;
     PrgFile prg_;
     bool is_prg_ = false;
+    bool keep_video_ = false;
     bool basic_tune_ = false; /* set by load_sid for an RSID BASIC tune */
     uint16_t song_ = 1;
     addr_t reloc_addr_ = 0;

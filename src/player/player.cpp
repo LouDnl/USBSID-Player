@@ -116,8 +116,9 @@ bool Player::load_sid(const data_t * bytes, size_t len, uint16_t song)
 
   if (!sidfile_parse(bytes, len, tune_)) return false;
 
-  /* Use the video standard the tune asks for */
+  /* Use the video standard the tune asks for, PAL when it states none unless one is forced */
   if (tune_.video_known) machine_.set_video_model(tune_.video_model);
+  else if (!keep_video_) machine_.set_video_model(VideoModel::Pal6569);
 
   /* Wire up the tune's SID addresses (up to kMaxSids). Boards only have 4 sockets and drop the rest */
   SidConfig & sid = machine_.sid().config();

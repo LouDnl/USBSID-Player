@@ -140,6 +140,9 @@ class Mos6581_8580 final : public IoDevice, public VicFrameObserver
      */
     addr_t translate(addr_t addr, uint8_t & chip) const US_RAM_ATTR;
 
+    /** @brief True if a configured chip or the FM window owns the address, false when the bus floats */
+    bool answers(addr_t addr) const US_RAM_ATTR;
+
     /** @brief Board register the first chip of the tune is forced to (-f/-fa), or 0 */
     addr_t socket_offset(void) const US_RAM_ATTR;
 

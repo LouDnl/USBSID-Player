@@ -28,6 +28,7 @@
  */
 
 #include "mos6569.h"
+#include "mmu.h"
 
 #include "util/logging.h"
 
@@ -367,16 +368,54 @@ void Mos6569::tick(void)
 /**
  * @brief Raster counter as a read of $d011/$d012 sees it
  *
+ * A CPU read follows the VIC phase of its cycle: cycle_ is one past the cycle being executed
  * Line increment is in the first cycle of a line, the wrap from the last line to line 0 is one cycle later
- * A read at the top of the frame shows the last line for one cycle, also puts the raster IRQ for line 0 in cycle 2 (see tick())
+ * A read in cycle 1 shows the previous line, a read at the top of the frame shows the last line for two cycles
+ * The raster IRQ for line 0 fires in cycle 2 (see tick())
  * The internal raster_ is unchanged (badline, sprite windows and display window use it)
  */
 uint16_t Mos6569::visible_raster(void) const
 {
-  if (raster_ == 0 && cycle_ == 1) {
+  if (cycle_ == 1) {
+    return static_cast<uint16_t>((raster_ != 0) ? (raster_ - 1)
+                                                : (timing_->lines_per_frame - 1));
+  }
+  if (raster_ == 0 && cycle_ == 2) {
     return static_cast<uint16_t>(timing_->lines_per_frame - 1);
   }
   return raster_;
+}
+
+data_t Mos6569::bus_byte(const Mmu & mmu)
+{
+  catch_up_now();
+  const data_t ctrl1 = regs_[kRegControl1];
+  const data_t memptr = regs_[kRegMemPtr];
+  const bool ecm = (ctrl1 & 0x40) != 0;
+  const addr_t idle = ecm ? 0x39ff : 0x3fff;
+
+  /* CPU read follows the VIC phase, cycle_ is one past the executing cycle */
+  const uint16_t cyc = static_cast<uint16_t>((cycle_ == 1) ? timing_->cycles_per_line : cycle_ - 1);
+  const uint16_t line = visible_raster();
+  const uint16_t first = static_cast<uint16_t>(kFirstDisplayLine + (ctrl1 & 0x07));
+
+  /* Display state runs 200 lines from the first bad line, g-accesses sit in cycles 16-55 */
+  if (!den_seen_ || cyc < 16 || cyc > 55 || line < first || line >= first + 200) {
+    return mmu.vic_read(idle);
+  }
+  const uint16_t y = static_cast<uint16_t>(line - first);
+  const uint16_t vc = static_cast<uint16_t>((y >> 3) * 40 + (cyc - 16));
+  const uint16_t rc = y & 0x07;
+
+  if ((ctrl1 & 0x20) != 0) { /* bitmap, matrix byte unused */
+    const addr_t base = static_cast<addr_t>((memptr & 0x08) << 10);
+    return mmu.vic_read(static_cast<addr_t>(base + (vc << 3) + rc));
+  }
+  const addr_t matrix = static_cast<addr_t>((memptr & 0xf0) << 6);
+  data_t glyph = mmu.vic_read(static_cast<addr_t>(matrix + vc));
+  if (ecm) glyph &= 0x3f;
+  const addr_t chars = static_cast<addr_t>((memptr & 0x0e) << 10);
+  return mmu.vic_read(static_cast<addr_t>(chars + (glyph << 3) + rc));
 }
 
 data_t Mos6569::peek(uint8_t reg) const

@@ -1129,6 +1129,13 @@ void Mos6510::tick(void)
       } else {
         push(static_cast<data_t>(pc_ & 0xff));
       }
+      /* NMI edge by the PCL push takes the vector of a BRK or IRQ,
+       * pushed flags keep the original B */
+      if (intr_type_ != IntrType::Nmi && intr_type_ != IntrType::Reset &&
+          bus_.nmi_edge()) {
+        nmi_hijack_ = true;
+        bus_.clear_nmi_edge();
+      }
       state_ = State::IntrPushP;
       break;
 
@@ -1142,13 +1149,6 @@ void Mos6510::tick(void)
           (intr_type_ == IntrType::Brk ? kFlagB : 0)));
       }
       set_flag(kFlagI, true);
-      /* NMI before the vector fetch takes the vector of a BRK or IRQ,
-       * pushed flags keep the original B */
-      if (intr_type_ != IntrType::Nmi && intr_type_ != IntrType::Reset &&
-          bus_.nmi_edge()) {
-        nmi_hijack_ = true;
-        bus_.clear_nmi_edge();
-      }
       state_ = State::IntrVecLo;
       break;
 

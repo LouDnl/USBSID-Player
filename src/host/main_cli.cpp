@@ -1267,6 +1267,7 @@ int main(int argc, char ** argv)
   }
 
   Player player(machine);
+  player.keep_video_model(forced_model != VideoModel::Count);
   if (is_sid) {
     if (!player.load_sid(bytes.data(), bytes.size(), song)) {
       printf("cannot load the tune\n");

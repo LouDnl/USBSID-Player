@@ -87,6 +87,7 @@ data_t Mmu::read_rom(Bank bank, addr_t addr) const
 
 /**
  * @brief The IO block, a chip only answers if fitted, otherwise the access falls through to the RAM underneath
+ * Unmapped IO1 and IO2 return the byte on the VIC bus
  */
 data_t Mmu::read_io(addr_t addr)
 {
@@ -103,9 +104,11 @@ data_t Mmu::read_io(addr_t addr)
     case 0x0d00:                                        /* $dd00-$ddff CIA2 */
       return (cia2_ != nullptr) ? cia2_->io_read(addr) : ram_.read(addr);
     case 0x0e00:                                        /* $de00-$deff IO1 */
-      return (io1_ != nullptr) ? io1_->io_read(addr) : ram_.read(addr);
+      if (io1_ != nullptr) return io1_->io_read(addr);
+      return (vic_ != nullptr) ? vic_->bus_byte(*this) : ram_.read(addr);
     default:                                            /* $df00-$dfff IO2 */
-      return (io2_ != nullptr) ? io2_->io_read(addr) : ram_.read(addr);
+      if (io2_ != nullptr && io2_->answers(addr)) return io2_->io_read(addr);
+      return (vic_ != nullptr) ? vic_->bus_byte(*this) : ram_.read(addr);
   }
 }
 

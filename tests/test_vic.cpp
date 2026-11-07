@@ -102,9 +102,11 @@ int test_frame_timing(void)
 
     /* the raster register follows the line, including the ninth bit */
     r.goto_line(0x100);
+    r.run(1);                     /* read after the VIC phase of cycle 1 */
     US_CHECK_EQ_U(r.read(0x12), 0x00u, "raster low byte wraps");
     US_CHECK_EQ_U(r.read(0x11) & 0x80, 0x80u, "raster bit 8 in $d011");
     r.goto_line(0x37);
+    r.run(1);
     US_CHECK_EQ_U(r.read(0x12), 0x37u, "raster low byte");
     US_CHECK_EQ_U(r.read(0x11) & 0x80, 0x00u, "raster bit 8 clear again");
   }

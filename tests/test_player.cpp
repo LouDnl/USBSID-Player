@@ -125,6 +125,37 @@ static uint16_t cia1_latch_after_setup(uint8_t video_flags)
   return c64.machine.cia1().latch_a();
 }
 
+/* Video model after loading a one song PSID with the given flags, on a machine preset to NTSC */
+static VideoModel model_after_load(uint8_t video_flags, bool keep)
+{
+  std::vector<data_t> file(0x7c + 4, 0);
+  memcpy(file.data(), "PSID", 4);
+  file[0x05] = 0x02;
+  file[0x07] = 0x7c;
+  file[0x08] = 0x10; file[0x0a] = 0x10; file[0x0c] = 0x10; file[0x0d] = 0x03;
+  file[0x0f] = 0x01; file[0x11] = 0x01;
+  file[0x77] = video_flags;
+  file[0x78] = 0x04; file[0x79] = 0x02;
+  file[0x7c] = 0x60;
+
+  TestC64 c64(VideoModel::Ntsc6567R8);
+  Player player(c64.machine);
+  player.keep_video_model(keep);
+  if (!player.load_sid(file.data(), file.size())) return VideoModel::Count;
+  return c64.machine.video_model();
+}
+
+int test_unspecified_clock_is_pal(void)
+{
+  US_CHECK(model_after_load(0x00, false) == VideoModel::Pal6569,
+           "an unspecified clock gives PAL after an NTSC machine");
+  US_CHECK(model_after_load(0x08, false) == VideoModel::Ntsc6567R8,
+           "a tune that states NTSC keeps NTSC");
+  US_CHECK(model_after_load(0x00, true) == VideoModel::Ntsc6567R8,
+           "a forced model survives an unspecified clock");
+  return 0;
+}
+
 int test_cia1_default_timer(void)
 {
   /* $4025 for PAL and $4295 for NTSC */
@@ -537,6 +568,7 @@ int us_test_player(void)
 #endif
   test_parse_synthetic();
   test_cia1_default_timer();
+  test_unspecified_clock_is_pal();
   test_v5_sid_count();
   test_real_tunes();
   test_tune_runs();

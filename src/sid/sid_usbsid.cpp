@@ -79,11 +79,15 @@ bool UsbSidBackend::open(const std::vector<std::string> & board_order)
   if (!manager_.OpenAll(targets, true, true)) return false;
   open_ = true;
   single_ = (manager_.BoardCount() == 1);
+  int ring_bytes = 65536; /* Default to max size 64KB required for a tune like MUSICIANS/A/Andy/Justinblue_tune_6.sid */
+  manager_.SetBufferSizeAll(ring_bytes);
+  manager_.ResetRingBufferAll();
+  manager_.RestartRingBufferAll();
 
 #if defined(RING_OVERRIDE) && RING_OVERRIDE
   /* Gated build flag test to allow USBSID-Pico driver ring buffer overrides for testing */
   {
-    int ring_bytes = 65536;
+    ring_bytes = 65536;
     if (const char * env = std::getenv("USPLAYER_RING_BYTES")) {
       const int v = std::atoi(env);
       if (v > 0) ring_bytes = v;

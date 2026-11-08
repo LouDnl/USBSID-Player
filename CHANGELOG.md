@@ -54,6 +54,7 @@ Please refer to the [releases page](https://github.com/LouDnl/USBSID-Player/rele
 * Fix stale tune state and start race in the web player
 * Fix VIC raster read timing, NMI hijack and unmapped IO reads
 * Add gated driver ring size override for CLI testing
+* Set default USBSID ringbuffer size to 64KB
 
 #### Version: 1.4.0
 * Add multiboard playback (--boards SERIAL,... and --list-boards)

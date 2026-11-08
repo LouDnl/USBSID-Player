@@ -38,7 +38,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           # Forces checkout of the branch head instead of a specific commit SHA
           ref: ${{ github.ref }}
@@ -49,7 +49,7 @@ jobs:
       # as it is now, instead of whatever revision a submodule bump last
       # recorded. CMake picks it up at lib/driver/src, see CMakeLists.txt.
       - name: Checkout USBSID driver
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: LouDnl/USBSID-Pico-driver
           path: repo/lib/driver
@@ -71,7 +71,7 @@ jobs:
       #     sudo apt-get update && sudo apt-get install -y xa65
 
       # - name: Checkout bin2h source
-      #   uses: actions/checkout@v4
+      #   uses: actions/checkout@v5
       #   with:
       #     repository: elnormous/bin2h
       #     path: bin2h-src
@@ -144,7 +144,7 @@ jobs:
           popd
 
       - name: Upload
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.buildname }}-${{ matrix.os }}
           # Exactly the player. A `${{ matrix.executable }}*` glob also picks up
@@ -162,14 +162,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.ref }}
 
       - name: Set up Emscripten
-        uses: mymindstorm/setup-emsdk@v14
+        uses: mymindstorm/setup-emsdk@v15
         with:
           version: 4.0.12
+          actions-cache-folder: 'emsdk-cache'
 
       - name: Build the WASM player
         run: |

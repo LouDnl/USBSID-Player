@@ -72,6 +72,10 @@ set(FM_YMFM 0 CACHE STRING "Use ymfm instead of Nuked-OPL3-fast for FM/OPL (CLI 
 ### BASIC programs without a SYS line need them
 set(EMBED_ROMS 1 CACHE STRING "Compile the stock C64 ROM images in")
 
+### Allow the USPLAYER_RING_BYTES environment variable to override the driver ring size per board (CLI only)
+### Test and diagnosis aid, the player default ring size applies without it
+set(RING_OVERRIDE 0 CACHE STRING "Allow USPLAYER_RING_BYTES to override the driver ring size (CLI only)")
+
 if(${WEB} EQUAL 1)
   set(DESKTOP 1)
   set(EMBEDDED 0)
@@ -575,6 +579,9 @@ if(${DESKTOP} EQUAL 1 AND ${WEB} EQUAL 0)
   target_compile_definitions(${EXECUTABLE} PRIVATE US_SOFTSID=${US_HAVE_RESIDFP})
   target_compile_definitions(${EXECUTABLE} PRIVATE US_HAVE_NETDEVICE=${US_HAVE_NETDEVICE})
   target_compile_definitions(${EXECUTABLE} PRIVATE US_HAVE_RTMIDI=${US_HAVE_RTMIDI})
+  if(RING_OVERRIDE)  # Accepts 1 or ON
+    target_compile_definitions(${EXECUTABLE} PRIVATE RING_OVERRIDE=1)
+  endif()
   if(US_HAVE_RTMIDI)
     if(WIN32)
       target_compile_definitions(${EXECUTABLE} PRIVATE WINDOWS_COMPILE)

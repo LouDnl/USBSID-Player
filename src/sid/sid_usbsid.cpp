@@ -28,6 +28,10 @@
  *
  */
 
+#if defined(RING_OVERRIDE) && RING_OVERRIDE
+#include <cstdlib>
+#endif
+
 #include "sid_usbsid.h"
 #include "util/logging.h"
 
@@ -75,6 +79,24 @@ bool UsbSidBackend::open(const std::vector<std::string> & board_order)
   if (!manager_.OpenAll(targets, true, true)) return false;
   open_ = true;
   single_ = (manager_.BoardCount() == 1);
+
+#if defined(RING_OVERRIDE) && RING_OVERRIDE
+  /* Gated build flag test to allow USBSID-Pico driver ring buffer overrides for testing */
+  {
+    int ring_bytes = 65536;
+    if (const char * env = std::getenv("USPLAYER_RING_BYTES")) {
+      const int v = std::atoi(env);
+      if (v > 0) ring_bytes = v;
+    }
+    for (int i = 0; i < manager_.BoardCount(); i++) {
+      USBSID_NS::USBSID_Class * b = manager_.Board(i);
+      if (!b) continue;
+      b->USBSID_DisableThread();
+      b->USBSID_SetBufferSize(ring_bytes);
+      b->USBSID_EnableThread();
+    }
+  }
+#endif
 
   const auto & board = manager_.Boards().front();
   if (board.socketconfig_valid) {

@@ -310,6 +310,8 @@ extern uint16_t usplayer_song(void);
 extern uint16_t usplayer_songs(void);
 extern uint32_t usplayer_frames(void);
 extern uint16_t usplayer_driver_address(void);
+/* Nonzero if the loaded tune states its video standard, 0 if it was assumed */
+extern int usplayer_video_known(void);
 /* Header strings as stored in the file, Windows-1252 (see win1252_to_utf8()) */
 extern const char * usplayer_tune_name(void);
 extern const char * usplayer_tune_author(void);

@@ -112,6 +112,7 @@ bool Player::load_sid(const data_t * bytes, size_t len, uint16_t song)
   playing_ = false;
   is_prg_ = false;
   basic_tune_ = false;
+  reloc_addr_ = 0; /* no driver until init_tune() installs one */
   frames_ = 0;
 
   if (!sidfile_parse(bytes, len, tune_)) return false;
@@ -156,6 +157,7 @@ bool Player::load_prg(const data_t * bytes, size_t len)
   playing_ = false;
   is_prg_ = false;
   basic_tune_ = false;
+  reloc_addr_ = 0; /* no driver until init_tune() installs one */
   frames_ = 0;
 
   if (!prgfile_parse(bytes, len, prg_)) return false;

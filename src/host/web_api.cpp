@@ -246,6 +246,8 @@ uint32_t usp_irq_sources(void) { return usplayer_irq_sources(); }
 int usp_start_mode(void) { return usplayer_start_mode(); }
 /** @brief Where the PSID driver was relocated to, or 0 */
 int usp_driver_address(void) { return static_cast<int>(usplayer_driver_address()); }
+/** @brief 1 if the tune states its video standard, 0 if PAL was assumed */
+int usp_video_known(void) { return usplayer_video_known(); }
 
 /* The ring
  * The page reads ring_ptr out of HEAPU8, takes everything between tail and head and writes the new tail back

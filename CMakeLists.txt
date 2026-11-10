@@ -668,7 +668,7 @@ if(${WEB} EQUAL 1)
     _usp_pan_layout _usp_pan_mode
     _usp_has_fm_opl _usp_has_embedded_songlengths _usp_embedded_songlength_ms
     _usp_benchmark
-    _usp_irq_sources _usp_start_mode _usp_driver_address
+    _usp_irq_sources _usp_start_mode _usp_driver_address _usp_video_known
     _usp_read_memory _usp_read_memory_block _usp_cia_latch _usp_sid_register
     _usp_audio_render _usp_audio_rendering
     _usp_audio_set_speed _usp_audio_speed

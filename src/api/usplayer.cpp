@@ -544,6 +544,7 @@ uint8_t usplayer_chip_mute(void)
   return g_machine.sid().chip_mute();
 }
 uint16_t usplayer_driver_address(void) { return g_player.driver_address(); }
+int usplayer_video_known(void) { return g_player.video_known() ? 1 : 0; }
 const char * usplayer_tune_name(void) { return g_player.tune().name; }
 const char * usplayer_tune_author(void) { return g_player.tune().author; }
 const char * usplayer_tune_released(void) { return g_player.tune().released; }

@@ -113,6 +113,8 @@ class Player
     uint16_t song(void) const { return song_; }
     uint16_t songs(void) const { return tune_.songs; }
     addr_t driver_address(void) const { return reloc_addr_; }
+    /** @brief True if the loaded tune states its video standard, false if PAL was assumed */
+    bool video_known(void) const { return tune_.video_known; }
     uint32_t frames_played(void) const { return frames_; }
 
   private:

@@ -56,6 +56,7 @@ Please refer to the [releases page](https://github.com/LouDnl/USBSID-Player/rele
 * Add gated driver ring size override for CLI testing
 * Set default USBSID ringbuffer size to 64KB
 * Fix RSID tune start, init runs like the SID file spec
+* Fix v5 embedded songlengths in the web player
 
 #### Version: 1.4.0
 * Add multiboard playback (--boards SERIAL,... and --list-boards)

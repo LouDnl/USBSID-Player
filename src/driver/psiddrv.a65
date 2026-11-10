@@ -185,7 +185,8 @@ doinit	lda rsidflg
 	pla
 	nop
 	jsr init
-	jmp initdone
+	; no cli after RSID init, I stays as the tune left it (libsidplayfp)
+	jmp idle
 
 psidinit lda #$2f
 	sta $00

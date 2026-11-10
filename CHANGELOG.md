@@ -58,6 +58,7 @@ Please refer to the [releases page](https://github.com/LouDnl/USBSID-Player/rele
 * Fix RSID tune start, init runs like the SID file spec
 * Fix v5 embedded songlengths in the web player
 * Add video standard to timing() and reset the driver address on load
+* Fix RSID driver placement and interrupts after init
 
 #### Version: 1.4.0
 * Add multiboard playback (--boards SERIAL,... and --list-boards)

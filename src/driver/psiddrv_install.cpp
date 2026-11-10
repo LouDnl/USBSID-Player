@@ -105,6 +105,7 @@ bool psiddrv_install(Ram & ram, const SidFile & tune, uint16_t song,
     /* Driver is two pages, like the psid64 minimal one */
     constexpr unsigned kDriverPages = 2;
     /* $0400-$07e7 is the default screen, last choice for the driver */
+    const bool rsid_noplay = tune.is_rsid && tune.play_addr == 0;
     const auto is_screen = [](unsigned page) { return page >= 0x04 && page <= 0x07; };
 
     unsigned best = 0, best_len = 0;      /* largest gap clear of the screen */
@@ -116,9 +117,12 @@ bool psiddrv_install(Ram & ram, const SidFile & tune, uint16_t song,
       if (free_here) { if (run == 0) run_start = i; run++; continue; }
       if (run >= kDriverPages) {
         if (run > fallback_len) { fallback_len = run; fallback = run_start; }
-        /* Trim the screen off the front of a run, $04-$0f is good from $08 */
+        /* Trim the screen off the front of a run, $04-$0f is good from $08.
+         * Not for a conforming RSID (no play address): the old player and
+         * libsidplayfp put the driver at the start of the run, $0400 here.
+         * 2_Canal_Diggi init copies data over $0900 and kills a driver there */
         unsigned s = run_start, n = run;
-        while (n > 0 && is_screen(s)) { s++; n--; }
+        while (!rsid_noplay && n > 0 && is_screen(s)) { s++; n--; }
         if (n >= kDriverPages && n > best_len) { best_len = n; best = s; }
       }
       run = 0;

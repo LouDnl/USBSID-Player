@@ -46,6 +46,7 @@ playvec	.word 0
 speed	.word 0, 0
 palflag .byte 0
 loadend .word 0
+rsidflg .byte 0       ; non zero: RSID, init runs with IRQs on
 
 iomap	.byte 0       ; $01 value for PLAY
 
@@ -53,6 +54,7 @@ iomap	.byte 0       ; $01 value for PLAY
 irqusr	.word irqjob
 brkusr	.word irqexit
 nmiusr	.word nmijob
+irqrsid	.word irqret
 
 	; Cold start
 	; Turn interrupts off
@@ -82,7 +84,17 @@ store80	lda cbm80,x
 	lda loadvec
 	cmp #$1a
 	bcc vicras
-initirq	ldx #$05
+initirq	lda rsidflg
+	beq psidvec
+	; RSID: only the IRQ vector, to a handler that acknowledges CIA 1 and nothing
+	; else (libsidplayfp irqret). BRK and NMI keep the KERNAL defaults. The VIC
+	; flag in $d019 stays set, RSID tunes poll it.
+	lda irqrsid
+	sta $0314
+	lda irqrsid+1
+	sta $0315
+	jmp vicras
+psidvec	ldx #$05
 store03	lda irqusr,x
 	sta $0314,x
 	dex
@@ -156,7 +168,26 @@ ciainit	lda #$81
 	stx $dc0e
 
 	; Set I/O map and call song init routine
-doinit	lda #$2f
+	; RSID takes its own path: $00 = $2f, $01 = $37 and P = 0 (I clear) like the
+	; SID file spec and libsidplayfp psiddrv.a65. Init is entered 42 cycles
+	; after the CIA 1 timer start (libsidplayfp: 37). Tunes race the first
+	; timer underflow and VIC raster, this start phase is the one where the
+	; Originalzak, Dragon, Hitech and Temple tests pass, 81 breaks Originalzak.
+doinit	lda rsidflg
+	beq psidinit
+	lda #$2f
+	sta $00
+	lda #$37
+	sta $01
+	lda #$00
+	pha
+	plp
+	pla
+	nop
+	jsr init
+	jmp initdone
+
+psidinit lda #$2f
 	sta $00
 	lda initvec+1
         ldx loadend+1
@@ -167,6 +198,7 @@ doinit	lda #$2f
 	tay
 	jsr init
 
+initdone
 	lda playvec+1
 	beq run
 	lda #$36
@@ -245,6 +277,10 @@ irqexit	pla
 	tax
 	pla
 	rti
+
+	; RSID IRQ handler: acknowledge CIA 1 only
+irqret	lda $dc0d
+	jmp irqexit
 
 nmijob  bit $dd0d
 	rti

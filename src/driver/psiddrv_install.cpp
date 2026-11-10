@@ -168,6 +168,10 @@ bool psiddrv_install(Ram & ram, const SidFile & tune, uint16_t song,
   ram.dma_write(addr++, static_cast<data_t>(is_pal ? 1 : 0));
   ram.dma_write(addr++, static_cast<data_t>(tune.load_last_addr & 0xff));
   ram.dma_write(addr++, static_cast<data_t>(tune.load_last_addr >> 8));
+  /* RSID start state only for a conforming RSID (play address 0). A file with an RSID header and a
+   * play address (Edge_of_Disgrace_FAKERSID.sid) is a PSID in disguise: its data sits under BASIC
+   * and needs the PSID bank rule, $37 hides it and the tune runs away */
+  ram.dma_write(addr++, static_cast<data_t>((tune.is_rsid && tune.play_addr == 0) ? 1 : 0));
 
   /* Signature goes in last, the backup must hold what the tune put at $8000 */
   install_cbm80(ram, static_cast<addr_t>(reloc_addr + kPsidDrvEntryOffset),

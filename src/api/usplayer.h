@@ -256,11 +256,12 @@ extern bool usplayer_loaded(void);
 extern bool usplayer_is_prg(void);
 
 /**
- * @brief Interrupt sources the tune armed, as a bitmask
+ * @brief Interrupt sources the tune used since the subtune started, as a bitmask
  *
- * Read from the chips, a CIA source counts when its mask bit is set and its timer runs,
- * the raster source when its enable bit is set. Follows later subtunes
- * CIA2 is reported as a source although it raises NMI
+ * Collected from the chips after 1 s of play (see usplayer_irq_known()), a CIA source counts
+ * when its mask bit is set and its timer runs, the raster source when its enable bit is set.
+ * Never cleared until the song restarts, so a tune toggling timers does not blink. Zero before
+ * the collection starts. CIA2 is reported as a source although it raises NMI
  */
 #define USP_IRQ_CIA1_TA   0x01u
 #define USP_IRQ_CIA1_TB   0x02u
@@ -270,6 +271,9 @@ extern bool usplayer_is_prg(void);
 #define USP_IRQ_CIA2_TOD  0x20u
 #define USP_IRQ_VIC_RASTER 0x40u
 extern uint32_t usplayer_irq_sources(void);
+
+/** @brief True once usplayer_irq_sources() holds a result, after 1 s of play of the subtune */
+extern bool usplayer_irq_known(void);
 
 /**
  * @brief CIA timer latch (reload value)

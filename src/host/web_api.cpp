@@ -240,8 +240,10 @@ int usp_embedded_songlength_ms(int song)
   return static_cast<int>(usplayer_embedded_songlength_ms(static_cast<uint16_t>(song)));
 }
 
-/** @brief Interrupt sources the tune has armed, see USP_IRQ_* */
+/** @brief Interrupt sources the tune used since the subtune started, see USP_IRQ_* */
 uint32_t usp_irq_sources(void) { return usplayer_irq_sources(); }
+/** @brief 1 once usp_irq_sources() holds a result (after 1 s of play), else 0 */
+int usp_irq_known(void) { return usplayer_irq_known() ? 1 : 0; }
 /** @brief How what is loaded was started, see USP_START_* */
 int usp_start_mode(void) { return usplayer_start_mode(); }
 /** @brief Where the PSID driver was relocated to, or 0 */

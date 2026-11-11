@@ -103,10 +103,11 @@ Goes through the CIA1 matrix, the KERNAL scan finds these like a real key. This 
 #define USP_IRQ_CIA2_TOD   0x20u
 #define USP_IRQ_VIC_RASTER 0x40u
 uint32_t usplayer_irq_sources(void);
+bool usplayer_irq_known(void);
 uint16_t usplayer_cia_latch(uint8_t cia, uint8_t timer);
 ```
 
-`usplayer_irq_sources()` is a bitmask of the interrupt sources the tune has **armed** at this moment, read from the chips (a CIA source counts when its mask bit is set *and* its timer runs, the VIC raster source when its enable bit is set). The file is not consulted. It follows the init routine of the playing subtune and changes when a later subtune programs something else. CIA2 raises NMI on real hardware but is reported as `CIA2_*`, the mask tells what drives the tune.
+`usplayer_irq_sources()` is a bitmask of the interrupt sources the tune used **since the subtune started**, read from the chips and collected once the subtune played 1 s (`usplayer_irq_known()` is false before, the mask is 0). Never cleared until the song restarts, so timers a tune toggles do not blink. A source counts when armed (a CIA source counts when its mask bit is set *and* its timer runs, the VIC raster source when its enable bit is set). The file is not consulted. It follows the init routine of the playing subtune and changes when a later subtune programs something else. CIA2 raises NMI on real hardware but is reported as `CIA2_*`, the mask tells what drives the tune.
 
 `usplayer_cia_latch(cia, timer)` (`cia` 1 or 2, `timer` 0 for A / 1 for B) returns the reload **latch** of the timer, not the live counter (reading a CIA register has side effects). Divide the cycles of a frame by the latch for calls per frame, about 19654 is once a frame on PAL, half that is twice.
 

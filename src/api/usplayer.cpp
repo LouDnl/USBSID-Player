@@ -146,6 +146,47 @@ template <typename F> bool basic_restart(F change)
 } /* namespace */
 
 /* ------------------------------------------------------------------------ *
+ * IRQ sources
+ * ------------------------------------------------------------------------ */
+
+/* Sources seen armed since the subtune started, collected once it played 1 s */
+static uint32_t g_irq_seen = 0;
+static bool g_irq_known = false;
+static uint32_t g_irq_last_frames = 0;
+static constexpr uint32_t kIrqCollectMs = 1000;
+
+/** @brief Armed interrupt sources at this moment, read from the chips */
+static uint32_t irq_snapshot(void)
+{
+  uint32_t out = 0;
+  if (g_tune_size == 0) return 0;
+
+  /* Armed = mask bit set and timer started (control register bit 0) */
+  struct { Mos6526 & cia; uint32_t ta, tb, tod; } cias[] = {
+    { g_machine.cia1(), USP_IRQ_CIA1_TA, USP_IRQ_CIA1_TB, USP_IRQ_CIA1_TOD },
+    { g_machine.cia2(), USP_IRQ_CIA2_TA, USP_IRQ_CIA2_TB, USP_IRQ_CIA2_TOD },
+  };
+  for (auto & c : cias) {
+    const data_t imr = c.cia.imr();
+    if ((imr & 0x01) != 0 && (c.cia.peek(0x0e) & 0x01) != 0) out |= c.ta;
+    if ((imr & 0x02) != 0 && (c.cia.peek(0x0f) & 0x01) != 0) out |= c.tb;
+    if ((imr & 0x04) != 0) out |= c.tod;
+  }
+
+  /* VIC interrupt enable, bit 0 is the raster compare */
+  if ((g_machine.vic().irq_enable() & 0x01) != 0) out |= USP_IRQ_VIC_RASTER;
+  return out;
+}
+
+/** @brief Forget the collected IRQ sources, a song (re)starts */
+static void irq_reset(void)
+{
+  g_irq_seen = 0;
+  g_irq_known = false;
+  g_irq_last_frames = 0;
+}
+
+/* ------------------------------------------------------------------------ *
  * Loading and streaming upload
  *
  * load_sidtune()/load_prg() are built on these, the firmware feeds USB
@@ -154,6 +195,7 @@ template <typename F> bool basic_restart(F change)
 
 void usplayer_upload_start(void)
 {
+  irq_reset();
   attach_once();
   g_prepared = false;
   g_is_prg = false; /* Set by finish_*() */
@@ -178,6 +220,7 @@ bool usplayer_upload_feed(const uint8_t * buf, size_t len)
 
 void usplayer_upload_finish_tune(char subt)
 {
+  irq_reset();
   g_is_prg = false;
   g_prepared = false;
 
@@ -199,6 +242,7 @@ void usplayer_upload_finish_tune(char subt)
  * Song 1 has no spelling in the zero based form above, where 0 means the default */
 void usplayer_upload_finish_song(int song)
 {
+  irq_reset();
   g_is_prg = false;
   g_prepared = false;
 
@@ -221,6 +265,7 @@ void usplayer_upload_finish_song(int song)
  */
 void usplayer_upload_finish_prg(bool loop)
 {
+  irq_reset();
   (void)loop;
   g_is_prg = true;
   g_prepared = false;
@@ -269,6 +314,7 @@ void load_prg(uint8_t * binary_, size_t binsize_, bool loop)
 
 void init_sidplayer(void)
 {
+  irq_reset();
   attach_once();
 
   /* A program is already started by load_prg() */
@@ -287,6 +333,7 @@ void init_sidplayer(void)
 
 void start_sidplayer(bool loop)
 {
+  irq_reset();
   (void)loop; /* Firmware drives the loop, one frame per call */
   if (!g_prepared) return;
   /* Pacer measures the timeline from its first access, init_sidplayer() setup is excluded */
@@ -302,10 +349,22 @@ void loop_sidplayer(void)
 
   /* One frame per call, always returns (VIC keeps counting, also on a jammed tune) */
   g_player.run_frame();
+
+  /* Frames restart at zero on any song start, drop what an earlier song collected */
+  const uint32_t frames = g_player.frames_played();
+  if (frames < g_irq_last_frames) irq_reset();
+  g_irq_last_frames = frames;
+
+  /* Timers toggled by the tune must not make the sources blink, keep what was ever armed */
+  if (usplayer_playtime_ms() >= kIrqCollectMs) {
+    g_irq_known = true;
+    g_irq_seen |= irq_snapshot();
+  }
 }
 
 bool stop_sidplayer(void)
 {
+  irq_reset();
   g_player.stop();
   end_ffwd();
   g_backend.reset_hardware();
@@ -315,6 +374,7 @@ bool stop_sidplayer(void)
 
 void next_subtune(void)
 {
+  irq_reset();
   if (g_player.is_basic_tune() && g_player.songs() > 1) {
     basic_restart([] { g_player.next_subtune(); return true; });
     return;
@@ -324,6 +384,7 @@ void next_subtune(void)
 
 void previous_subtune(void)
 {
+  irq_reset();
   if (g_player.is_basic_tune() && g_player.songs() > 1) {
     basic_restart([] { g_player.previous_subtune(); return true; });
     return;
@@ -443,27 +504,9 @@ bool usplayer_paused(void) { return g_player.paused(); }
 bool usplayer_loaded(void) { return g_tune_size != 0; }
 bool usplayer_is_prg(void) { return g_is_prg; }
 
-uint32_t usplayer_irq_sources(void)
-{
-  uint32_t out = 0;
-  if (g_tune_size == 0) return 0;
+uint32_t usplayer_irq_sources(void) { return g_irq_seen; }
 
-  /* Armed = mask bit set and timer started (control register bit 0) */
-  struct { Mos6526 & cia; uint32_t ta, tb, tod; } cias[] = {
-    { g_machine.cia1(), USP_IRQ_CIA1_TA, USP_IRQ_CIA1_TB, USP_IRQ_CIA1_TOD },
-    { g_machine.cia2(), USP_IRQ_CIA2_TA, USP_IRQ_CIA2_TB, USP_IRQ_CIA2_TOD },
-  };
-  for (auto & c : cias) {
-    const data_t imr = c.cia.imr();
-    if ((imr & 0x01) != 0 && (c.cia.peek(0x0e) & 0x01) != 0) out |= c.ta;
-    if ((imr & 0x02) != 0 && (c.cia.peek(0x0f) & 0x01) != 0) out |= c.tb;
-    if ((imr & 0x04) != 0) out |= c.tod;
-  }
-
-  /* VIC interrupt enable, bit 0 is the raster compare */
-  if ((g_machine.vic().irq_enable() & 0x01) != 0) out |= USP_IRQ_VIC_RASTER;
-  return out;
-}
+bool usplayer_irq_known(void) { return g_irq_known; }
 
 uint16_t usplayer_cia_latch(uint8_t cia, uint8_t timer)
 {
@@ -507,6 +550,7 @@ uint32_t usplayer_frames(void) { return g_player.frames_played(); }
 
 bool usplayer_restart_song(uint16_t song)
 {
+  irq_reset();
   attach_once();
   if (g_player.is_basic_tune()) {
     return basic_restart([song] { return g_player.restart_song(song); });

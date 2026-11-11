@@ -243,7 +243,9 @@ void usage(const char * argv0)
     "  a SID file plays; a program is loaded where it says and started the\n"
     "  way you would start it, with RUN or with SYS\n"
     "\n"
-    "  -s,  --song N     start at subtune N (default: the tune's own)\n"
+    "  -s,  --song N     start at subtune N (default: the tune's own), plays on\n"
+    "                    into the following songs unless --single\n"
+    "  -1,  --single     play only this song, stop when it ends\n"
     "  -t,  --seconds N  stop after N seconds (default: play until ctrl-c)\n"
     "  -i,  --info       print what the file says and exit\n"
     "  -n,  --no-device  run without hardware, useful for checking a tune\n"
@@ -295,7 +297,10 @@ void usage(const char * argv0)
     "  -np, --net-port P its TCP port (default 6581)\n"
     "  -ns, --net-sids N SIDs to tell it about (default: the tune's own count)\n"
 #endif
-    "  -w,  --wav FILE   write a WAV instead of playing, implies --output=wav\n"
+    "  -w,  --wav FILE   write a WAV instead of playing, implies --output=wav.\n"
+    "                    A tune with more songs records from the start song\n"
+    "                    through the last, use -1/--single (or -t) for one\n"
+    "                    song. With -nsl and no -t the WAV never ends\n"
     "  -ra, --rate N     sample rate for audio and wav (default 44100). A device\n"
     "                    may impose its own, which is then what is used\n"
     "  -q,  --quality Q  fast (linear) or good (sinc, default)\n"
@@ -633,6 +638,7 @@ int main(int argc, char ** argv)
   bool info_only = false;
   bool no_device = false;
   bool no_roms = false;
+  bool single = false;
   bool real_reads = false;
   bool force_socket_two = false;
   bool force_address = false;
@@ -679,6 +685,7 @@ int main(int argc, char ** argv)
     else if (!strcmp(a, "--no-roms")) no_roms = true;
     else if (!strcmp(a, "-P") || !strcmp(a, "--pal")) forced_model = VideoModel::Pal6569;
     else if (!strcmp(a, "-N") || !strcmp(a, "--ntsc")) forced_model = VideoModel::Ntsc6567R8;
+    else if (!strcmp(a, "-1") || !strcmp(a, "--single")) single = true;
     else if ((!strcmp(a, "-s") || !strcmp(a, "--song")) && i + 1 < argc)
       song = static_cast<uint16_t>(atoi(argv[++i]));
     else if ((!strcmp(a, "-t") || !strcmp(a, "--seconds")) && i + 1 < argc)
@@ -929,6 +936,7 @@ int main(int argc, char ** argv)
     onboard.sid_count = is_sid ? info.sid_count : 1;
     onboard.song = song;
     onboard.seconds = seconds;
+    onboard.single = single;
     onboard.force_two = force_socket_two;
     onboard.detach = onboard_detach;
     if (mute_spec != nullptr) {
@@ -1700,7 +1708,7 @@ int main(int argc, char ** argv)
         /* Last song ends on the shown time for a Network SID Device, lets the queued tail play out */
         const double shown_ms =
           1000.0 * static_cast<double>(disp_frames()) / pacer.frame_rate();
-        const bool more = player.song() < player.songs();
+        const bool more = !single && player.song() < player.songs();
         const bool over = (!more && output == OutputMode::NetDevice)
           ? shown_ms >= static_cast<double>(ms)
           : played_ms >= static_cast<double>(ms);
@@ -1712,8 +1720,9 @@ int main(int argc, char ** argv)
             if (!no_device) pacer.rebase(frame);
           } else {
             if (status_line) print_status();
-            printf("\r  done     %s, the last song has played out        \n",
-                   play_time(disp_frames(), pacer.frame_rate()));
+            printf("\r  done     %s, %s        \n",
+                   play_time(disp_frames(), pacer.frame_rate()),
+                   single ? "the song has played out" : "the last song has played out");
             break;
           }
         }

@@ -62,6 +62,7 @@ struct OnboardOptions {
   uint8_t sid_count = 1;
   uint16_t song = 0;               /**< -s, counting from 1, 0 for the tune's own */
   int seconds = 0;                 /**< -t */
+  bool single = false;             /**< -1 */
   bool force_two = false;          /**< -f */
   bool detach = false;             /**< --detach */
   bool has_mute = false;

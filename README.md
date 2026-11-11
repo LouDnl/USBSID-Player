@@ -25,7 +25,9 @@ usage: usplayer [options] <file.sid|file.prg|file.p00>
   a SID file plays; a program is loaded where it says and started the
   way you would start it, with RUN or with SYS
 
-  -s,  --song N     start at subtune N (default: the tune's own)
+  -s,  --song N     start at subtune N (default: the tune's own), plays on
+                    into the following songs unless --single
+  -1,  --single     play only this song, stop when it ends
   -t,  --seconds N  stop after N seconds (default: play until ctrl-c)
   -i,  --info       print what the file says and exit
   -n,  --no-device  run without hardware, useful for checking a tune
@@ -66,7 +68,10 @@ usage: usplayer [options] <file.sid|file.prg|file.p00>
                     --output=nsd (default 127.0.0.1)
   -np, --net-port P its TCP port (default 6581)
   -ns, --net-sids N SIDs to tell it about (default: the tune's own count)
-  -w,  --wav FILE   write a WAV instead of playing, implies --output=wav
+  -w,  --wav FILE   write a WAV instead of playing, implies --output=wav.
+                    A tune with more songs records from the start song
+                    through the last, use -1/--single (or -t) for one
+                    song. With -nsl and no -t the WAV never ends
   -ra, --rate N     sample rate for audio and wav (default 44100). A device
                     may impose its own, which is then what is used
   -q,  --quality Q  fast (linear) or good (sinc, default)
@@ -150,7 +155,7 @@ usage: usplayer [options] <file.sid|file.prg|file.p00>
 ```
 
 ## Onboard player
-`--output=onboard` does not emulate anything on the host. It uploads the tune to the player that runs on the board itself (firmware built with `ONBOARD_EMULATOR=1`, the `_em` builds) and follows it: the play time is polled from the board, the same keys work (pause, subtune, restart, fast forward, voice mute) and the song ends by the Songlengths database like the normal player. `--detach` sends, starts and exits, the tune keeps playing. The `--board-stop`, `--board-pause`, `--board-next` and `--board-prev` options need no file. `-` as the file reads the tune from stdin. `-s`, `-t`, `-f`, `-m`, `-b` (exactly one board, serial or index from `--list-boards`), `-sl` and `-nsl` apply, `-T -S -ms -ss -fa -w` are refused.
+`--output=onboard` does not emulate anything on the host. It uploads the tune to the player that runs on the board itself (firmware built with `ONBOARD_EMULATOR=1`, the `_em` builds) and follows it: the play time is polled from the board, the same keys work (pause, subtune, restart, fast forward, voice mute) and the song ends by the Songlengths database like the normal player. `--detach` sends, starts and exits, the tune keeps playing. The `--board-stop`, `--board-pause`, `--board-next` and `--board-prev` options need no file. `-` as the file reads the tune from stdin. `-s`, `-1`, `-t`, `-f`, `-m`, `-b` (exactly one board, serial or index from `--list-boards`), `-sl` and `-nsl` apply, `-T -S -ms -ss -fa -w` are refused.
 ```shell
 usplayer -o onboard tune.sid
 usplayer -o onboard -s 2 -t 90 -b AB12 tune.sid
@@ -182,6 +187,7 @@ Linux example.
 ```bash
 ./usplayer --song 1 tune.sid          # play from a subtune
 ./usplayer --output wav --wav out.wav tune.sid
+./usplayer -s 2 -1 -w song2.wav tune.sid  # record subtune 2 only
 ./usplayer --output nsd --net-host 192.168.1.42 tune.sid  # play over a Network SID Device server
 ./usplayer -i tune.sid                # print the tune's own info and exit
 ./usplayer -h                         # the full option list

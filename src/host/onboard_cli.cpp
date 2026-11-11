@@ -207,8 +207,8 @@ int run_onboard(const OnboardOptions & opt, volatile sig_atomic_t * stop)
   const uint16_t default_song = (opt.default_song == 0) ? 1 : opt.default_song;
   uint16_t cur = (opt.song != 0) ? opt.song : default_song;
 
-  /* The CLI advances songs itself only while attached and without -t */
-  const bool may_advance = !opt.detach && opt.seconds <= 0;
+  /* The CLI advances songs itself only while attached, without -t and without -1 */
+  const bool may_advance = !opt.detach && opt.seconds <= 0 && !opt.single;
   const auto len_of = [&](uint16_t song) -> uint32_t {
     if (opt.seconds > 0) return static_cast<uint32_t>(opt.seconds) * 1000u;
     return opt.song_length_ms ? opt.song_length_ms(song) : 0u;
@@ -397,7 +397,8 @@ int run_onboard(const OnboardOptions & opt, volatile sig_atomic_t * stop)
             song_changed();
           } else if (end == OnboardEnd::Done) {
             printf("\r  done     %s, %s        \n", fmt_ms(last_ms),
-                   (opt.seconds > 0) ? "the time limit has passed" : "the last song has played out");
+                   (opt.seconds > 0) ? "the time limit has passed"
+                   : opt.single ? "the song has played out" : "the last song has played out");
             quit = true;
             done = true;
           }

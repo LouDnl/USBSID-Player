@@ -61,8 +61,8 @@ jobs:
       - name: Install dependencies (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y pkg-config cmake build-essential libusb-1.0-0 libusb-1.0-0-dev libudev1 libudev-dev libasound2-dev
+          sudo apt-get -o Acquire::Retries=5 update
+          sudo apt-get -o Acquire::Retries=5 install -y pkg-config cmake build-essential libusb-1.0-0 libusb-1.0-0-dev libudev1 libudev-dev libasound2-dev
 
       - name: Install dependencies (MacOs)
         if: matrix.os == 'macos-15-intel'
@@ -177,7 +177,7 @@ jobs:
 
       # GitHub's ubuntu image ships CMake; Gitea's runner image does not.
       - name: Install CMake (Gitea runner image)
-        run: command -v cmake >/dev/null || { sudo apt-get update && sudo apt-get install -y cmake; }
+        run: command -v cmake >/dev/null || { sudo apt-get -o Acquire::Retries=5 update && sudo apt-get -o Acquire::Retries=5 install -y cmake; }
 
       - name: Build the WASM player
         run: |

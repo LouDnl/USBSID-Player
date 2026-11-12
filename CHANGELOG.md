@@ -1,66 +1,81 @@
 # Changelog
 Please refer to the [releases page](https://github.com/LouDnl/USBSID-Player/releases) for more information on version changes
 
-#### Version: Unreleased
-* Fix next/previous subtune for Basic tunes
-* Fix bug in previous subtune selection for web players
-* Fix/Add ffwd for embedded player
+#### Version: 1.5.0
+* Rename CLI player binary usbsid to usplayer
 * Rewrite virtual Voice3 (thanks @WilfredC64)
-* Fix automatic tune stop when using SENDSID from WebSerial
-* Fix output selection for ASID
-* Fix environment and SID type not being sent from the web player
-* Fix silent ASID webplay after using ReSIDfp in the browser
-* Fix reads from voice 3 for all modes when not using real reads
+* Add ASID backend for CLI player
+* Add onboard embedded player to the CLI outputs (send_sid)
+* Add Windows and macOS support for the NSD output
+* Add missing record single subtune option to CLI player
+* Add r key to restart (sub)tune and show wall clock elapsed time on lagging outputs in CLI player
+* Add config requests and port sharing to the Web Serial transport
+* Add gated driver ring size override for CLI testing
 * Add identification of backend used to redirect reads for voice 3
+* Add per voice oscilloscope tap to software audio (reSIDfp)
+* Add playing without the Commodore ROMs (stub KERNAL, EMBED_ROMS=0, --no-roms)
+* Add reSIDfp patch for a settled ExternalFilter start
+* Add src/host/session.h playback session on an engine thread
+* Add stereo and filter control to software audio in the web player
+* Add usp_audio_pan and usp_audio_set_filter exports
+* Add usp_audio_scope, _scope_voices and _scope_take exports
+* Add usp_audio_set_speed() and usp_audio_speed() exports
+* Add usp_audio_set_stereo, _channels and _set_panning exports
+* Add usp_read_memory_block() export
+* Add usplayer_set_roms() and usplayer_needs_roms() to the embedded API
+* Add video standard to timing() and reset the driver address on load
+* Add web/usplayer-scope.js for per voice oscilloscopes
+* Add ASID unit tests (tests/test_asid.cpp)
+* Correct keybinding help in CLI player
+* Force FM/OPL and SID to 100% volume in CLI player on audio output
+* Compile reSIDfp from a patched copy in the build tree (see patches/residfp)
+* Change license to GPL-2.0-or-later (was GPL-2.0-only)
+* Defer driver volume write to bus, waits until first actual SID write
+* Link libstdc++, libgcc, winpthread and libusb statically on MinGW (fixes silent 0xC0000135 start)
+* Map the unclaimed FM OPL park to ring registers $80 and $90
+* Move scope, panning and filter handling to web/usplayer-softaudio.js
+* Print the reason when the NSD link drops
+* Release WebUSB transport after a failed open
+* Send one NSD request per frame to USBSID-Pico and enable FM OPL when requested
+* Send the real SID count over NSD and step down when the server refuses it
 * Set backend identification for each backend when initialised
+* Set default USBSID ringbuffer size to 64KB
+* Set UNIX_COMPILE and WINDOWS_COMPILE per platform
 * Make asid device number and midi device string readable
 * Update fixed device logging to use backend identification
-* Fix voice 3 reading when using the embedded player
-* Fix FM/OPL over NSD to follow the NSD v5 spec (needs matching firmware)
-* Rename CLI player binary usbsid to usplayer (test and ymfm builds follow)
-* Change licence to GPL-2.0-or-later (was GPL-2.0-only)
-* Fix double encoded tune name, author and release in web player
-* Add playing without the Commodore ROMs (stub KERNAL, EMBED_ROMS=0, --no-roms)
-* Add usplayer_set_roms() and usplayer_needs_roms() to the embedded API
-* Add src/host/session.h playback session on an engine thread
-* Fix slow play and fast forward in web software audio (reSIDfp)
-* Add usp_audio_set_speed() and usp_audio_speed() exports
-* Fix memory view in web software audio with the worker
-* Add usp_read_memory_block() export
-* Fix DeepSID buffer sizes below 200 ms being ignored
-* Add per voice oscilloscope tap to software audio (reSIDfp)
-* Add usp_audio_scope, _scope_voices and _scope_take exports
-* Compile reSIDfp from a patched copy in the build tree (see patches/residfp)
-* Add stereo and filter control to software audio in the web player
-* Add usp_audio_set_stereo, _channels and _set_panning exports
-* Add usp_audio_pan and usp_audio_set_filter exports
-* Move scope, panning and filter handling to web/usplayer-softaudio.js
-* Add web/usplayer-scope.js for per voice oscilloscopes
-* Fix usp_audio_available() counting wrong after taking rendered audio
-* Fix web status line in software audio with the worker
-* Fix reSIDfp output differing from run to run in native builds
-* Add ASID backend unit tests (tests/test_asid.cpp)
+* Fix/Add ffwd for embedded player
 * Fix ASID environment message speed multiplier
+* Fix automatic tune stop when using SENDSID from WebSerial
+* Fix bug in previous subtune selection for web players
+* Fix DeepSID buffer sizes below 200 ms being ignored
+* Fix double encoded tune name, author and release in web player
+* Fix environment and SID type not being sent from the web player
 * Fix failed asid_init leaking RtMidiOut
-* Fix sendSIDEnvironment and sendSIDType crash before init
-* Fix NTSC CIA1 timer A default to $4295
-* Set UNIX_COMPILE and WINDOWS_COMPILE per platform
-* Defer driver volume write to bus, waits untill first actual SID write
-* Add config requests and port sharing to the Web Serial transport
-* Fix serial-check port open and add Web Serial to the worker client
-* Fix start delay for BASIC tunes on reSIDfp
-* Add reSIDfp patch for a settled ExternalFilter start
-* Add onboard embedded player to the CLI outputs
-* Fix stale tune state and start race in the web player
-* Fix VIC raster read timing, NMI hijack and unmapped IO reads
-* Add gated driver ring size override for CLI testing
-* Set default USBSID ringbuffer size to 64KB
-* Fix RSID tune start, init runs like the SID file spec
-* Fix v5 embedded songlengths in the web player
-* Add video standard to timing() and reset the driver address on load
-* Fix RSID driver placement and interrupts after init
+* Fix FM/OPL over NSD to follow the NSD v5 spec (needs matching firmware)
 * Fix IRQ badges of the web player blinking on tunes that toggle timers
-* Add missing record single subtune option to CLI player
+* Fix memory view in web software audio with the worker
+* Fix next/previous subtune for Basic tunes
+* Fix NTSC CIA1 timer A default to $4295
+* Fix output selection for ASID
+* Fix reads from voice 3 for all modes when not using real reads
+* Fix reSIDfp output differing from run to run in native builds
+* Fix RSID driver placement and interrupts after init
+* Fix RSID tune start, init runs like the SID file spec
+* Fix sendSIDEnvironment and sendSIDType crash before init
+* Fix serial-check port open and add Web Serial to the worker client
+* Fix silent ASID webplay after using ReSIDfp in the browser
+* Fix slow play and fast forward in web software audio (reSIDfp)
+* Fix stale tune state and start race in the web player
+* Fix start delay for BASIC tunes on reSIDfp
+* Fix usp_audio_available() counting wrong after taking rendered audio
+* Fix v5 embedded songlengths in the web player
+* Fix VIC raster read timing, NMI hijack and unmapped IO reads
+* Fix voice 3 reading when using the embedded player
+* Fix web status line in software audio with the worker
+* Fix command name print on Windows
+* Fix num SIDs being higher than configured addresses
+* Fix pacing and -t when the audio device stalls
+* Fix stuttering on software NSD (sid-device/JSidplay2), pace by server backpressure
 
 #### Version: 1.4.0
 * Add multiboard playback (--boards SERIAL,... and --list-boards)

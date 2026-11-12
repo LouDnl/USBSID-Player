@@ -58,6 +58,7 @@ workflow:
     - if: $CI_COMMIT_BRANCH && $CI_PIPELINE_SOURCE == "push"
       changes:
         - CMakeLists.txt
+        - .version
         - cmake/**/*
         - src/**/*
         - lib/**/*
@@ -100,6 +101,7 @@ default:
     - if: $PIPELINE_TYPE == "dev"
       changes:
         - CMakeLists.txt
+        - .version
         - cmake/**/*
         - src/**/*
         - lib/**/*
@@ -114,6 +116,7 @@ default:
     - if: $PIPELINE_TYPE == "dev" && $CI_SERVER_HOST != $PRIVATE_HOST
       changes:
         - CMakeLists.txt
+        - .version
         - cmake/**/*
         - src/**/*
         - lib/**/*
@@ -136,6 +139,7 @@ default:
     - if: $PIPELINE_TYPE == "dev" && $CI_SERVER_HOST == $PRIVATE_HOST
       changes:
         - CMakeLists.txt
+        - .version
         - cmake/**/*
         - src/**/*
         - lib/**/*

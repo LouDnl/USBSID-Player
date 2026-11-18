@@ -89,11 +89,12 @@ set(USPLAYER_INCLUDE_DIRS
 ### src/util (logging.h, md5.h, profile.h) is NOT added, all references use "util/md5.h" via src
 ### A bare src/util include dir collides with other same-named headers (BTstack md5.h)
 
-### Cynthcart (MC68B50 ACIA on IO1, $de00-$deff).
-### Embedded only, see src/cart/cynthcart_embedded.cpp.
+### Embedded C64 MIDI apps, Cynthcart and SID SYNTH (MC68B50 ACIA on IO1, $de00-$deff).
+### Embedded only, see src/cart/c64app_embedded.cpp. Variable names kept for the firmware.
 set(USPLAYER_CYNTHCART_SOURCES
   ${USPLAYER_ROOT}/src/cart/MC68B50.cpp
-  ${USPLAYER_ROOT}/src/cart/cynthcart_embedded.cpp
+  ${USPLAYER_ROOT}/src/cart/c64app_embedded.cpp
+  ${USPLAYER_ROOT}/src/cart/vdrive.cpp
 )
 set(USPLAYER_CYNTHCART_INCLUDE_DIRS
   ${USPLAYER_ROOT}/src/cart

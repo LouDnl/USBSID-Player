@@ -31,7 +31,7 @@ extern "C" {
   #include "globals.h"
   #include "pico/util/queue.h"  /* Inter core queue */
   #include "midi.h"
-  extern queue_t cynthcart_queue;
+  extern queue_t c64midi_queue;
 }
 #endif
 
@@ -107,9 +107,9 @@ inline void MC68B50::process_midi(void)
   if (regs_[STATUS] & RDRF) return; /* data already waiting to be read */
 
   #if defined(EMBEDDED) && EMBEDDED
-  if (!queue_is_empty(&cynthcart_queue)) {
-    cynthcart_queue_entry_t cq_entry;
-    if (queue_try_remove(&cynthcart_queue, &cq_entry)) {
+  if (!queue_is_empty(&c64midi_queue)) {
+    c64midi_queue_entry_t cq_entry;
+    if (queue_try_remove(&c64midi_queue, &cq_entry)) {
       regs_[RXDR] = cq_entry.data;       /* Add data to the RXDR */
       regs_[STATUS] |= (IRQ | RDRF);     /* Set IRQ and RDRF for data available */
       bus_.set_irq(IrqSource::Expansion, true);

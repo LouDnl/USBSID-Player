@@ -734,7 +734,7 @@ if(${DESKTOP} EQUAL 1 AND ${BUILD_TESTS} EQUAL 1)
   enable_testing()
 
   set(US_TEST_NAMES bus ram cpu mmu cia vic sid player embedded prg keyboard web roms session)
-  list(APPEND US_TEST_NAMES netdevice asid onboard)
+  list(APPEND US_TEST_NAMES netdevice asid onboard vdrive)
 
   set(US_TEST_SOURCES "")
   foreach(t ${US_TEST_NAMES})
@@ -752,6 +752,10 @@ if(${DESKTOP} EQUAL 1 AND ${BUILD_TESTS} EQUAL 1)
       US_ASSET_DIR="${CMAKE_CURRENT_LIST_DIR}/assets")
     add_test(NAME ${t} COMMAND test_${t})
   endforeach()
+
+  ### The virtual drive is embedded-only and not in usbsidcore
+  target_sources(test_vdrive PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src/cart/vdrive.cpp)
+  target_include_directories(test_vdrive PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src/cart)
 
   ### The network backend is CLI-only and not in usbsidcore
   target_sources(test_netdevice PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src/sid/sid_netdevice.cpp)
@@ -781,6 +785,8 @@ if(${DESKTOP} EQUAL 1 AND ${BUILD_TESTS} EQUAL 1)
   target_compile_definitions(usplayer-test PRIVATE
     US_ASSET_DIR="${CMAKE_CURRENT_LIST_DIR}/assets")
   target_sources(usplayer-test PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src/sid/sid_netdevice.cpp)
+  target_sources(usplayer-test PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src/cart/vdrive.cpp)
+  target_include_directories(usplayer-test PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src/cart)
   if(US_HAVE_RTMIDI)
     target_sources(usplayer-test PRIVATE
       ${CMAKE_CURRENT_LIST_DIR}/src/sid/sid_asid.cpp)

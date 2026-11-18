@@ -60,6 +60,7 @@ const TestEntry kTests[] = {
   { "netdevice", us_test_netdevice },
   { "asid", us_test_asid },
   { "onboard", us_test_onboard },
+  { "vdrive", us_test_vdrive },
 };
 
 constexpr size_t kTestCount = sizeof(kTests) / sizeof(kTests[0]);

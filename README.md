@@ -16,6 +16,9 @@ USBSID-Player is a Cycle Exact Commodore64 emulating PSID/RSID & PRG tune player
 - Embeds into the USBSID-Pico firmware (`ONBOARD_SIDPLAYER=1`, RP2350 only, needs `-O3`), a drop in replacement for the old player
 - Compiles to WebAssembly for the browser, drives a board over WebUSB (cycle exact) or ASID over Web MIDI (a snapshot per frame), the AudioWorklet worker keeps playing in a background tab
 
+# Download & Installation
+The latest release version and development snapshots are available on the [Releases](https://github.com/LouDnl/USBSID-Player/releases) page.  
+You can also find the latest release version from my [CSDB](https://csdb.dk/scener/?id=41623) scener profile.
 
 # Usage
 Output `nsd` and `--net-*` options are only available on Linux and MacOs.

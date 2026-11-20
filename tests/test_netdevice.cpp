@@ -117,38 +117,37 @@ struct FakeNsd {
   }
 };
 
-/* Once FM is in use on a v5 hardware server, SID writes join the FM writes in
- * one TRY_WRITE_EX stream and only a gap of 4096+ cycles ends a packet. */
+/* Once FM is in use on a v5 server, SID writes join the FM writes in
+ * one TRY_WRITE_EX stream, a packet ends on size or time only. */
 int test_netdevice_ex_stream(void)
 {
   FakeNsd srv;
   US_CHECK(srv.start(), "fake server starts");
   NetworkSidBackend be;
   US_CHECK(be.connect("127.0.0.1", srv.port), "connects");
-  US_CHECK(be.protocol_version() == 5 && !be.is_software(), "v5 hardware server");
+  US_CHECK(be.protocol_version() == 5, "v5 server");
   be.set_sid_count(2);
 
   be.write(0x0000, 0x11, 10);       /* before FM: plain TRY_WRITE */
   be.write(0x01e0, 0x22, 100);      /* FM index port: arms the stream */
   be.write(0x01f0, 0x33, 100);      /* FM data port */
-  be.write(0x0004, 0x41, 1000);     /* SID, below 4096 */
-  be.write(0x0020, 0x42, 2000);     /* SID 2, below 4096 */
-  be.write(0x0004, 0x43, 5000);     /* big gap: last entry of its packet */
+  be.write(0x0004, 0x41, 100);      /* SID, below 256 */
+  be.write(0x0020, 0x42, 200);      /* SID 2, below 256 */
+  be.write(0x0004, 0x43, 5000);     /* long gap, stays in the same packet */
   be.write(0x0004, 0x44, 10);
   be.send_pending();
 
-  for (int i = 0; i < 200 && srv.count() < 4; i++) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  for (int i = 0; i < 200 && srv.count() < 3; i++) std::this_thread::sleep_for(std::chrono::milliseconds(10));
   be.disconnect();
   srv.stop();
 
   std::vector<FakeNsd::Packet> ex, plain;
   for (const FakeNsd::Packet & p : srv.packets) (p.cmd == 19 ? ex : plain).push_back(p);
   US_CHECK_EQ_U(plain.size(), 1, "one TRY_WRITE packet (pre-FM)");
-  US_CHECK_EQ_U(ex.size(), 2, "two TRY_WRITE_EX packets");
-  if (ex.size() == 2) {
-    US_CHECK_EQ_U(ex[0].payload.size(), 5 * 5, "FM index + data + 3 SID writes in one packet");
-    US_CHECK_EQ_U(ex[1].payload.size(), 1 * 5, "tail after the big gap");
-    if (ex[0].payload.size() == 25) {
+  US_CHECK_EQ_U(ex.size(), 1, "one TRY_WRITE_EX packet");
+  if (ex.size() == 1) {
+    US_CHECK_EQ_U(ex[0].payload.size(), 6 * 5, "FM index + data + 4 SID writes in one packet");
+    if (ex[0].payload.size() == 30) {
       const std::vector<uint8_t> & b = ex[0].payload;
       US_CHECK_EQ_U((b[2] << 8) | b[3], 0xdf40, "FM index port address");
       US_CHECK_EQ_U(b[4], 0x22, "FM register number");
@@ -156,8 +155,8 @@ int test_netdevice_ex_stream(void)
       US_CHECK_EQ_U(b[9], 0x33, "FM data value");
       US_CHECK_EQ_U((b[12] << 8) | b[13], 0x0004, "SID 1 address verbatim");
       US_CHECK_EQ_U((b[17] << 8) | b[18], 0x0020, "SID 2 address verbatim");
-      US_CHECK_EQ_U((b[22] << 8) | b[23], 0x0004, "big gap entry address");
-      US_CHECK_EQ_U((b[20] << 8) | b[21], 5000, "big gap delay kept");
+      US_CHECK_EQ_U((b[22] << 8) | b[23], 0x0004, "long gap entry address");
+      US_CHECK_EQ_U((b[20] << 8) | b[21], 5000, "long gap delay kept");
     }
   }
   return 0;
@@ -172,7 +171,6 @@ int test_netdevice_software_multisid(void)
   US_CHECK(srv.start(), "fake server starts");
   NetworkSidBackend be;
   US_CHECK(be.connect("127.0.0.1", srv.port), "connects");
-  US_CHECK(be.is_software(), "software server");
   be.set_sid_count(3);
   be.reset();
   be.write(0x0018, 0x0f, 10);       /* chip 0 volume */

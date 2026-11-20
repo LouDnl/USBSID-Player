@@ -3,6 +3,9 @@ Please refer to the [releases page](https://github.com/LouDnl/USBSID-Player/rele
 
 #### Version: Unreleased
 * Add SID SYNTH as second embedded C64 Midi application
+* Use one request profile for every Network SID Device server 
+* Update the netdevice tests for the single request profile
+* Document the Network SID Device request profile and --overhead
 
 #### Version: 1.5.0
 * Rename CLI player binary usbsid to usplayer

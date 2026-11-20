@@ -358,9 +358,12 @@ void usage(const char * argv0)
     "                    given, an FM/OPL not named this way is not played\n"
     "                    (--output=usbsid only; default: the tune's first N\n"
     "                    SIDs on the first N sockets, in order)\n"
-    "  -oh, --overhead N Cycles one hardware access costs (default 1; 0 for\n"
-    "                    netdevice software servers)\n"
-    "  -sl, --songlengths F\n"
+    "  -oh, --overhead N Cycles one USBSID-Pico hardware access costs, taken\n"
+    "                    off every delay by the player (default 1). Meant for\n"
+    "                    hardware only: audio and wav always use 0, software\n"
+    "                    NSD servers need 0. --output=nsd defaults to 0:\n"
+    "                    firmware 0.9.1 and newer takes that cycle off itself,\n"
+    "                    pass 1 for older firmware\n"    "  -sl, --songlengths F\n"
     "                    HVSC Songlengths database, to stop when the song\n"
     "                    ends. Found by itself in $SONGLENGTHS,\n"
     "                    ~/Songlengths.md5, $HVSCROOT or $HVSC_BASE\n"
@@ -1069,12 +1072,10 @@ int main(int argc, char ** argv)
       const uint8_t chips = static_cast<uint8_t>(
         (net_sids > 0) ? net_sids : (is_sid ? info.sid_count : 2));
       net.set_sid_count(chips); /* clamped to kMaxSids (15) internally */
-      /* A software server is its own clock, no bus overhead unless --overhead
+      /* The server takes the access cycle off every delay, no overhead unless --overhead
        * Idle frames are sent as time (SidConfig::render_idle) */
-      if (net.is_software()) {
-        if (!overhead_given) overhead = 0;
-        machine.sid().config().render_idle = true;
-      }
+      if (!overhead_given) overhead = 0;
+      machine.sid().config().render_idle = true;
       machine.set_sid_backend(net);
       printf("  device   : %s at %s:%d, protocol v%d, %u SID%s\n",
              machine.sid().backend().get_backend_type_string(),

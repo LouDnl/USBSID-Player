@@ -69,18 +69,10 @@ class NetworkSidBackend final : public SidBackend
     uint8_t protocol_version(void) const { return version_; }
 
     /**
-     * @brief False when the server names itself "USBSID-Pico" in GET_CONFIG_INFO (firmware NSD server)
-     *
-     * True for software servers such as sid-device, decided in connect()
-     * They want small batches, idle time sent and no access overhead
-     */
-    bool is_software(void) const { return !hardware_; }
-
-    /**
-     * @brief Software servers only: store the tune clock and chip model, resend the chip setup (send_chip_setup())
+     * @brief Store the tune clock and chip model, resend the chip setup (send_chip_setup())
      *
      * Model is the config index whose GET_CONFIG_INFO model matches, 6581 for Unknown/Any
-     * Call before the tune init writes. No-op against the firmware server
+     * Call before the tune init writes
      */
     void configure_tune(bool ntsc, SidModel model);
 
@@ -88,9 +80,8 @@ class NetworkSidBackend final : public SidBackend
      * @brief TRY_SET_SID_COUNT (1..kMaxChips), on ERROR retry 8, 4, then 1 and sid_count() drops to what was accepted
      *
      * Call after connect() and on every chip count change, before the tune init writes
-     * Software server: followed by SET_SID_POSITION, TRY_SET_SID_MODEL for every chip and TRY_SET_CLOCK (send_chip_setup())
+     * Followed by SET_SID_POSITION, TRY_SET_SID_MODEL for every chip and TRY_SET_CLOCK (send_chip_setup())
      * as the count command empties the chip array and resets the clock
-     * Firmware server: bookkeeping only, addressing is set by sid_count() and TRY_WRITE vs TRY_WRITE_EX
      */
     void set_sid_count(uint8_t count);
     uint8_t sid_count(void) const { return sid_count_; }
@@ -125,24 +116,25 @@ class NetworkSidBackend final : public SidBackend
     void send_pending(void);
 
   private:
+    /** @brief Cycles buffered before a send, grows with the measured round trip */
+    uint32_t flush_cycles(void) const;
+    /** @brief Frames a batch below flush_cycles() may wait before it is sent */
+    uint16_t max_frames(void) const;
+
     /* Ceiling of sid_count_, kMaxSids (15, sidfile.h) */
     static constexpr int kMaxChips = kMaxSids;
     /* Largest quad count per TRY_WRITE (255 = 1020 B, under NSD_MAX_PAYLOAD). */
     static constexpr size_t kMaxQuadsPerPacket = 255;
-    /* A quad delay at or above this ends its packet (flush_if_big_delay()). */
-    static constexpr uint16_t kBigDelay = 256;
-    /* Big-delay limit on a USBSID-Pico server, both streams
-     * Above the gaps between writes in a frame, below the idle gap */
-    static constexpr uint16_t kBigDelayHardware = 4096;
-    /* Buffered cycle threshold before write()/wait() force a send, tuned
-     * under USBSID-Pico firmware: nsd.c's NSD_CYCLES_HIGH BUSY threshold. */
-    static constexpr uint32_t kFlushCyclesThreshold = 45000;
-    /* Max time something stays buffered below the cycle threshold (~60ms PAL) */
-    static constexpr uint16_t kMaxFramesBetweenFlushes = 3;
-    /* Software server (sid-device) reads BUSY past 63*312*10 cycles and starts playback after 63*312*5
-     * Batches are half a frame, sent every frame */
-    static constexpr uint32_t kSoftFlushCyclesThreshold = 9828;
-    static constexpr uint16_t kSoftMaxFramesBetweenFlushes = 1;
+    /* Buffered cycle threshold before write()/wait() force a send, from half a frame to 45000 cycles
+     * sid-device reads BUSY past 63*312*10 cycles and starts playback after 63*312*5, the USBSID-Pico
+     * server reports BUSY at 63*312*8 cycles. The batch grows with the request round trip to keep the sender
+     * thread, one request at a time, at about a quarter of its time waiting (flush_cycles()) */
+    static constexpr uint32_t kFlushMinCycles = 9828;
+    static constexpr uint32_t kFlushMaxCycles = 45000;
+    /* Batch cycles per microsecond of round trip: four round trips of tune time (PHI2 985248 Hz) */
+    static constexpr uint32_t kFlushCyclesPerRttUs = 4;
+    /* Frame length in cycles (PAL) */
+    static constexpr uint32_t kFrameCycles = 19656;
     /* GET_CONFIG_INFO is queried for at most this many configurations. */
     static constexpr int kMaxConfigs = 32;
     /* wait_for_room() blocks past this much queued tune time (2 PAL frames), server BUSY bounds the rest */
@@ -187,13 +179,14 @@ class NetworkSidBackend final : public SidBackend
                  const uint8_t * payload, uint16_t payload_len,
                  uint32_t cycles = 0);
     /**
-     * @brief Bring total under 0x10000 with dummy delay quads and return the rest
+     * @brief Bring total under 0x10000 with TRY_DELAY(0xffff) requests and return the rest
      *
-     * Quads are register $1E (open bus), delay 0xffff each, appended to pending_quads_
-     * for_ex says which stream the entry joins, the other is flushed first to keep order
+     * Pending writes of both streams are flushed before each request to keep order
+     * for_ex says which stream the following entry joins, the other is flushed first
      */
     uint16_t append_delay_quads(uint32_t total, bool for_ex);
-    void flush_if_big_delay(uint16_t delay, bool for_ex);
+    /** @brief Queue TRY_DELAY (cmd 4) for 1..0xffff cycles, no bus write on the server */
+    void enqueue_delay(uint16_t cycles);
     /** @brief Send whatever is buffered, if anything is. */
     void do_flush(void);
     /** @brief v5 only: send whatever is buffered in the TRY_WRITE_EX stream. */
@@ -207,7 +200,7 @@ class NetworkSidBackend final : public SidBackend
     void handle_fmopl_write(addr_t reg, data_t value, uint16_t cycles);
 
     /**
-     * @brief Software servers only: TRY_SET_SID_COUNT, SET_SID_POSITION (center), TRY_SET_SID_MODEL for chips 0..count-1, then TRY_SET_CLOCK
+     * @brief TRY_SET_SID_COUNT, SET_SID_POSITION (center), TRY_SET_SID_MODEL for chips 0..count-1, then TRY_SET_CLOCK
      *
      * A software server (JSidplay2 NetSIDDev, sid-device) has no chip behind a sid number until its model is set
      * TRY_SET_SID_COUNT drops every chip, position and the clock, sid-device mixes 2+ chips silent until positioned
@@ -224,17 +217,14 @@ class NetworkSidBackend final : public SidBackend
     std::atomic<uint8_t> sid_count_{1}; /* sender thread may lower it, see negotiate_sid_count() */
     uint8_t  wire_limit_ = 255; /* sender thread: count the server accepted */
 
-    /* Set by query_configs() in connect(), no usable answer counts as software
+    /* Set by query_configs() in connect(), no usable answer leaves no configs
      * models_[i] is the GET_CONFIG_INFO model byte */
-    bool     hardware_ = false;
     uint8_t  config_count_ = 0;
     uint8_t  models_[kMaxConfigs] = { 0 };
     /* Last tune clock and model byte (0 = 6581, 1 = 8580), defaults until
      * configure_tune() runs, resent by send_chip_setup() */
     bool     ntsc_ = false;
     uint8_t  want_model_ = 0;
-    uint32_t flush_cycles_ = kFlushCyclesThreshold;
-    uint16_t max_frames_ = kMaxFramesBetweenFlushes;
     std::vector<uint8_t> send_buf_; /* header + payload, one send() */
 
     std::thread             sender_thread_;
@@ -244,6 +234,8 @@ class NetworkSidBackend final : public SidBackend
     std::atomic<bool>       running_{false};
     /* Cycles of TRY_WRITE(_EX) requests queued or being sent, changed under queue_mutex_ */
     std::atomic<uint32_t>   inflight_cycles_{0};
+    /* Smoothed request round trip in microseconds, sender thread writes, emulation thread reads */
+    std::atomic<uint32_t>   rtt_us_{1000};
     std::condition_variable room_cv_;
 
     /* Emulation thread only. extra_cycles_ carries a gap forward, pending_quads_ is the shared stream of all chips */

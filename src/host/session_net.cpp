@@ -42,11 +42,9 @@ NetSessionSink::~NetSessionSink(void)
 bool NetSessionSink::attach(Machine & machine)
 {
   if (!net_.is_connected() && !net_.connect(host_.c_str(), port_)) return false;
-  /* Software server: no access overhead, idle frames sent as time */
-  if (net_.is_software()) {
-    machine.sid().config().access_overhead = 0;
-    machine.sid().config().render_idle = true;
-  }
+  /* The server takes the access cycle off every delay, idle frames are sent as time */
+  machine.sid().config().access_overhead = 0;
+  machine.sid().config().render_idle = true;
   machine.set_sid_backend(net_);
   return true;
 }

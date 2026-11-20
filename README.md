@@ -9,6 +9,7 @@ USBSID-Player is a Cycle Exact Commodore64 emulating PSID/RSID & PRG tune player
 - Software audio and netdevice play up to 15 SID chips, a real board (USB, WebUSB or embedded) plays the first 4 sockets
 - `--stereo` pans a multi-SID tune per the v5 panning hint (software audio and WAV only, off by default)
 - FM/OPL playback via Nuked-OPL3-fast for tunes that use the FM/OPL chip of a board
+- Netdevice sends the same requests to a USBSID-Pico and to software servers (sid-device, JSidplay2): batches from half a frame up to 45000 cycles that grow with the measured round trip of the link, idle time on the following write or as `TRY_DELAY` once it fills a batch, chip count, position, model and clock set at the start of a tune
 - Netdevice sends FM OPL as NSD v5 `TRY_WRITE_EX` writes to `$DF40` (address) and `$DF50` (data), `TRY_SET_FM_OPL` enables/disables FM OPL on the server
 - HVSC Songlengths support, a tune stops when the song ends (a v5 tune uses its embedded song length table when the database has no entry)
 - Muting and solo by chip and voice, subtune switching, PAL/NTSC forcing and a `--trace` mode that records SID register events to a file
@@ -132,8 +133,12 @@ usage: usplayer [options] <file.sid|file.prg|file.p00>
                     given, an FM/OPL not named this way is not played
                     (--output=usbsid only; default: the tune's first N
                     SIDs on the first N sockets, in order)
-  -oh, --overhead N Cycles one hardware access costs (default 1; 0 for
-                    netdevice software servers)
+  -oh, --overhead N Cycles one USBSID-Pico hardware access costs, taken
+                    off every delay by the player (default 1). Meant for
+                    hardware only: audio and wav always use 0, software
+                    NSD servers need 0. --output=nsd defaults to 0:
+                    firmware 0.9.1 and newer takes that cycle off itself,
+                    pass 1 for older firmware
   -sl, --songlengths F
                     HVSC Songlengths database, to stop when the song
                     ends. Found by itself in $SONGLENGTHS,
@@ -192,6 +197,7 @@ Linux example.
 ./usplayer --output wav --wav out.wav tune.sid
 ./usplayer -s 2 -1 -w song2.wav tune.sid  # record subtune 2 only
 ./usplayer --output nsd --net-host 192.168.1.42 tune.sid  # play over a Network SID Device server
+./usplayer --output nsd --net-host 192.168.1.42 --overhead 1 tune.sid  # USBSID-Pico firmware older than 0.9.1
 ./usplayer -i tune.sid                # print the tune's own info and exit
 ./usplayer -h                         # the full option list
 ```
